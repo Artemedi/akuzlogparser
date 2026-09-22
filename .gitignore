@@ -1,0 +1,16 @@
+# Local credentials and data (may contain sensitive medical records)
+ConnectConf.cfg
+.data/
+data/
+reports/
+downloads/
+cache/
+*.log
+*.log.*
+*.jsonl
+*.jsonl.gz
+*.part
+__pycache__/
+*.pyc
+.venv/
+dist/
