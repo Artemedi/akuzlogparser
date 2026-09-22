@@ -27,11 +27,13 @@ def main():
         app = root/'AKUZLogExplorer'
         executable = app/'AKUZLogExplorer.exe'
         env = os.environ.copy()
-        env['PATH'] = str(Path(env['SystemRoot'])/'System32')
+        env['PATH'] = str(Path(os.environ['SystemRoot'])/'System32')
         env.pop('PYTHONHOME',None)
         env.pop('PYTHONPATH',None)
         result = subprocess.run([str(executable),'--self-test'], cwd=scratch, env=env,
-                                capture_output=True, text=True, check=True, timeout=120)
+                                capture_output=True, text=True, encoding="utf-8", timeout=120)
+        if result.returncode:
+            raise RuntimeError("EXE self-test failed:\n"+result.stdout+result.stderr)
         check = json.loads(result.stdout.strip())
         if not check['ok'] or Path(check['app_root']) != app.resolve():
             raise RuntimeError('Frozen app does not use the executable directory')
@@ -50,7 +52,8 @@ def main():
                 deadline=time.monotonic()+60
                 while True:
                     if process.poll() is not None:
-                        raise RuntimeError('EXE exited during startup')
+                        raise RuntimeError('EXE exited during startup: '+
+                                           (root/'smoke-output.txt').read_text(encoding='utf-8',errors='replace'))
                     try:
                         with opener.open(base+'/api/status',timeout=2) as response:
                             if response.status == 200:
