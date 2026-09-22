@@ -15,7 +15,7 @@ class PortableRuntimeTests(unittest.TestCase):
             folder.mkdir()
             executable=folder/'AKUZLogExplorer.exe'
             with patch.object(sys,'frozen',True,create=True), patch.object(sys,'executable',str(executable)):
-                self.assertEqual(runtime.app_root(),folder)
+                self.assertEqual(runtime.app_root(),folder.resolve())
 
     def test_asset_upgrade_preserves_config_and_data(self):
         with TemporaryDirectory() as scratch:

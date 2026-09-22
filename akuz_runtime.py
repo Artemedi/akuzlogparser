@@ -5,12 +5,15 @@ import shutil
 import sys
 import tempfile
 
+DOCUMENTS = ('README.md', 'README_PORTABLE.md', 'README_PROJECT.md',
+             'README_EXPLORER.md', 'README_START_HERE.md', 'README_ANALYTICS.md',
+             'CHANGELOG.md', 'CHANGELOG_v4.md', 'CHANGELOG_v4_1.md', 'CHANGELOG_v4_2.md')
+
 ASSETS = (
     'index.html', 'event.html', 'errors.html', 'style.css', 'common.js',
     'index.js', 'event.js', 'errors.js', 'app_controls.js',
-    'README_EXPLORER.md', 'README_START_HERE.md', 'README_ANALYTICS.md',
     'ConnectConf.example.cfg',
-)
+) + DOCUMENTS
 
 
 def app_root():

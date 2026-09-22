@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AKUZ Explorer v4.1: localhost-only inventory, idempotent SSH fetch and dated reports."""
+"""AKUZ Explorer: localhost inventory, dated reports and error analytics."""
 from __future__ import annotations
 import argparse
 from collections import Counter
@@ -21,11 +21,12 @@ from akuz_log_parser import event_stream
 from akuz_store import (cached_download, cached_report, clear_cache, key_for,
                          load_store, report_summary, save_store, date_from_log_name)
 
-from akuz_runtime import app_root, prepare_runtime
+from akuz_runtime import DOCUMENTS, app_root, prepare_runtime
+from akuz_version import __version__
 
 ROOT = app_root()
 STATIC = {'index.html', 'event.html', 'errors.html', 'errors.js', 'style.css', 'common.js', 'index.js',
-          'event.js', 'app_controls.js', 'README_EXPLORER.md', 'README_START_HERE.md', 'README_ANALYTICS.md'}
+          'event.js', 'app_controls.js', 'README_EXPLORER.md', 'README_START_HERE.md', 'README_ANALYTICS.md'} | set(DOCUMENTS)
 CONTENT_TYPE = {'.html':'text/html; charset=utf-8', '.js':'application/javascript; charset=utf-8',
                 '.css':'text/css; charset=utf-8', '.md':'text/markdown; charset=utf-8'}
 MAX_SELECTED = 30
@@ -578,7 +579,7 @@ def make_handler(root: Path, state: State, port: int):
 
 
 def main():
-    p=argparse.ArgumentParser(description='AKUZ Explorer v4.2.1 · AKUZ logs and Error Analytics')
+    p=argparse.ArgumentParser(description=f'AKUZ Explorer {__version__} · AKUZ logs and Error Analytics')
     p.add_argument('--port',type=int,default=8765)
     p.add_argument('--no-browser',action='store_true')
     p.add_argument('--self-test',action='store_true',help=argparse.SUPPRESS)
@@ -597,7 +598,7 @@ def main():
         server=ThreadingHTTPServer(('127.0.0.1',args.port),make_handler(ROOT,STATE,args.port))
     except OSError as exc:
         p.error(f'Cannot start on 127.0.0.1:{args.port}: {exc}')
-    print(f'AKUZ Log Explorer v4.2.1: http://127.0.0.1:{args.port}/\nОстановка: Ctrl+C',flush=True)
+    print(f'AKUZ Log Explorer {__version__}: http://127.0.0.1:{args.port}/\nОстановка: Ctrl+C',flush=True)
     if not args.no_browser:
         threading.Timer(0.6, lambda:webbrowser.open(f'http://127.0.0.1:{args.port}/')).start()
     try:

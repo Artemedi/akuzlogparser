@@ -10,6 +10,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from akuz_runtime import ASSETS
+from akuz_version import __version__
 
 
 def main():
@@ -29,7 +30,7 @@ def main():
     archive = output/'AKUZLogExplorer-windows-x64.zip'
     commit = subprocess.check_output(['git','rev-parse','HEAD'], cwd=ROOT, text=True).strip()
     packages = subprocess.check_output([sys.executable,'-m','pip','freeze'], text=True).splitlines()
-    manifest = json.dumps(dict(commit=commit, platform='Windows x64',
+    manifest = json.dumps(dict(version=__version__, commit=commit, platform='Windows x64',
                                python=platform.python_version(), packages=packages), indent=2)
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as package:
         package.write(executable, 'AKUZLogExplorer/AKUZLogExplorer.exe')
@@ -37,9 +38,12 @@ def main():
         package.write(ROOT/'ConnectConf.example.cfg', 'AKUZLogExplorer/ConnectConf.cfg')
         package.write(ROOT/'README_PORTABLE.md', 'AKUZLogExplorer/README_PORTABLE.md')
         package.writestr('AKUZLogExplorer/BUILD_INFO.json', manifest+'\n')
-    with archive.open('rb') as source:
-        digest = hashlib.file_digest(source, 'sha256').hexdigest()
-    (output/'SHA256SUMS.txt').write_text(digest+'  '+archive.name+'\n', encoding='ascii')
+    sums=[]
+    for file in (executable, archive):
+        with file.open('rb') as source:
+            digest = hashlib.file_digest(source, 'sha256').hexdigest()
+        sums.append(digest+'  '+file.name)
+    (output/'SHA256SUMS.txt').write_text('\n'.join(sums)+'\n', encoding='ascii')
     print(archive)
 
 

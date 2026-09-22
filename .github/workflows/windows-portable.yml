@@ -27,6 +27,7 @@ jobs:
         with:
           name: AKUZLogExplorer-windows-x64
           path: |
+            dist/AKUZLogExplorer.exe
             dist/AKUZLogExplorer-windows-x64.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error

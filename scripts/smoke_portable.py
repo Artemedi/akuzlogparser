@@ -33,7 +33,7 @@ def main():
         result = subprocess.run([str(executable),'--self-test'], cwd=scratch, env=env,
                                 capture_output=True, text=True, check=True, timeout=120)
         check = json.loads(result.stdout.strip())
-        if not check['ok'] or Path(check['app_root']) != app:
+        if not check['ok'] or Path(check['app_root']) != app.resolve():
             raise RuntimeError('Frozen app does not use the executable directory')
         config = app/'ConnectConf.cfg'
         config.write_bytes(config.read_bytes()+b'\n# preserve existing operator config\n')
