@@ -30,7 +30,7 @@
 в [windows] укажите `enabled=true` и `log_dir=\\SERVER\AKUZLogs`,
 затем выберите `Windows · SMB / UNC` в интерфейсе. Используются разрешения текущего
 пользователя; для проверки работы на реальной SMB-шаре потребуется Windows-машина.
-Windows Event Log, Source-Aware Diagnostics и standalone EXE остаются отдельными задачами.
+Windows Event Log и Source-Aware Diagnostics остаются отдельными задачами. Portable EXE для Windows собирается workflow Windows portable; см. README_PORTABLE.md.
 VCLib в этот самостоятельный проект не включается.
 
 
@@ -54,7 +54,7 @@ data/analytics.js и data/error_*.js позволяют открыть анал�
 журналов PostgreSQL/Linux или анализа исходников VCLib.
 
 Для сбора новых файлов нужен локальный Python-сервис, для чтения готовых
-HTML-отчётов и сформированной аналитики — нет. Windows EXE пока не собран.
+HTML-отчётов и сформированной аналитики — нет. Для Windows доступна сборка portable EXE с включёнными зависимостями; см. README_PORTABLE.md.
 
 
 ## Обновление с v4.2 без потери данных

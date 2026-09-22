@@ -21,7 +21,9 @@ from akuz_log_parser import event_stream
 from akuz_store import (cached_download, cached_report, clear_cache, key_for,
                          load_store, report_summary, save_store, date_from_log_name)
 
-ROOT = Path(__file__).resolve().parent
+from akuz_runtime import app_root, prepare_runtime
+
+ROOT = app_root()
 STATIC = {'index.html', 'event.html', 'errors.html', 'errors.js', 'style.css', 'common.js', 'index.js',
           'event.js', 'app_controls.js', 'README_EXPLORER.md', 'README_START_HERE.md', 'README_ANALYTICS.md'}
 CONTENT_TYPE = {'.html':'text/html; charset=utf-8', '.js':'application/javascript; charset=utf-8',
@@ -579,9 +581,18 @@ def main():
     p=argparse.ArgumentParser(description='AKUZ Explorer v4.2.1 · AKUZ logs and Error Analytics')
     p.add_argument('--port',type=int,default=8765)
     p.add_argument('--no-browser',action='store_true')
+    p.add_argument('--self-test',action='store_true',help=argparse.SUPPRESS)
     args=p.parse_args()
+    if args.self_test:
+        from akuz_portable_check import run
+        run()
+        return
     if not 1024 <= args.port <= 65535:
         p.error('port must be 1024..65535')
+    try:
+        prepare_runtime()
+    except OSError as exc:
+        p.error(f'Cannot prepare application files beside the executable: {exc}')
     try:
         server=ThreadingHTTPServer(('127.0.0.1',args.port),make_handler(ROOT,STATE,args.port))
     except OSError as exc:
