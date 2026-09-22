@@ -1,10 +1,17 @@
 name: Windows portable
 on:
   workflow_dispatch:
+    inputs:
+      draft_release:
+        description: Upload to a draft GitHub Release instead of Actions artifacts
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   build:
+    permissions:
+      contents: write
     runs-on: windows-2022
     timeout-minutes: 20
     env:
@@ -25,7 +32,13 @@ jobs:
         run: python scripts/build_portable.py
       - name: Verify packaged executable
         run: python scripts/smoke_portable.py dist/AKUZLogExplorer-windows-x64.zip
+      - name: Upload verified build to draft release
+        if: ${{ inputs.draft_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/publish_portable.py
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !inputs.draft_release }}
         with:
           name: AKUZLogExplorer-windows-x64
           path: |

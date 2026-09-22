@@ -72,7 +72,7 @@ python scripts/build_portable.py
 python scripts/smoke_portable.py dist/AKUZLogExplorer-windows-x64.zip
 ```
 
-Workflow **Windows portable** запускается вручную в GitHub Actions. Он тестирует приложение, собирает EXE, проверяет готовый ZIP и публикует артефакт `AKUZLogExplorer-windows-x64`. Релиз содержит EXE, ZIP и SHA-256. `BUILD_INFO.json` внутри ZIP указывает версию, коммит и зависимости сборки. [Архитектура и выпуск](README_PROJECT.md).
+Workflow **Windows portable** запускается вручную в GitHub Actions. Он тестирует приложение, собирает EXE, проверяет готовый ZIP и публикует артефакт `AKUZLogExplorer-windows-x64`. Если включить `draft_release`, вместо артефакта создаётся черновик релиза с EXE, ZIP и SHA-256; этот режим не использует квоту артефактов Actions. `BUILD_INFO.json` внутри ZIP указывает версию, коммит и зависимости сборки. [Архитектура и выпуск](README_PROJECT.md).
 
 ## Ограничения
 

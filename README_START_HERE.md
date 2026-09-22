@@ -6,7 +6,7 @@
 
 **Windows без установки зависимостей:** распакуйте portable ZIP из [релиза](https://github.com/Artemedi/akuzlogparser/releases/latest), заполните `ConnectConf.cfg`, запустите `AKUZLogExplorer.exe`. Python уже внутри. [Подробная инструкция](README_PORTABLE.md).
 
-**Исходники на Windows:** нужен Python 3.9+. Создайте `ConnectConf.cfg` из `ConnectConf.example.cfg` и запустите `START_EXPLORER.bat`; если Paramiko отсутствует, BAT предложит установить его через pip.
+**Исходники на Windows:** нужен Python 3.9+. Создайте `ConnectConf.cfg` из `ConnectConf.example.cfg` и запустите `START_EXPLORER.bat`; если Paramiko отсутствует, BAT установит его через pip (нужен доступ к PyPI или внутреннему зеркалу).
 
 **Исходники на Linux:** установите `requirements.txt` в виртуальное окружение и выполните `python akuz_app.py --no-browser`. Полные команды — в [README](README.md).
 
