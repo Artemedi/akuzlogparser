@@ -82,8 +82,15 @@ def connect(root):
     CREATE INDEX IF NOT EXISTS ix_line ON errors(source_key,line_no);
     """)
     version=db.execute("SELECT value FROM meta WHERE key='schema'").fetchone()
-    if version is None or version["value"]!=str(VERSION):
+    columns={row["name"] for row in db.execute("PRAGMA table_info(errors)")}
+    missing_relative_day="relative_day" not in columns
+    if missing_relative_day or version is None or version["value"]!=str(VERSION):
         with db:
+            # CREATE TABLE IF NOT EXISTS does not upgrade an existing table.
+            # Inspect columns too: the old migration could already record v4.
+            db.execute("BEGIN IMMEDIATE")
+            if missing_relative_day:
+                db.execute("ALTER TABLE errors ADD COLUMN relative_day INTEGER NOT NULL DEFAULT 0")
             for table in ("indexed","source_files","source_dates","errors"):
                 db.execute("DELETE FROM "+table)
             db.execute("INSERT OR REPLACE INTO meta VALUES('schema',?)",(str(VERSION),))
@@ -404,6 +411,7 @@ def refresh(root):
     with LOCK:
         db=connect(root)
         try:
+            migrated=db.total_changes>0
             available=reports(root)
             desired={rid:stamp for rid,_,_,stamp in available}
             prior={r["id"]:r["stamp"] for r in db.execute("SELECT id,stamp FROM indexed")}
@@ -415,7 +423,7 @@ def refresh(root):
                 prior={}
             aliases={r["sha"]:r["source_key"] for r in
                      db.execute("SELECT sha,source_key FROM source_files")}
-            changed=removed
+            changed=removed or migrated
             for rid,info,catalog,stamp in available:
                 if rid in prior:
                     continue

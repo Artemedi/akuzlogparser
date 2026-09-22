@@ -3,6 +3,8 @@ from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import shutil
+import sqlite3
+from contextlib import closing
 import unittest
 
 import akuz_app as app
@@ -30,6 +32,49 @@ class ErrorAnalyticsTests(unittest.TestCase):
         return (time+",AKUZ,session,user: "
                 "System.Runtime.Serialization.SerializationException: Failed Patient "+
                 patient+"\n at AKUZ.Serialize()\n"+suffix)
+
+    def test_legacy_schema_rebuilds_even_if_already_marked_current(self):
+        report=self.report("migration",self.event("23:59:00.100")+
+                           self.event("00:01:00.100","5678"))
+        expected=refresh(self.root)
+        catalog=self.root/"reports"/report["id"]/"data"/"catalog.js"
+        original=catalog.read_bytes()
+        inventory=(self.root/"cache"/"inventory.json").read_bytes()
+        for version in ("3","4"):
+            with self.subTest(version=version):
+                # Recreate the actual pre-relative_day table, retaining index
+                # stamps to ensure migration forces re-ingestion of reports.
+                with closing(sqlite3.connect(self.root/"cache"/"error_analytics.sqlite")) as db:
+                    db.executescript("""
+                        DROP TABLE errors;
+                        CREATE TABLE errors(
+                            fp TEXT,exception TEXT,family TEXT,template TEXT,method TEXT,
+                            source_key TEXT,line_no INTEGER,end_line INTEGER,raw_sha TEXT,
+                            day TEXT,clock TEXT,report_id TEXT,event_id INTEGER,
+                            ambiguous INTEGER DEFAULT 0,
+                            UNIQUE(source_key,line_no,end_line,raw_sha));
+                    """)
+                    db.execute("UPDATE meta SET value=? WHERE key='schema'",(version,))
+                    db.commit()
+                actual=refresh(self.root)
+                self.assertEqual(actual,expected)
+                with closing(connect(self.root)) as db:
+                    result=detail(db,actual["groups"][0]["fp"])
+                    self.assertEqual(result["relative_days"],[("D+0",1),("D+1",1)])
+                    self.assertEqual(result["days"],[("2026-09-22",1),("2026-09-23",1)])
+                self.assertEqual(refresh(self.root),actual)
+                self.assertEqual(catalog.read_bytes(),original)
+                self.assertEqual((self.root/"cache"/"inventory.json").read_bytes(),inventory)
+
+    def test_schema_upgrade_refreshes_empty_static_snapshot(self):
+        refresh(self.root)
+        snapshot=self.root/"data"/"analytics.js"
+        snapshot.write_text('window.AKUZ_ANALYTICS={"schema":3};',encoding="utf-8")
+        with closing(sqlite3.connect(self.root/"cache"/"error_analytics.sqlite")) as db:
+            db.execute("UPDATE meta SET value='3' WHERE key='schema'")
+            db.commit()
+        actual=refresh(self.root)
+        self.assertEqual(read_js(snapshot,"window.AKUZ_ANALYTICS="),actual)
 
     def test_normalized_fingerprint_and_family(self):
         first=recognize_error(self.event("12:00:00.100", "1234"))
