@@ -19,7 +19,7 @@ from akuz_windows import fetch_windows, list_windows, load_windows_config
 from akuz_html_explorer import generate
 from akuz_log_parser import event_stream
 from akuz_store import (cached_download, cached_report, clear_cache, key_for,
-                         load_store, report_summary, save_store)
+                         load_store, report_summary, save_store, date_from_log_name)
 
 ROOT = Path(__file__).resolve().parent
 STATIC = {'index.html', 'event.html', 'errors.html', 'errors.js', 'style.css', 'common.js', 'index.js',
@@ -100,6 +100,7 @@ def perform_list(root: Path, state: State, list_fn=list_remote, source='linux'):
     listing = source_list(cfg, source, state.set_stage) if source == 'windows' else list_fn(cfg, state.set_stage)
     store = load_store(root)
     for file in listing:
+        file['date'] = date_from_log_name(file['name'])
         file['cached'] = file['id'] in store['downloads'] and cached_download(store, file['id']) is not None
     with state.lock:
         state.listing = listing
@@ -189,6 +190,8 @@ def perform_build(root: Path, state: State, selections,
         # Reconcile selections by the trusted previously-listed paths, not browser paths.
         state.set_stage('Проверяю актуальные размеры выбранных журналов…')
         fresh = source_list(cfg, source, state.set_stage)
+        for file in fresh:
+            file['date'] = date_from_log_name(file['name'])
         by_path = {f['path']:f for f in fresh}
         reconciled = []
         for choice in selections:
@@ -215,6 +218,7 @@ def perform_build(root: Path, state: State, selections,
         value = selected.get('date', '')
         if not isinstance(value, str):
             raise FetchError('Неверный формат даты')
+        value = value or date_from_log_name(listed[selected['id']]['name'])
         if value:
             try:
                 date.fromisoformat(value)
@@ -359,7 +363,7 @@ def perform_latest(root, state, source='linux'):
         latest = state.listing[0] if state.listing else None
     if latest is None:
         raise FetchError('Файлы по маске не найдены')
-    # No auto calendar date: mtime does not prove the event's first date.
+    # Use the filename date through perform_build; never infer it from mtime.
     perform_build(root, state, [dict(id=latest['id'], date='')])
 
 
@@ -401,9 +405,27 @@ def make_handler(root: Path, state: State, port: int):
             return self.headers.get('Host','').lower() in accepted_hosts
 
         def do_GET(self):
+            # Serialize analytics reads with job admission. A direct URL or a
+            # second tab must not index a partly published batch either.
+            path='/'+'/'.join(Path(unquote(urlsplit(self.path).path).lstrip('/')).parts)
+            analytics=(path == '/errors.html' or path.startswith('/api/analytics/') or
+                       path == '/data/analytics.js' or
+                       any(path.startswith('/data/'+prefix) for prefix in
+                           ('error_', 'type_', 'family_')))
+            if analytics:
+                with state.lock:
+                    if state.busy:
+                        if not self._host_ok():
+                            return self._json(403, {'error':'Неверный Host'})
+                        return self._json(409, {'error':'Дождитесь завершения обработки всех выбранных журналов, затем откройте аналитику.'})
+                    return self._serve_get()
+            return self._serve_get()
+
+        def _serve_get(self):
             if not self._host_ok():
                 return self._json(403, {'error':'Неверный Host'})
             parsed = urlsplit(self.path)
+            parsed = parsed._replace(path='/'+'/'.join(Path(unquote(parsed.path).lstrip('/')).parts))
             if parsed.path == '/api/status':
                 return self._json(200, state.snapshot())
             if parsed.path == '/api/reports':
@@ -441,7 +463,7 @@ def make_handler(root: Path, state: State, port: int):
                 self.end_headers()
                 self.wfile.write(data)
                 return
-            path = unquote(parsed.path)
+            path = parsed.path
             if '\x00' in path or '\\' in path:
                 return self._json(404, {'error':'Не найдено'})
             parts = Path(path.lstrip('/')).parts or ('index.html',)
@@ -455,6 +477,8 @@ def make_handler(root: Path, state: State, port: int):
             elif len(parts) >= 3 and parts[0] == 'reports' and len(parts[1]) < 80:
                 if len(parts) == 3 and parts[2] in STATIC:
                     file = root/'reports'/parts[1]/parts[2]
+                    if parts[2] == 'app_controls.js' and (root/'app_controls.js').is_file():
+                        file = root/'app_controls.js'
                 elif len(parts) == 4 and parts[2] == 'data' and parts[3].endswith('.js'):
                     file = root/'reports'/parts[1]/'data'/parts[3]
             if file is None:
@@ -502,14 +526,14 @@ def make_handler(root: Path, state: State, port: int):
                 with state.lock:
                     if state.busy:
                         return self._json(409, {'error':'Дождитесь завершения загрузки журналов'})
-                from akuz_analytics import update_source_date
-                try:
-                    result=update_source_date(root,payload.get('id'),payload.get('date'))
-                except ValueError as exc:
-                    return self._json(400, {'error':str(exc)})
-                except Exception:
-                    return self._json(500, {'error':'Не удалось обновить аналитические даты'})
-                return self._json(200,result)
+                    from akuz_analytics import update_source_date
+                    try:
+                        result=update_source_date(root,payload.get('id'),payload.get('date'))
+                    except ValueError as exc:
+                        return self._json(400, {'error':str(exc)})
+                    except Exception:
+                        return self._json(500, {'error':'Не удалось обновить аналитические даты'})
+                    return self._json(200,result)
             if endpoint in ('/api/list', '/api/fetch'):
                 if payload.get('source', 'linux') not in ('linux','windows'):
                     return self._json(400, {'error':'Неизвестный источник'})

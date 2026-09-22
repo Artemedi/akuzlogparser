@@ -416,11 +416,11 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
 # v3: preserve offline reader and add a button only enabled on localhost.
 FETCH_PANEL = r"""<section class="panel" id="fetch-panel" style="margin-bottom:17px">
 <div class="fetchbar"><div><div class="eyebrow">SSH · коллекция журналов · v4.1</div><h2 style="font-size:18px;margin:4px 0">Журналы по датам</h2>
-<p class="small">Выбери один или несколько файлов, задай дату первой записи и открой отдельные отчёты или общую выборку.</p>
+<p class="small">Выбери один или несколько файлов, проверь дату из имени и открой отдельные отчёты или общую выборку.</p>
 <div id="fetch-status" class="status" role="status">Проверка локального сервиса…</div></div>
 <div class="actions"><button class="primary" id="fetch-latest">↓ Последний лог</button><button id="fetch-list">↻ Список файлов</button><button id="picker-toggle" type="button" aria-controls="remote-picker" aria-expanded="false" hidden>▾ Показать файлы</button><button id="fetch-cache">⌫ Очистить кэш</button><label class="small"><input type="checkbox" id="clear-reports"> Включая отчёты v4</label><a class="btn" id="fetch-open" href="#" hidden>Открыть отчёт →</a></div></div>
 <div id="remote-picker" hidden><div class="pickerbar"><span id="picker-count" class="sub"></span><label>Дата изменения на сервере с <input type="date" id="picker-from"></label><label>по <input type="date" id="picker-to"></label><button id="picker-today">Сбросить даты</button><button id="picker-select-all">Выбрать видимые</button><button id="picker-select-none">Снять выделение</button></div>
-<div class="filelist" id="picker-files"></div><div class="pickerbar"><button class="primary" id="picker-build">Создать отчёты по выбранным файлам</button><span class="small">Дата рядом с файлом — редактируемая дата ПЕРВОЙ записи; предложена по mtime, а не прочитана из лога.</span></div></div>
+<div class="filelist" id="picker-files"></div><div class="pickerbar"><button class="primary" id="picker-build">Создать отчёты по выбранным файлам</button><span class="small">Дата первой записи берётся из имени YYYYMMDD_*.log. Её можно исправить вручную.</span></div></div>
 <div id="report-library" class="library" hidden><h3>Мои отчёты</h3><div id="report-items"></div></div>
 </section>"""
 INDEX_HTML = INDEX_HTML.replace('<section class="hero">', FETCH_PANEL+'<section class="hero">', 1)

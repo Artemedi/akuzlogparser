@@ -65,3 +65,5 @@ button.analytics-group .analytics-count{color:var(--accent);white-space:nowrap}
 .analytics-relative-note{padding:12px;border-radius:10px;border:1px solid var(--line);color:var(--muted);margin:12px 0}
 @media(max-width:690px){.analytics-source{grid-template-columns:minmax(0,1fr);gap:8px}
 .analytics-source input[type=date]{width:100%}}
+
+.btn[aria-disabled="true"]{opacity:.5;cursor:wait;}

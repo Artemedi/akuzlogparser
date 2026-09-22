@@ -51,6 +51,43 @@ class WindowsSourceTests(unittest.TestCase):
         self.assertNotEqual(first['id'], second['id'])
         self.assertGreater(second['size'], first['size'])
 
+    def test_filename_dates_are_validated(self):
+        from akuz_store import date_from_log_name
+        for name,expected in (("20260923_server.log","2026-09-23"),
+                              ("20240229_server.LOG","2024-02-29"),
+                              ("20260229_server.log",""),("20261301_server.log",""),
+                              ("akuz.log",""),("20260923_server.log.gz","")):
+            with self.subTest(name=name):
+                self.assertEqual(date_from_log_name(name),expected)
+
+    def test_filename_date_combines_reports_and_growing_file_is_refetched(self):
+        from akuz_store import load_store
+        first=self.write_log('20260923_first.log')
+        self.write_log('20260924_second.log')
+        state=app.State()
+        with patch.object(app,'source_config',return_value=self.cfg), \
+             patch.object(app,'source_list',side_effect=lambda cfg,source,notify:win._inventory(self.share,cfg)), \
+             patch.object(app,'source_fetch',side_effect=lambda cfg,source,remote,notify:win.fetch_windows(cfg,remote,notify)) as fetch, \
+             patch.object(win,'os',self.fake_os):
+            app.perform_list(self.root,state,source='windows')
+            self.assertEqual({f['date'] for f in state.listing},{'2026-09-23','2026-09-24'})
+            choices=[{'id':f['id'],'date':''} for f in state.listing]
+            app.perform_build_current(self.root,state,choices)
+            self.assertIsNotNone(state.result['combined'])
+            self.assertEqual(fetch.call_count,2)
+            app.perform_build_current(self.root,state,choices)
+            self.assertEqual(fetch.call_count,2)
+            self.assertTrue(state.result['reused'])
+            with first.open('ab') as f:
+                f.write(b'13:00:00.000,AKUZ,s1,user: Next\n')
+            # Reuse the old browser selection: refresh must detect the growth.
+            app.perform_build_current(self.root,state,choices)
+            self.assertEqual(fetch.call_count,3)
+            latest=[r for r in state.result['reports'] if r['sources'][0]['name']==first.name][0]
+            self.assertEqual(latest['events'],2)
+            self.assertEqual(latest['sources'][0]['date'],'2026-09-23')
+            self.assertEqual(len(load_store(self.root)['downloads']),3)
+
     def test_static_without_newline_preserved(self):
         data = b'12:00:00.000,AKUZ,s1,user: final'
         self.write_log(data=data)

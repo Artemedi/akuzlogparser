@@ -1,10 +1,28 @@
 """Local v4 inventory, SHA-256 integrity, safe tracked cache clearing."""
 from __future__ import annotations
-from datetime import datetime
+from datetime import date, datetime
 import hashlib
 import json
+import re
 from pathlib import Path
 import shutil
+
+
+def date_from_log_name(name):
+    """AKUZ naming contract: YYYYMMDD_*.log contains the first event's date."""
+    match=re.fullmatch(r"([0-9]{4})([0-9]{2})([0-9]{2})_.*\.log",str(name),re.I)
+    if not match:
+        return ""
+    try:
+        return date(*(int(part) for part in match.groups())).isoformat()
+    except ValueError:
+        return ""
+
+
+def source_date(info):
+    if info.get("date") or info.get("date_override"):
+        return str(info.get("date") or "")
+    return date_from_log_name(info.get("name", ""))
 
 
 def load_store(root: Path):

@@ -4,9 +4,9 @@ from collections import Counter
 from datetime import date,timedelta
 import hashlib,json,re,sqlite3,threading
 from pathlib import Path
-from akuz_store import load_store
+from akuz_store import load_store, source_date
 LOCK=threading.RLock()
-VERSION=4
+VERSION=5
 REPORT_ID=re.compile(r"^v4_[A-Za-z0-9_-]{1,74}$")
 EXCEPTION=re.compile(r"(?<![\w.])(?:[A-Za-z_]\w*\.)*([A-Z][A-Za-z0-9_]*(?:Exception|Error))\b\s*:?",re.I)
 SERIAL=re.compile(r"ошибк[а-я]*\s+сериализац[а-я]*|serialization\s+(?:failed|error)|сбой\s+сериализац[а-я]*",re.I)
@@ -102,6 +102,9 @@ def reports(root):
             continue
         catalog=root/"reports"/rid/"data"/"catalog.js"
         if catalog.is_file():
+            # Apply filename dates to old reports without rewriting source data.
+            meta=dict(meta,sources=[dict(info,date=source_date(info))
+                                   for info in meta.get("sources") or []])
             st=catalog.stat()
             # The source-to-report provenance is held in inventory.json, not
             # catalog.js. A corrected source date/path must invalidate the
@@ -359,10 +362,10 @@ def source_inventory(root):
             item=result.setdefault(key,dict(id=key,name=str(info.get("name") or "?"),
               host=str(info.get("host") or "не указан"),
               remote_path=str(info.get("remote_path") or ""),
-              date=str(info.get("date") or ""),
+              date=source_date(info),
               reports=[],conflict=False,bytes_sha=str(info.get("sha256") or "")))
             item["reports"].append(dict(id=rid,index=idx,label=str(meta.get("label") or rid)))
-            if item["date"]!=str(info.get("date") or ""):
+            if item["date"]!=source_date(info):
                 item["conflict"]=True
     return sorted(result.values(),key=lambda x:(x["date"]!="",x["host"],x["name"]))
 
@@ -396,6 +399,7 @@ def update_source_date(root,identity,first_date):
                     (rid+":"+str(idx)).encode()).hexdigest()
                 if original==identity:
                     info["date"]=first_date
+                    info["date_override"]=True
                     changed+=1
         if not changed:
             raise ValueError("Источник больше не найден, обновите страницу")

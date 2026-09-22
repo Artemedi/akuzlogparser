@@ -12,8 +12,8 @@
 <section class="panel analytics-date-panel" id="date-panel">
 <div class="analytics-date-header">
 <div><h2>Календарные даты исходных журналов</h2><p class="small">
-Если дату первой записи не указали при обработке .log, события остаются в отчётах,
-но график по календарю не строится. Подтвердите её здесь без повторной загрузки журнала.</p></div>
+Дата автоматически берётся из имени YYYYMMDD_*.log, в том числе для ранее обработанных журналов.
+Если имя не содержит корректной даты, укажите её здесь без повторной загрузки. Ручная корректировка имеет приоритет.</p></div>
 <button type="button" id="date-toggle">Назначить даты ↴</button>
 </div><p class="status" id="date-status"></p><div id="date-sources" hidden></div>
 </section>

@@ -40,7 +40,7 @@ class ErrorAnalyticsTests(unittest.TestCase):
         catalog=self.root/"reports"/report["id"]/"data"/"catalog.js"
         original=catalog.read_bytes()
         inventory=(self.root/"cache"/"inventory.json").read_bytes()
-        for version in ("3","4"):
+        for version in ("3","4","5"):
             with self.subTest(version=version):
                 # Recreate the actual pre-relative_day table, retaining index
                 # stamps to ensure migration forces re-ingestion of reports.
@@ -76,6 +76,64 @@ class ErrorAnalyticsTests(unittest.TestCase):
         actual=refresh(self.root)
         self.assertEqual(read_js(snapshot,"window.AKUZ_ANALYTICS="),actual)
 
+    def test_old_undated_report_uses_filename_without_modifying_report(self):
+        report=self.report("20260923_server",self.event("23:59:00.100")+
+                           self.event("00:01:00.100","9876"),base=None)
+        catalog=self.root/"reports"/report["id"]/"data"/"catalog.js"
+        original=catalog.read_bytes()
+        result=refresh(self.root)
+        self.assertEqual(result["groups"][0]["dated"],2)
+        with closing(connect(self.root)) as db:
+            self.assertEqual(detail(db,result["groups"][0]["fp"])["days"],
+                             [("2026-09-23",1),("2026-09-24",1)])
+        source=source_inventory(self.root)[0]
+        self.assertEqual(source["date"],"2026-09-23")
+        update_source_date(self.root,source["id"],"2026-09-20")
+        self.assertEqual(source_inventory(self.root)[0]["date"],"2026-09-20")
+        update_source_date(self.root,source["id"],"")
+        self.assertEqual(refresh(self.root)["groups"][0]["dated"],0)
+        self.assertEqual(catalog.read_bytes(),original)
+
+    def test_analytics_blocked_while_batch_is_busy(self):
+        import http.client
+        import threading
+        from http.server import ThreadingHTTPServer
+        from unittest.mock import patch
+        state=app.State()
+        state.busy=True
+        (self.root/"errors.html").write_text("analytics page")
+        server=ThreadingHTTPServer(("127.0.0.1",0),app.make_handler(self.root,state,0))
+        server.RequestHandlerClass=app.make_handler(self.root,state,server.server_port)
+        worker=threading.Thread(target=server.serve_forever,daemon=True)
+        worker.start()
+        conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+        try:
+            with patch("akuz_analytics.refresh") as refresh_mock:
+                for path in ("/errors.html","/%65rrors.html","/./errors.html",
+                             "/api/analytics/sources","/data/analytics.js",
+                             "/data/error_123.js","/data/type_123.js","/data/family_123.js"):
+                    conn.request("GET",path)
+                    response=conn.getresponse()
+                    self.assertEqual(response.status,409,path)
+                    response.read()
+                refresh_mock.assert_not_called()
+                conn.request("GET","/api/status")
+                response=conn.getresponse()
+                self.assertEqual(response.status,200)
+                response.read()
+                with state.lock:
+                    state.busy=False
+                conn.request("GET","/errors.html")
+                response=conn.getresponse()
+                self.assertEqual(response.status,200)
+                response.read()
+                refresh_mock.assert_called_once_with(self.root)
+        finally:
+            conn.close()
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=3)
+
     def test_normalized_fingerprint_and_family(self):
         first=recognize_error(self.event("12:00:00.100", "1234"))
         second=recognize_error(self.event("13:00:00.100", "9876"))
@@ -97,7 +155,7 @@ class ErrorAnalyticsTests(unittest.TestCase):
         self.assertEqual(info["distinct_errors"],3)
         self.assertEqual(info["report_count"],2)
         fp=info["groups"][0]["fp"]
-        with connect(self.root) as c:
+        with closing(connect(self.root)) as c:
             snapshot=detail(c,fp)
         self.assertEqual(snapshot["days"],[("2026-09-22",3)])
         self.assertEqual(snapshot["hours"],[("2026-09-22 12",2),
@@ -128,7 +186,7 @@ class ErrorAnalyticsTests(unittest.TestCase):
         info=refresh(self.root)
         self.assertEqual(info["distinct_errors"],2)
         self.assertEqual(info["ambiguous"],2)
-        with connect(self.root) as db:
+        with closing(connect(self.root)) as db:
             groups=[detail(db,g["fp"]) for g in info["groups"]]
         self.assertEqual(sum(x["dated"] for x in groups),0)
 
@@ -140,7 +198,7 @@ class ErrorAnalyticsTests(unittest.TestCase):
         self.assertEqual(state["distinct_errors"],1)
         self.assertEqual(state["date_conflicts"],1)
         self.assertEqual(state["groups"][0]["dated"],0)
-        with connect(self.root) as db:
+        with closing(connect(self.root)) as db:
             self.assertEqual(detail(db,state["groups"][0]["fp"])["days"],[])
 
     def test_unknown_date_never_assumed_from_file_mtime(self):
@@ -149,7 +207,7 @@ class ErrorAnalyticsTests(unittest.TestCase):
         self.assertEqual(info["distinct_errors"],1)
         self.assertEqual(info["groups"][0]["dated"],0)
         fp=info["groups"][0]["fp"]
-        with connect(self.root) as db:
+        with closing(connect(self.root)) as db:
             group=detail(db,fp)
         self.assertEqual(group["days"],[])
         self.assertIsNone(group["items"][0]["day"])
@@ -197,7 +255,7 @@ class ErrorAnalyticsTests(unittest.TestCase):
         self.assertEqual(result["distinct_errors"],2)
         self.assertEqual(result["date_conflicts"],0)
         fp=result["groups"][0]["fp"]
-        with connect(self.root) as db:
+        with closing(connect(self.root)) as db:
             aggregate=detail(db,fp)
         self.assertEqual(aggregate["days"],
                          [("2026-09-21",1),("2026-09-22",1)])
@@ -229,7 +287,7 @@ class ErrorAnalyticsTests(unittest.TestCase):
                             joined,date(2026,9,21),sources,"combined","combined")
         first_summary=refresh(self.root)
         group=first_summary["groups"][0]
-        with connect(self.root) as db:
+        with closing(connect(self.root)) as db:
             initial=detail(db,group["fp"])
             self.assertEqual(initial["days"],
                              [("2026-09-21",1),("2026-09-22",1)])
@@ -237,7 +295,7 @@ class ErrorAnalyticsTests(unittest.TestCase):
         original_catalog=(self.root/"reports"/report["id"]/"data"/"catalog.js").read_bytes()
         target=next(x for x in source_inventory(self.root) if x["name"]=="b.log")
         update_source_date(self.root,target["id"],"2026-09-23")
-        with connect(self.root) as db:
+        with closing(connect(self.root)) as db:
             self.assertEqual(detail(db,group["fp"])["days"],
                              [("2026-09-21",1),("2026-09-23",1)])
         self.assertEqual((self.root/"reports"/report["id"]/"data"/"catalog.js").read_bytes(),
@@ -323,7 +381,7 @@ class ErrorAnalyticsTests(unittest.TestCase):
         self.assertEqual(len(state["groups"]),2)
         self.assertEqual(len(state["types"]),1)
         self.assertEqual(state["types"][0]["total"],2)
-        with connect(self.root) as db:
+        with closing(connect(self.root)) as db:
             kind=state["types"][0]
             group=detail(db,kind["fp"],"type",(kind["exception"],kind["family"]))
         self.assertEqual(group["total"],2)
@@ -337,7 +395,7 @@ class ErrorAnalyticsTests(unittest.TestCase):
         state=refresh(self.root)
         self.assertEqual(state["groups"][0]["dated"],0)
         fp=state["groups"][0]["fp"]
-        with connect(self.root) as db:
+        with closing(connect(self.root)) as db:
             result=detail(db,fp)
         self.assertEqual(result["relative_days"],[("D+0",1),("D+1",1)])
         self.assertEqual(result["relative_hours"],

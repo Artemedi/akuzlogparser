@@ -7,12 +7,26 @@
   const buttons=['fetch-latest','fetch-list','fetch-cache','picker-build','picker-select-all','picker-select-none'];
   const isLocal=/^(127\.0\.0\.1|localhost)$/.test(location.hostname)&&location.protocol==='http:';
   if(!isLocal){$('fetch-status').textContent='Офлайн-просмотр работает. Для SSH и управления отчётами запустите START_EXPLORER.bat.';for(const id of buttons)$(id).disabled=true;return}
-  let files=[],renderKey='',awaitAction='',shownResult='',pollTimer=null,pickerCollapsed=true,initialSourceLoaded=false;
+  let files=[],renderKey='',awaitAction='',shownResult='',pollTimer=null,pickerCollapsed=true,initialSourceLoaded=false,busyNow=true;
   const status=$('fetch-status'), picker=$('remote-picker'), collection=$('picker-files'), link=$('fetch-open');
   const url='/api/status';
   const label=s=>String(s??'');
   const size=n=>n>=1048576?(n/1048576).toFixed(1)+' МБ':(n/1024).toFixed(0)+' КБ';
-  function setBusy(busy){for(const id of ['fetch-latest','fetch-list','fetch-cache'])$(id).disabled=busy; $('fetch-source').disabled=busy; $('picker-build').disabled=busy||!files.some(x=>x.checked)||files.filter(x=>x.checked).length>30}
+  if(analytics)analytics.addEventListener('click',event=>{
+    if(busyNow){event.preventDefault();status.textContent='Дождитесь завершения обработки всех выбранных журналов.';}
+  });
+  function setBusy(busy){busyNow=busy;
+    if(analytics){
+      analytics.setAttribute('aria-disabled',String(busy));
+      analytics.classList.toggle('disabled',busy);
+      analytics.title=busy?'Дождитесь завершения обработки всех выбранных журналов':'Открыть аналитику ошибок';
+      if(busy)analytics.removeAttribute('href');
+      else analytics.href=location.pathname.includes('/reports/')?'../../errors.html':'errors.html';
+    }
+    for(const id of ['fetch-latest','fetch-list','fetch-cache'])$(id).disabled=busy;
+    $('fetch-source').disabled=busy;
+    $('picker-build').disabled=busy||!files.some(x=>x.checked)||files.filter(x=>x.checked).length>30;
+  }
   async function jsonRequest(path,body){const r=await fetch(path,{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let data=await r.json();if(!r.ok)throw Error(data.error||'HTTP '+r.status);return data}
   function showPicker(expanded){
     pickerCollapsed=!expanded;
@@ -34,12 +48,12 @@
       const modified=document.createElement('div');modified.className='sizedate';modified.textContent=f.suggested_date;
       const hm=document.createElement('span');hm.className='sub';hm.textContent='mtime · '+f.modified_utc.slice(11,19)+' UTC';modified.appendChild(hm);row.appendChild(modified);
       const amount=document.createElement('span');amount.className='sub';amount.textContent=size(f.size)+(f.cached?' · кэш':'');row.appendChild(amount);
-      const group=document.createElement('label');group.className='firstdate';group.textContent='Дата первой записи';const date=document.createElement('input');date.type='date';date.value=f.date??'';date.title='Проверьте дату первой записи! mtime файла — только подсказка.';date.addEventListener('change',()=>f.date=date.value);group.appendChild(date);row.appendChild(group);
+      const group=document.createElement('label');group.className='firstdate';group.textContent='Дата первой записи';const date=document.createElement('input');date.type='date';date.value=f.date??'';date.title='Дата из имени YYYYMMDD_*.log. При необходимости исправьте вручную.';date.addEventListener('change',()=>f.date=date.value);group.appendChild(date);row.appendChild(group);
       collection.appendChild(row);
     }
     showPicker(!pickerCollapsed);updateCount();
   }
-  function updateCount(){const sel=files.filter(x=>x.checked).length;$('picker-count').textContent='Доступно '+files.length+' · показано '+collection.children.length+' · выбрано '+sel+' (максимум 30)';$('picker-build').disabled=!sel||sel>30}
+  function updateCount(){const sel=files.filter(x=>x.checked).length;$('picker-count').textContent='Доступно '+files.length+' · показано '+collection.children.length+' · выбрано '+sel+' (максимум 30)';$('picker-build').disabled=busyNow||!sel||sel>30}
   async function getReports(){try{const r=await fetch('/api/reports',{cache:'no-store'});if(!r.ok)throw Error('Не удалось прочитать библиотеку');const data=await r.json();const lib=$('report-library'),items=$('report-items');items.replaceChildren();for(const report of data.reports){const row=document.createElement('div');row.className='library-item';const a=document.createElement('a');a.href=report.url;a.textContent=(report.kind==='combined'?'▦ ':'▤ ')+report.label;row.appendChild(a);const detail=document.createElement('span');detail.className='sub';detail.textContent=Number(report.events).toLocaleString('ru-RU')+' событий · '+report.created;row.appendChild(detail);items.appendChild(row)}lib.hidden=!data.reports.length}catch(e){status.textContent='Библиотека: '+e.message}}
   async function refresh(){
     try{
@@ -69,7 +83,7 @@
         if(s.error)awaitAction='';
         if(!shownResult||shownResult!==JSON.stringify(s.result)){shownResult=JSON.stringify(s.result);await getReports()}
       }
-      if(s.busy){pollTimer=setTimeout(refresh,1100)}
+      pollTimer=setTimeout(refresh,s.busy?1100:2500)
     }catch(e){status.textContent='Нет связи с локальным сервисом: '+String(e.message||e);setBusy(true)}
   }
   async function action(endpoint,body,name){
@@ -89,7 +103,7 @@
     if(!selected.length){status.textContent='Выберите файлы.';return}
     if(selected.length>30){status.textContent='Максимум 30 файлов за операцию.';return}
     if(selected.length>1&&!selected.every(f=>f.date)){
-      if(!confirm('Не для всех файлов задана дата первой записи. Будут созданы отдельные отчёты без общей временной шкалы. Продолжить?'))return;
+      if(!confirm('У части файлов нет даты в имени YYYYMMDD_*.log и дата не указана вручную. Создать отдельные отчёты без общей временной шкалы?'))return;
     }
     action('/api/build',{selections:selected},'build');
   });
@@ -102,5 +116,5 @@
   $('picker-today').addEventListener('click',()=>{$('picker-from').value='';$('picker-to').value='';renderFiles()});
   $('picker-select-all').addEventListener('click',()=>{const ids=new Set([...collection.children].map(x=>x.dataset.fid));for(const f of files)if(ids.has(f.id))f.checked=true;renderFiles()});
   $('picker-select-none').addEventListener('click',()=>{for(const f of files)f.checked=false;renderFiles()});
-  refresh();getReports();
+  setBusy(true);refresh();getReports();
 })();
