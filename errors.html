@@ -6,9 +6,17 @@
 <div class="actions"><a class="btn" href="index.html">← Журнал</a><button id="theme">◐ Тема</button></div></header>
 <section class="hero"><div class="eyebrow">Только обработанные .log приложения АКУЗ</div>
 <h2>Повторяющиеся ошибки и динамика</h2>
-<p class="note">Группировка по типу исключения, нормализованному сообщению и первому кадру стека (если он найден).
+<p class="note">Группировка по типу, семейству или точному шаблону исключения — выбирайте нужную детализацию.
 Нажмите на ошибку, чтобы открыть график по дням или часам и исходные события.</p>
 <div id="analytics-status" class="status" role="status">Загрузка аналитического индекса…</div></section>
+<section class="panel analytics-date-panel" id="date-panel">
+<div class="analytics-date-header">
+<div><h2>Календарные даты исходных журналов</h2><p class="small">
+Если дату первой записи не указали при обработке .log, события остаются в отчётах,
+но график по календарю не строится. Подтвердите её здесь без повторной загрузки журнала.</p></div>
+<button type="button" id="date-toggle">Назначить даты ↴</button>
+</div><p class="status" id="date-status"></p><div id="date-sources" hidden></div>
+</section>
 <div class="metrics" id="analytics-metrics"><div class="metric"><strong id="metric-errors">—</strong><span>Уникальных появлений ошибок</span></div>
 <div class="metric"><strong id="metric-groups">—</strong><span>Групп ошибок</span></div>
 <div class="metric"><strong id="metric-reports">—</strong><span>Обработано отчётов</span></div>
@@ -16,6 +24,9 @@
 <div class="analytics-layout">
 <section class="panel analytics-left"><h2>Группы ошибок</h2>
 <div class="field"><label for="error-search">Тип, сообщение или метод</label><input id="error-search" type="search" placeholder="SerializationException…"></div>
+<div class="field"><label for="group-mode">Группировка</label><select id="group-mode">
+<option value="type">По типу ошибки</option><option value="exact">По точному шаблону</option>
+<option value="family">По семейству</option></select></div>
 <div class="field"><label for="error-family">Семейство</label><select id="error-family">
 <option value="">Все ошибки</option><option value="Сериализация">Сериализация</option>
 <option value="Другие ошибки">Другие ошибки</option></select></div>
@@ -25,7 +36,7 @@
 </section></div>
 <p class="warning">Подсчёт ведётся только по сохранённым отчётам AKUZ. Повторные снимки с одинаковыми исходными строками не удваивают события.
 Конфликтующие снимки помечаются как неопределённые и исключаются из графика. Дни без достоверной даты первой записи
-не отображаются на календарной оси. Графики показывают совпадения, а не доказанные причины неисправности.
+не отображаются на календарной оси, но доступны по относительным дням/часам журнала. Графики показывают совпадения, а не доказанные причины неисправности.
 Отчёты могут содержать медицинские и персональные сведения: не публикуйте каталог.</p>
 <footer class="footer">AKUZ Log Explorer · <a href="README_ANALYTICS.md">Методика аналитики</a> · Без системных логов, CDN и внешних сервисов</footer>
 </div><script src="data/analytics.js"></script><script src="errors.js"></script></body></html>

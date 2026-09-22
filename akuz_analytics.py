@@ -6,7 +6,7 @@ import hashlib,json,re,sqlite3,threading
 from pathlib import Path
 from akuz_store import load_store
 LOCK=threading.RLock()
-VERSION=3
+VERSION=4
 REPORT_ID=re.compile(r"^v4_[A-Za-z0-9_-]{1,74}$")
 EXCEPTION=re.compile(r"(?<![\w.])(?:[A-Za-z_]\w*\.)*([A-Z][A-Za-z0-9_]*(?:Exception|Error))\b\s*:?",re.I)
 SERIAL=re.compile(r"ошибк[а-я]*\s+сериализац[а-я]*|serialization\s+(?:failed|error)|сбой\s+сериализац[а-я]*",re.I)
@@ -76,6 +76,7 @@ def connect(root):
         fp TEXT,exception TEXT,family TEXT,template TEXT,method TEXT,
         source_key TEXT,line_no INTEGER,end_line INTEGER,raw_sha TEXT,
         day TEXT,clock TEXT,report_id TEXT,event_id INTEGER,ambiguous INTEGER DEFAULT 0,
+        relative_day INTEGER NOT NULL DEFAULT 0,
         UNIQUE(source_key,line_no,end_line,raw_sha));
     CREATE INDEX IF NOT EXISTS ix_fp ON errors(fp);
     CREATE INDEX IF NOT EXISTS ix_line ON errors(source_key,line_no);
@@ -137,6 +138,10 @@ def ingest(db,rid,info,catalog_path,aliases):
                      label==p.get("name")+" · "+str(p.get("date") or "")),None)
         if found is None and len(provenance)==1:
             found=provenance[0]
+        if found is None and len(provenance)==len(catalog.get("sources") or []):
+            # A source-date override changes inventory metadata but not the
+            # immutable source label embedded in an existing merged report.
+            found=provenance[sid]
         found=found or {}
         identity=source_identity(found)
         skip=info.get("kind")=="combined" and bool(identity and identity in aliases)
@@ -159,13 +164,13 @@ def ingest(db,rid,info,catalog_path,aliases):
             has_source_date=False
         mapping[sid]=(key,skip,bool(identity and db.execute(
             "SELECT conflict FROM source_dates WHERE sha=?",
-            (identity,)).fetchone()["conflict"]),has_source_date)
+            (identity,)).fetchone()["conflict"]),has_source_date,chosen)
     part=None
     raw_shard=[]
     for row in catalog["rows"]:
         sid=int(row[12]) if len(row)>12 else 0
-        key,skip,date_conflict,has_source_date=mapping.get(
-            sid,(rid+":"+str(sid),False,False,False))
+        key,skip,date_conflict,has_source_date,chosen_source_date=mapping.get(
+            sid,(rid+":"+str(sid),False,False,False,""))
         if skip:
             continue
         number=int(row[10])
@@ -184,14 +189,41 @@ def ingest(db,rid,info,catalog_path,aliases):
         if ambiguous:
             db.execute("UPDATE errors SET ambiguous=1 WHERE source_key=? AND line_no=?",
                        (key,line))
-        when=(base_day+timedelta(days=int(row[1]))).isoformat() if (
-            base_day and has_source_date and not date_conflict) else None
+        merged_offset=int(row[1])
+        relative_day=merged_offset
+        source_day=date.fromisoformat(chosen_source_date) if has_source_date else None
+        if info.get("kind") == "combined" and base_day:
+            # Combined rows are offset from the earliest file's calendar day.
+            # D+N must instead be relative to EACH original source.
+            label=(catalog.get("sources") or [""])[sid]
+            old_label_day=label.rsplit(" · ",1)[-1]
+            try:
+                initial_day=date.fromisoformat(old_label_day)
+            except ValueError:
+                initial_day=source_day or base_day
+            relative_day=merged_offset-(initial_day-base_day).days
+        calendar_day=(source_day+timedelta(days=relative_day)
+                      if source_day else None)
+        when=(calendar_day.isoformat() if calendar_day and not date_conflict else None)
         db.execute("""INSERT OR IGNORE INTO errors
           (fp,exception,family,template,method,source_key,line_no,end_line,raw_sha,
-           day,clock,report_id,event_id,ambiguous) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           day,clock,report_id,event_id,ambiguous,relative_day)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
           (match["fp"],match["exception"],match["family"],match["template"],
            match["method"],key,line,end,raw_sha,when,str(row[2]),
-           rid,int(row[0]),int(ambiguous)))
+           rid,int(row[0]),int(ambiguous),relative_day))
+def signature_label(number):
+    """Human-readable number of exact templates in a broad group."""
+    ending=("шаблон" if number%10==1 and number%100!=11 else
+            "шаблона" if 2<=number%10<=4 and not 12<=number%100<=14 else
+            "шаблонов")
+    return str(number)+" "+ending
+
+
+def group_id(mode,value):
+    return hashlib.sha256((mode+"\0"+value.casefold()).encode("utf-8")).hexdigest()[:24]
+
+
 def overview(db):
     groups=[dict(r) for r in db.execute("""
       SELECT fp,exception,family,template,method,count(*) AS total,
@@ -199,30 +231,81 @@ def overview(db):
        sum(ambiguous) AS ambiguous,min(day) AS first,max(day) AS last
       FROM errors GROUP BY fp ORDER BY total DESC,exception
     """)]
-    return dict(groups=groups,
+    types=[]
+    for r in db.execute("""
+      SELECT exception,family,count(*) AS total,count(DISTINCT fp) AS signatures,
+       sum(CASE WHEN day IS NOT NULL AND ambiguous=0 THEN 1 ELSE 0 END) AS dated,
+       sum(ambiguous) AS ambiguous
+      FROM errors GROUP BY exception,family ORDER BY total DESC,exception
+    """):
+        item=dict(r)
+        item["fp"]=group_id("type",item["exception"]+"\0"+item["family"])
+        item["template"]=signature_label(item["signatures"])
+        item["method"]=""
+        types.append(item)
+    families=[]
+    for r in db.execute("""
+      SELECT family,count(*) AS total,count(DISTINCT fp) AS signatures,
+       sum(CASE WHEN day IS NOT NULL AND ambiguous=0 THEN 1 ELSE 0 END) AS dated,
+       sum(ambiguous) AS ambiguous
+      FROM errors GROUP BY family ORDER BY total DESC
+    """):
+        item=dict(r)
+        item["fp"]=group_id("family",item["family"])
+        item["exception"]=item["family"]
+        item["template"]=signature_label(item["signatures"])
+        item["method"]=""
+        families.append(item)
+    return dict(groups=groups,types=types,families=families,
                 report_count=db.execute("SELECT count(*) FROM indexed").fetchone()[0],
                 distinct_errors=db.execute("SELECT count(*) FROM errors").fetchone()[0],
                 ambiguous=db.execute("SELECT count(*) FROM errors WHERE ambiguous=1").fetchone()[0],
                 date_conflicts=db.execute("SELECT count(*) FROM source_dates WHERE conflict=1").fetchone()[0],
                 schema=VERSION)
-def detail(db,fp):
+
+
+def detail(db,fp,mode="exact",value=None):
+    if mode == "exact":
+        assert re.fullmatch("[0-9a-f]{24}",fp)
+        where,params="fp=?",(fp,)
+    elif mode == "type":
+        exception,family=value
+        where,params="exception=? AND family=?",(exception,family)
+    elif mode == "family":
+        where,params="family=?",(value,)
+    else:
+        raise ValueError("Unknown group mode")
     rows=[dict(r) for r in db.execute("""
-      SELECT fp,exception,family,template,method,day,clock,report_id,event_id,ambiguous
-      FROM errors WHERE fp=? ORDER BY day DESC,clock DESC,report_id,event_id
-    """,(fp,))]
-    days,hours=Counter(),Counter()
+      SELECT fp,exception,family,template,method,day,clock,report_id,
+             event_id,ambiguous,relative_day
+      FROM errors WHERE """+where+""" ORDER BY day DESC,clock DESC,report_id,event_id
+    """,params)]
+    days,hours,rel_days,rel_hours=Counter(),Counter(),Counter(),Counter()
     for r in rows:
-        if r["day"] and not r["ambiguous"]:
+        if r["ambiguous"]:
+            continue
+        rel="D+"+str(r["relative_day"])
+        rel_days[rel]+=1
+        if r["clock"]:
+            rel_hours[rel+" "+r["clock"][:2]]+=1
+        if r["day"]:
             days[r["day"]]+=1
             if r["clock"]:
                 hours[r["day"]+" "+r["clock"][:2]]+=1
-    return dict(fp=fp,exception=rows[0]["exception"] if rows else "",
+    return dict(fp=fp,mode=mode,
+                exception=rows[0]["exception"] if mode!="family" and rows else (value if mode=="family" else ""),
                 family=rows[0]["family"] if rows else "",
-                template=rows[0]["template"] if rows else "",
-                method=rows[0]["method"] if rows else "",
+                template=(rows[0]["template"] if len({r["fp"] for r in rows})==1 and rows else
+                          signature_label(len({r["fp"] for r in rows}))+" в группе"),
+                method=rows[0]["method"] if mode=="exact" and rows else "",
                 total=len(rows),dated=sum(days.values()),
                 ambiguous=sum(r["ambiguous"] for r in rows),
-                days=sorted(days.items()),hours=sorted(hours.items()),items=rows)
+                days=sorted(days.items()),hours=sorted(hours.items()),
+                relative_days=sorted(rel_days.items(),key=lambda r:int(r[0][2:])),
+                relative_hours=sorted(rel_hours.items(),key=lambda r:(int(r[0].split()[0][2:]),r[0].split()[1])),
+                items=rows)
+
+
 def export(db,root):
     folder=root/"data"
     folder.mkdir(exist_ok=True)
@@ -231,6 +314,20 @@ def export(db,root):
     for path in folder.glob("error_*.js"):
         if re.fullmatch(r"error_[0-9a-f]{24}\.js",path.name) and path.stem[6:] not in live:
             path.unlink()
+    for mode,collection in (("type",summary["types"]),("family",summary["families"])):
+        for item in collection:
+            value=(item["exception"],item["family"]) if mode=="type" else item["family"]
+            fp=item["fp"]
+            target=folder/(mode+"_"+fp+".js")
+            temp=target.with_suffix(".tmp")
+            temp.write_text("window.AKUZ_ERROR_DETAIL="+js_json(detail(db,fp,mode,value))+";\n",
+                            encoding="utf-8")
+            temp.replace(target)
+    for mode in ("type","family"):
+        existing={g["fp"] for g in summary[mode+"s" if mode=="type" else "families"]}
+        for stale in folder.glob(mode+"_*.js"):
+            if re.fullmatch(mode+r"_[0-9a-f]{24}\.js",stale.name) and stale.stem[len(mode)+1:] not in existing:
+                stale.unlink()
     for fp in live:
         target=folder/("error_"+fp+".js")
         temp=target.with_suffix(".tmp")
@@ -241,6 +338,66 @@ def export(db,root):
     temp=folder/"analytics.js.tmp"
     temp.write_text("window.AKUZ_ANALYTICS="+js_json(summary)+";\n",encoding="utf-8")
     temp.replace(target)
+def source_inventory(root):
+    """Only source metadata from registered AKUZ reports; no remote access."""
+    result={}
+    for rid,meta in load_store(Path(root))["reports"].items():
+        if not REPORT_ID.fullmatch(rid):
+            continue
+        if not (Path(root)/"reports"/rid/"data"/"catalog.js").is_file():
+            continue
+        for idx,info in enumerate(meta.get("sources") or []):
+            identity=source_identity(info)
+            key=identity or hashlib.sha256((rid+":"+str(idx)).encode()).hexdigest()
+            item=result.setdefault(key,dict(id=key,name=str(info.get("name") or "?"),
+              host=str(info.get("host") or "не указан"),
+              remote_path=str(info.get("remote_path") or ""),
+              date=str(info.get("date") or ""),
+              reports=[],conflict=False,bytes_sha=str(info.get("sha256") or "")))
+            item["reports"].append(dict(id=rid,index=idx,label=str(meta.get("label") or rid)))
+            if item["date"]!=str(info.get("date") or ""):
+                item["conflict"]=True
+    return sorted(result.values(),key=lambda x:(x["date"]!="",x["host"],x["name"]))
+
+
+def update_source_date(root,identity,first_date):
+    """Update only matched registered report metadata, never original .log.
+
+    Keep catalog.js/raw shards immutable. An operator override corrects only
+    Error Analytics calendar projections, not the old report's printed date.
+    """
+    if not isinstance(identity,str) or not re.fullmatch("[0-9a-f]{64}",identity):
+        raise ValueError("Некорректный идентификатор источника")
+    if not isinstance(first_date,str):
+        raise ValueError("Неверный тип даты")
+    if first_date:
+        try:
+            if date.fromisoformat(first_date).isoformat()!=first_date:
+                raise ValueError
+        except ValueError as exc:
+            raise ValueError("Дата первой записи должна быть YYYY-MM-DD") from exc
+    with LOCK:
+        store=load_store(Path(root))
+        changed=0
+        for rid,meta in store["reports"].items():
+            if not REPORT_ID.fullmatch(rid):
+                continue
+            if not (Path(root)/"reports"/rid/"data"/"catalog.js").is_file():
+                continue
+            for idx,info in enumerate(meta.get("sources") or []):
+                original=source_identity(info) or hashlib.sha256(
+                    (rid+":"+str(idx)).encode()).hexdigest()
+                if original==identity:
+                    info["date"]=first_date
+                    changed+=1
+        if not changed:
+            raise ValueError("Источник больше не найден, обновите страницу")
+        from akuz_store import save_store
+        save_store(Path(root),store)
+        overview=refresh(root)
+        return dict(updated_reports=changed,overview=overview)
+
+
 def refresh(root):
     """Idempotent processing of *reports*, never a network operation."""
     root=Path(root)

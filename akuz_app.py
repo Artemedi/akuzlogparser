@@ -408,6 +408,9 @@ def make_handler(root: Path, state: State, port: int):
                 return self._json(200, state.snapshot())
             if parsed.path == '/api/reports':
                 return self._json(200, {'reports':report_summary(load_store(root),root)})
+            if parsed.path == '/api/analytics/sources':
+                from akuz_analytics import source_inventory
+                return self._json(200, {'sources':source_inventory(root)})
             if parsed.path == '/errors.html':
                 try:
                     from akuz_analytics import refresh as update_analytics
@@ -492,8 +495,21 @@ def make_handler(root: Path, state: State, port: int):
             if not isinstance(payload,dict):
                 return self._json(400, {'error':'Ожидается объект JSON'})
             endpoint = urlsplit(self.path).path
-            if endpoint not in ('/api/list','/api/build','/api/fetch','/api/clear'):
+            if endpoint not in ('/api/list','/api/build','/api/fetch','/api/clear',
+                                '/api/analytics/source-date'):
                 return self._json(404, {'error':'Не найдено'})
+            if endpoint == '/api/analytics/source-date':
+                with state.lock:
+                    if state.busy:
+                        return self._json(409, {'error':'Дождитесь завершения загрузки журналов'})
+                from akuz_analytics import update_source_date
+                try:
+                    result=update_source_date(root,payload.get('id'),payload.get('date'))
+                except ValueError as exc:
+                    return self._json(400, {'error':str(exc)})
+                except Exception:
+                    return self._json(500, {'error':'Не удалось обновить аналитические даты'})
+                return self._json(200,result)
             if endpoint in ('/api/list', '/api/fetch'):
                 if payload.get('source', 'linux') not in ('linux','windows'):
                     return self._json(400, {'error':'Неизвестный источник'})
@@ -536,7 +552,7 @@ def make_handler(root: Path, state: State, port: int):
 
 
 def main():
-    p=argparse.ArgumentParser(description='AKUZ Explorer v4.1 · inventory, dated reports, cache')
+    p=argparse.ArgumentParser(description='AKUZ Explorer v4.2.1 · AKUZ logs and Error Analytics')
     p.add_argument('--port',type=int,default=8765)
     p.add_argument('--no-browser',action='store_true')
     args=p.parse_args()
@@ -546,7 +562,7 @@ def main():
         server=ThreadingHTTPServer(('127.0.0.1',args.port),make_handler(ROOT,STATE,args.port))
     except OSError as exc:
         p.error(f'Cannot start on 127.0.0.1:{args.port}: {exc}')
-    print(f'AKUZ Log Explorer v4.1: http://127.0.0.1:{args.port}/\nОстановка: Ctrl+C',flush=True)
+    print(f'AKUZ Log Explorer v4.2.1: http://127.0.0.1:{args.port}/\nОстановка: Ctrl+C',flush=True)
     if not args.no_browser:
         threading.Timer(0.6, lambda:webbrowser.open(f'http://127.0.0.1:{args.port}/')).start()
     try:

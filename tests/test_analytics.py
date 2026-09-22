@@ -6,7 +6,7 @@ import shutil
 import unittest
 
 import akuz_app as app
-from akuz_analytics import recognize_error,refresh,connect,detail,read_js
+from akuz_analytics import recognize_error,refresh,connect,detail,read_js,source_inventory,update_source_date
 from akuz_store import load_store,save_store,sha256
 
 
@@ -165,6 +165,51 @@ class ErrorAnalyticsTests(unittest.TestCase):
         self.assertEqual(summary["distinct_errors"],2)
         self.assertEqual(summary["date_conflicts"],0)
 
+    def test_date_override_in_merged_report_shifts_only_selected_source(self):
+        first=self.root/"a.log"
+        second=self.root/"b.log"
+        first.write_text(self.event("15:00:00.100","11"),encoding="utf-8")
+        second.write_text(self.event("16:00:00.100","22"),encoding="utf-8")
+        selected=[]
+        for file,day in ((first,"2026-09-21"),(second,"2026-09-22")):
+            selected.append(dict(local=file,remote=dict(name=file.name,
+                         path="/srv/akuz/"+file.name,mtime=1),
+                         sha=sha256(file),date=day))
+        joined=self.root/"joined.jsonl"
+        app._combine_sources(selected,joined,date(2026,9,21))
+        sources=[dict(name=x["remote"]["name"],date=x["date"],
+                      sha256=x["sha"],remote_path=x["remote"]["path"],
+                      host="host-a") for x in selected]
+        report=app._publish(self.root,self.store,"merged-date-test",
+                            joined,date(2026,9,21),sources,"combined","combined")
+        first_summary=refresh(self.root)
+        group=first_summary["groups"][0]
+        with connect(self.root) as db:
+            initial=detail(db,group["fp"])
+            self.assertEqual(initial["days"],
+                             [("2026-09-21",1),("2026-09-22",1)])
+            self.assertEqual(initial["relative_days"],[("D+0",2)])
+        original_catalog=(self.root/"reports"/report["id"]/"data"/"catalog.js").read_bytes()
+        target=next(x for x in source_inventory(self.root) if x["name"]=="b.log")
+        update_source_date(self.root,target["id"],"2026-09-23")
+        with connect(self.root) as db:
+            self.assertEqual(detail(db,group["fp"])["days"],
+                             [("2026-09-21",1),("2026-09-23",1)])
+        self.assertEqual((self.root/"reports"/report["id"]/"data"/"catalog.js").read_bytes(),
+                         original_catalog)
+
+    def test_html_has_readable_groups_and_date_controls(self):
+        root=Path(__file__).resolve().parents[1]
+        page=(root/"errors.html").read_text("utf-8")
+        style=(root/"style.css").read_text("utf-8")
+        script=(root/"errors.js").read_text("utf-8")
+        self.assertIn('id="group-mode"',page)
+        self.assertIn('id="date-sources"',page)
+        self.assertIn('id="date-toggle"',page)
+        self.assertIn('button.analytics-group{display:flex',style)
+        self.assertIn("state.temporal==='relative'",script)
+        self.assertIn("/api/analytics/source-date",script)
+
     def test_local_html_api_serves_analytics_and_event_navigation(self):
         import http.client
         import threading
@@ -197,6 +242,20 @@ class ErrorAnalyticsTests(unittest.TestCase):
                 self.assertEqual(group.status,200)
                 self.assertIn("window.AKUZ_ERROR_DETAIL=",
                               group.read().decode("utf-8"))
+                source_id=source_inventory(self.root)[0]["id"]
+                conn.request("GET","/api/analytics/sources")
+                sources_response=conn.getresponse()
+                self.assertEqual(sources_response.status,200)
+                self.assertIn(source_id,sources_response.read().decode("utf-8"))
+                import json
+                conn.request("POST","/api/analytics/source-date",
+                    body=json.dumps({"id":source_id,"date":"2026-09-21"}),
+                    headers={"Origin":"http://127.0.0.1:"+str(server.server_port),
+                             "Content-Type":"application/json"})
+                saved=conn.getresponse()
+                self.assertEqual(saved.status,200)
+                self.assertEqual(json.loads(saved.read().decode("utf-8"))["updated_reports"],1)
+                self.assertEqual(source_inventory(self.root)[0]["date"],"2026-09-21")
                 conn.request("GET","/reports/"+report["id"]+"/event.html?id=1")
                 event=conn.getresponse()
                 self.assertEqual(event.status,200)
@@ -207,6 +266,57 @@ class ErrorAnalyticsTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             worker.join(timeout=3)
+
+    def test_analytics_groups_by_type_without_losing_exact_groups(self):
+        sample=self.event("12:00:00.100","1234")+(
+            "12:30:00.100,AKUZ,session,user: "
+            "System.Runtime.Serialization.SerializationException: Failed export 55\\n"
+            " at AKUZ.Serialize()\\n")
+        self.report("two_errors",sample)
+        state=refresh(self.root)
+        self.assertEqual(state["distinct_errors"],2)
+        self.assertEqual(len(state["groups"]),2)
+        self.assertEqual(len(state["types"]),1)
+        self.assertEqual(state["types"][0]["total"],2)
+        with connect(self.root) as db:
+            kind=state["types"][0]
+            group=detail(db,kind["fp"],"type",(kind["exception"],kind["family"]))
+        self.assertEqual(group["total"],2)
+        self.assertEqual(group["relative_hours"],[("D+0 12",2)])
+        self.assertTrue((self.root/"data"/("type_"+kind["fp"]+".js")).exists())
+
+    def test_undated_errors_have_relative_day_and_hour_graph(self):
+        sample=(self.event("23:59:00.100","1")+
+                self.event("00:01:00.100","2"))
+        self.report("night",sample,base=None)
+        state=refresh(self.root)
+        self.assertEqual(state["groups"][0]["dated"],0)
+        fp=state["groups"][0]["fp"]
+        with connect(self.root) as db:
+            result=detail(db,fp)
+        self.assertEqual(result["relative_days"],[("D+0",1),("D+1",1)])
+        self.assertEqual(result["relative_hours"],
+                         [("D+0 23",1),("D+1 00",1)])
+        self.assertEqual(result["days"],[])
+
+    def test_assign_date_to_existing_undated_report_without_reparsing(self):
+        report=self.report("old_undated",self.event("13:00:00.100"),base=None)
+        before=refresh(self.root)
+        self.assertEqual(before["groups"][0]["dated"],0)
+        sources=source_inventory(self.root)
+        self.assertEqual(len(sources),1)
+        self.assertEqual(sources[0]["date"],"")
+        catalog=self.root/"reports"/report["id"]/"data"/"catalog.js"
+        original=catalog.read_bytes()
+        result=update_source_date(self.root,sources[0]["id"],"2026-09-22")
+        self.assertEqual(result["updated_reports"],1)
+        self.assertEqual(result["overview"]["groups"][0]["dated"],1)
+        self.assertEqual(catalog.read_bytes(),original)
+        self.assertEqual(refresh(self.root)["groups"][0]["dated"],1)
+        updated=source_inventory(self.root)
+        self.assertEqual(updated[0]["date"],"2026-09-22")
+        with self.assertRaises(ValueError):
+            update_source_date(self.root,updated[0]["id"],"22.09.2026")
 
     def test_combined_report_does_not_recount_singles(self):
         single=self.event("12:00:00.100")

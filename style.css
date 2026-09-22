@@ -40,3 +40,28 @@ button,.btn,select,input{font:inherit;color:var(--txt);border:1px solid var(--li
 .analytics-table{width:100%;min-width:460px;font-variant-numeric:tabular-nums}
 @media(max-width:980px){.analytics-layout{grid-template-columns:1fr}.analytics-left{position:static;max-height:none}.analytics-groups{max-height:320px}.analytics-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:500px){.analytics-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.analytics-title{font-size:20px}}
+
+
+/* v4.2 analytics usability fixes: full-height readable list buttons. */
+.analytics-groups{display:flex;flex-direction:column;align-items:stretch;gap:9px}
+button.analytics-group{display:flex;flex-direction:column;flex:0 0 auto;align-items:stretch;
+  width:100%;min-height:81px;padding:11px 13px;line-height:1.45;
+  color:var(--txt);background:var(--pane2);border:1px solid var(--line)}
+button.analytics-group strong{display:block;color:var(--txt);font-size:13px;line-height:1.4;min-height:18px}
+button.analytics-group .sub{display:block;color:var(--muted);font-size:12px;min-height:17px}
+button.analytics-group .analytics-group-footer{width:100%;min-height:21px;flex:0 0 auto}
+button.analytics-group .tag{color:var(--txt);max-width:63%;overflow:hidden;text-overflow:ellipsis}
+button.analytics-group .analytics-count{color:var(--accent);white-space:nowrap}
+.analytics-date-panel{margin-bottom:17px}
+.analytics-date-header{display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap}
+.analytics-date-header h2{margin:0 0 7px}.analytics-date-header p{max-width:950px;margin:0}
+.analytics-source{display:grid;grid-template-columns:minmax(180px,1fr) 160px auto;
+  align-items:end;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.analytics-source .source-name{min-width:0;overflow-wrap:anywhere}
+.analytics-source .source-name strong{display:block}
+.analytics-source .source-name .sub{display:block;overflow-wrap:anywhere}
+.analytics-source input[type=date]{width:160px;max-width:100%}
+.analytics-source button{white-space:nowrap}
+.analytics-relative-note{padding:12px;border-radius:10px;border:1px solid var(--line);color:var(--muted);margin:12px 0}
+@media(max-width:690px){.analytics-source{grid-template-columns:minmax(0,1fr);gap:8px}
+.analytics-source input[type=date]{width:100%}}
