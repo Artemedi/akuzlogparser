@@ -67,3 +67,10 @@ button.analytics-group .analytics-count{color:var(--accent);white-space:nowrap}
 .analytics-source input[type=date]{width:100%}}
 
 .btn[aria-disabled="true"]{opacity:.5;cursor:wait;}
+/* Historical snapshots share a visual group, not an analytical total. */
+.library-report-group{border:1px solid var(--line);border-radius:10px;margin:10px 0;overflow:hidden}
+.library-report-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:var(--pane2)}
+.library-report-heading strong{overflow-wrap:anywhere}
+.library-report-group .library-item{padding:9px 12px}
+.library-report-group .library-item:last-child{border-bottom:0}
+.library-current{color:var(--accent);border-color:var(--accent)}

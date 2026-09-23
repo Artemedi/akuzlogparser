@@ -49,3 +49,44 @@ test('analytics stays locked during a batch, including file-list rendering, and 
   assert.equal(get('open-analytics').attrs['aria-disabled'],'true');
   await action;await flush();
 });
+
+test('report library groups versions by verified source identity, without summing events',async()=>{
+  const nodes=new Map();
+  const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
+  const make=(id,created,events,remote_path,kind='single',host='app1')=>({
+    id,created,events,kind,url:'/reports/'+id+'/index.html',
+    label:'20260923_server.log · 2026-09-23',
+    sources:[{host,remote_path,date:'2026-09-23'}]
+  });
+  const reports=[
+    make('new','2026-09-23T12:03:24',101282,'/srv/a/20260923_server.log'),
+    make('old','2026-09-23T10:17:13',74356,'/srv/a/20260923_server.log'),
+    make('another-path','2026-09-23T09:00:00',500,'/srv/b/20260923_server.log'),
+    make('another-host','2026-09-23T08:00:00',500,'/srv/a/20260923_server.log','single','app2'),
+    make('combined','2026-09-23T07:00:00',200000,'/srv/a/20260923_server.log','combined')
+  ];
+  const context={
+    document:{getElementById:get,createElement:()=>new Element()},
+    location:{hostname:'127.0.0.1',protocol:'http:',pathname:'/',assign(){}},
+    setTimeout:()=>1,clearTimeout(){},confirm:()=>true,
+    fetch:async url=>({ok:true,json:async()=>url==='/api/status'?
+      {busy:false,source:'linux',listing:[],stage:'Ready'}:
+      url==='/api/reports'?{reports}:{started:true}})
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../app_controls.js'),'utf8'),context);
+  await new Promise(resolve=>setImmediate(resolve));
+  const entries=get('report-items').children;
+  assert.equal(entries.length,4,'different paths, hosts and merged reports remain separate');
+  assert.equal(entries[0].className,'library-report-group');
+  assert.equal(entries[0].children.length,3);
+  assert.match(entries[0].children[0].children[1].textContent,/не суммируются/);
+  assert.equal(entries[0].children[1].children[0].href,'/reports/new/index.html');
+  assert.equal(entries[0].children[1].children[1].textContent,'Последний снимок');
+  assert.match(entries[0].children[1].children[2].textContent,/101/);
+  assert.equal(entries[0].children[2].children[0].href,'/reports/old/index.html');
+  assert.equal(entries[0].children[2].children[1].textContent,'Предыдущий снимок');
+  assert.match(entries[0].children[2].children[2].textContent,/74/);
+  assert.equal(entries[1].children[0].href,'/reports/another-path/index.html');
+  assert.equal(entries[2].children[0].href,'/reports/another-host/index.html');
+  assert.equal(entries[3].children[0].href,'/reports/combined/index.html');
+});

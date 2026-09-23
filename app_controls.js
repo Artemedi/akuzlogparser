@@ -54,7 +54,67 @@
     showPicker(!pickerCollapsed);updateCount();
   }
   function updateCount(){const sel=files.filter(x=>x.checked).length;$('picker-count').textContent='Доступно '+files.length+' · показано '+collection.children.length+' · выбрано '+sel+' (максимум 30)';$('picker-build').disabled=busyNow||!sel||sel>30}
-  async function getReports(){try{const r=await fetch('/api/reports',{cache:'no-store'});if(!r.ok)throw Error('Не удалось прочитать библиотеку');const data=await r.json();const lib=$('report-library'),items=$('report-items');items.replaceChildren();for(const report of data.reports){const row=document.createElement('div');row.className='library-item';const a=document.createElement('a');a.href=report.url;a.textContent=(report.kind==='combined'?'▦ ':'▤ ')+report.label;row.appendChild(a);const detail=document.createElement('span');detail.className='sub';detail.textContent=Number(report.events).toLocaleString('ru-RU')+' событий · '+report.created;row.appendChild(detail);items.appendChild(row)}lib.hidden=!data.reports.length}catch(e){status.textContent='Библиотека: '+e.message}}
+  // Only a documented single-source identity may join historical snapshots.
+  // Equal display names alone do not prove that two reports came from one log.
+  function reportGroupKey(report){
+    const sources=Array.isArray(report.sources)?report.sources:[];
+    if(report.kind!=='single'||sources.length!==1)return 'report:'+report.id;
+    const source=sources[0];
+    if(!source.host||!source.remote_path)return 'report:'+report.id;
+    return 'source:'+JSON.stringify([source.host,source.remote_path,source.date||'']);
+  }
+  function appendReportRow(parent,report,snapshotIndex=-1){
+    const row=document.createElement('div');
+    row.className='library-item'+(snapshotIndex>=0?' library-snapshot':'');
+    const a=document.createElement('a');
+    a.href=report.url;
+    a.textContent=snapshotIndex>=0?'▤ Открыть снимок':(report.kind==='combined'?'▦ ':'▤ ')+report.label;
+    row.appendChild(a);
+    if(snapshotIndex>=0){
+      const marker=document.createElement('span');
+      marker.className='tag'+(snapshotIndex===0?' library-current':'');
+      marker.textContent=snapshotIndex===0?'Последний снимок':'Предыдущий снимок';
+      row.appendChild(marker);
+    }
+    const detail=document.createElement('span');
+    detail.className='sub';
+    detail.textContent=Number(report.events).toLocaleString('ru-RU')+' событий · '+report.created;
+    row.appendChild(detail);
+    parent.appendChild(row);
+  }
+  async function getReports(){
+    try{
+      const r=await fetch('/api/reports',{cache:'no-store'});
+      if(!r.ok)throw Error('Не удалось прочитать библиотеку');
+      const data=await r.json(),lib=$('report-library'),items=$('report-items');
+      items.replaceChildren();
+      const groups=new Map();
+      for(const report of data.reports){
+        const key=reportGroupKey(report);
+        if(!groups.has(key))groups.set(key,[]);
+        groups.get(key).push(report);
+      }
+      for(const reports of groups.values()){
+        if(reports.length===1){appendReportRow(items,reports[0]);continue}
+        reports.sort((a,b)=>String(b.created).localeCompare(String(a.created)));
+        const group=document.createElement('div');
+        group.className='library-report-group';
+        const heading=document.createElement('div');
+        heading.className='library-report-heading';
+        const name=document.createElement('strong');
+        name.textContent=reports[0].label;
+        heading.appendChild(name);
+        const note=document.createElement('span');
+        note.className='sub';
+        note.textContent='Снимков: '+reports.length+' · события указаны для каждого снимка, не суммируются';
+        heading.appendChild(note);
+        group.appendChild(heading);
+        reports.forEach((report,i)=>appendReportRow(group,report,i));
+        items.appendChild(group);
+      }
+      lib.hidden=!data.reports.length;
+    }catch(e){status.textContent='Библиотека: '+e.message}
+  }
   async function refresh(){
     try{
       const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const s=await r.json();setBusy(!!s.busy);
