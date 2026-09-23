@@ -39,7 +39,7 @@ class LocalSourceTests(unittest.TestCase):
         nested.mkdir()
         (nested / 'secret.log').write_text('not a top-level log')
         cfg = load_local_config(str(self.logs), self.root)
-        self.assertEqual(cfg.local_dest, self.root / 'downloads')
+        self.assertEqual(cfg.local_dest, (self.root / 'downloads').resolve())
         self.assertTrue(cfg.host.startswith('local:'))
         found = list_local(cfg)
         self.assertEqual([item['name'] for item in found], [first.name])
