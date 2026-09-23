@@ -417,7 +417,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
 
 # v3: preserve offline reader and add a button only enabled on localhost.
 FETCH_PANEL = r"""<section class="panel" id="fetch-panel" style="margin-bottom:17px">
-<div class="fetchbar"><div><div class="eyebrow">SSH · коллекция журналов · v4.3.0</div><h2 style="font-size:18px;margin:4px 0">Журналы по датам</h2>
+<div class="fetchbar"><div><div class="eyebrow">SSH · коллекция журналов · v4.3.1</div><h2 style="font-size:18px;margin:4px 0">Журналы по датам</h2>
 <p class="small">Выбери один или несколько файлов, проверь дату из имени и открой отдельные отчёты или общую выборку.</p>
 <div id="fetch-status" class="status" role="status">Проверка локального сервиса…</div></div>
 <div class="actions"><button class="primary" id="fetch-latest">↓ Последний лог</button><button id="fetch-list">↻ Список файлов</button><button id="picker-toggle" type="button" aria-controls="remote-picker" aria-expanded="false" hidden>▾ Показать файлы</button><button id="fetch-cache">⌫ Очистить кэш</button><label class="small"><input type="checkbox" id="clear-reports"> Включая отчёты v4</label><a class="btn" id="fetch-open" href="#" hidden>Открыть отчёт →</a></div></div>
