@@ -3,6 +3,15 @@
   const analytics=document.getElementById('open-analytics');
   if(analytics)analytics.href=location.pathname.includes('/reports/')?'../../errors.html':'errors.html';
   const panel=document.getElementById('fetch-panel'); if(!panel)return;
+  // Previously generated reports have no source selector; do not crash their reader.
+  if(!document.getElementById('fetch-source') || !document.getElementById('local-path')){
+    const status=document.getElementById('fetch-status');
+    if(status)status.textContent='Отчёт создан старой версией. Для новых загрузок откройте главную страницу Explorer.';
+    for(const id of ['fetch-latest','fetch-list','fetch-cache','picker-build']){
+      const control=document.getElementById(id);if(control)control.disabled=true;
+    }
+    return;
+  }
   const $=id=>document.getElementById(id);
   const buttons=['fetch-latest','fetch-list','fetch-cache','picker-build','picker-select-all','picker-select-none'];
   const isLocal=/^(127\.0\.0\.1|localhost)$/.test(location.hostname)&&location.protocol==='http:';
@@ -25,9 +34,12 @@
     }
     for(const id of ['fetch-latest','fetch-list','fetch-cache'])$(id).disabled=busy;
     $('fetch-source').disabled=busy;
+    $('local-path').disabled=busy;
     $('picker-build').disabled=busy||!files.some(x=>x.checked)||files.filter(x=>x.checked).length>30;
   }
   async function jsonRequest(path,body){const r=await fetch(path,{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let data=await r.json();if(!r.ok)throw Error(data.error||'HTTP '+r.status);return data}
+  function showLocalPath(){ $('local-path-panel').hidden=$('fetch-source').value!=='local'; }
+  function localSelection(){return {source:$('fetch-source').value,local_path:$('fetch-source').value==='local'?$('local-path').value.trim():''};}
   function showPicker(expanded){
     pickerCollapsed=!expanded;
     picker.hidden=pickerCollapsed || !files.length;
@@ -118,8 +130,8 @@
   async function refresh(){
     try{
       const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const s=await r.json();setBusy(!!s.busy);
-      if(!initialSourceLoaded){$('fetch-source').value=s.source||'linux';initialSourceLoaded=true}
-      if(!s.busy && !s.error && ['list','build','latest'].includes(awaitAction))$('fetch-source').value=s.source||'linux';
+      if(!initialSourceLoaded){$('fetch-source').value=s.source||'linux';$('local-path').value=s.local_path||'';initialSourceLoaded=true;showLocalPath()}
+      if(!s.busy && !s.error && ['list','build','latest'].includes(awaitAction)){$('fetch-source').value=s.source||'linux';showLocalPath()}
       status.textContent=s.error?'Ошибка: '+s.error:s.stage;
       const signature=(s.source||'linux')+'|'+s.listing.map(f=>f.id+String(f.cached)).join('|');
       if(signature!==renderKey){
@@ -151,12 +163,16 @@
     awaitAction=name;setBusy(true);status.textContent='Отправляю команду…';link.hidden=true;
     try{await jsonRequest(endpoint,body);refresh()}catch(e){awaitAction='';status.textContent='Ошибка: '+e.message;setBusy(false)}
   }
-  $('fetch-source').addEventListener('change',()=>{
+  function clearSelectedFiles(){
     files=[];renderKey='';collection.replaceChildren();showPicker(false);updateCount();
-    status.textContent='Выбран источник: '+($('fetch-source').value==='windows'?'Windows · SMB':'Linux · SSH')+'. Нажмите «Список файлов».';
+  }
+  $('fetch-source').addEventListener('change',()=>{
+    clearSelectedFiles();showLocalPath();
+    status.textContent='Выбран источник: '+($('fetch-source').value==='windows'?'Windows · SMB':$('fetch-source').value==='local'?'Локальный файл / папка':'Linux · SSH')+'. Нажмите «Список файлов».';
   });
-  $('fetch-latest').addEventListener('click',()=>action('/api/fetch',{source:$('fetch-source').value},'latest'));
-  $('fetch-list').addEventListener('click',()=>action('/api/list',{source:$('fetch-source').value},'list'));
+  $('local-path').addEventListener('input',()=>{clearSelectedFiles();status.textContent='Путь изменён. Нажмите «Список файлов».'});
+  $('fetch-latest').addEventListener('click',()=>action('/api/fetch',localSelection(),'latest'));
+  $('fetch-list').addEventListener('click',()=>action('/api/list',localSelection(),'list'));
   $('picker-toggle').addEventListener('click',()=>showPicker(pickerCollapsed));
   $('picker-build').addEventListener('click',()=>{
     const selected=files.filter(f=>f.checked).map(f=>({id:f.id,date:f.date||''}));
@@ -176,5 +192,5 @@
   $('picker-today').addEventListener('click',()=>{$('picker-from').value='';$('picker-to').value='';renderFiles()});
   $('picker-select-all').addEventListener('click',()=>{const ids=new Set([...collection.children].map(x=>x.dataset.fid));for(const f of files)if(ids.has(f.id))f.checked=true;renderFiles()});
   $('picker-select-none').addEventListener('click',()=>{for(const f of files)f.checked=false;renderFiles()});
-  setBusy(true);refresh();getReports();
+  showLocalPath();setBusy(true);refresh();getReports();
 })();

@@ -417,10 +417,11 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
 
 # v3: preserve offline reader and add a button only enabled on localhost.
 FETCH_PANEL = r"""<section class="panel" id="fetch-panel" style="margin-bottom:17px">
-<div class="fetchbar"><div><div class="eyebrow">SSH · коллекция журналов · v4.3.1</div><h2 style="font-size:18px;margin:4px 0">Журналы по датам</h2>
+<div class="fetchbar"><div><div class="eyebrow">SSH / Windows / Local · коллекция журналов · v4.4.0</div><h2 style="font-size:18px;margin:4px 0">Журналы по датам</h2>
 <p class="small">Выбери один или несколько файлов, проверь дату из имени и открой отдельные отчёты или общую выборку.</p>
 <div id="fetch-status" class="status" role="status">Проверка локального сервиса…</div></div>
-<div class="actions"><button class="primary" id="fetch-latest">↓ Последний лог</button><button id="fetch-list">↻ Список файлов</button><button id="picker-toggle" type="button" aria-controls="remote-picker" aria-expanded="false" hidden>▾ Показать файлы</button><button id="fetch-cache">⌫ Очистить кэш</button><label class="small"><input type="checkbox" id="clear-reports"> Включая отчёты v4</label><a class="btn" id="fetch-open" href="#" hidden>Открыть отчёт →</a></div></div>
+<div class="actions"><label class="small">Источник <select id="fetch-source" aria-label="Источник журналов"><option value="linux">Linux · SSH</option><option value="windows">Windows · SMB / UNC</option><option value="local">Локальный .log / папка</option></select></label><button class="primary" id="fetch-latest">↓ Последний лог</button><button id="fetch-list">↻ Список файлов</button><button id="picker-toggle" type="button" aria-controls="remote-picker" aria-expanded="false" hidden>▾ Показать файлы</button><button id="fetch-cache">⌫ Очистить кэш</button><label class="small"><input type="checkbox" id="clear-reports"> Включая отчёты v4</label><a class="btn" id="fetch-open" href="#" hidden>Открыть отчёт →</a></div></div>
+<div id="local-path-panel" class="local-source" hidden><label for="local-path">Путь к локальному .log или папке журналов на компьютере, где запущен Explorer</label><input id="local-path" type="text" placeholder="C:\AKUZ\Logs или C:\AKUZ\Logs\20260923_server.log" autocomplete="off" spellcheck="false" maxlength="2048"><p class="small">Укажите полный путь. Только файлы .log, без вложенных каталогов; исходные файлы не меняются. UNC-папки — через Windows · SMB.</p></div>
 <div id="remote-picker" hidden><div class="pickerbar"><span id="picker-count" class="sub"></span><label>Дата изменения на сервере с <input type="date" id="picker-from"></label><label>по <input type="date" id="picker-to"></label><button id="picker-today">Сбросить даты</button><button id="picker-select-all">Выбрать видимые</button><button id="picker-select-none">Снять выделение</button></div>
 <div class="filelist" id="picker-files"></div><div class="pickerbar"><button class="primary" id="picker-build">Создать отчёты по выбранным файлам</button><span class="small">Дата первой записи берётся из имени YYYYMMDD_*.log. Её можно исправить вручную.</span></div></div>
 <div id="report-library" class="library" hidden><h3>Мои отчёты</h3><div id="report-items"></div></div>
@@ -434,6 +435,20 @@ CSS += "\n.fetchbar{display:flex;align-items:center;justify-content:space-betwee
 CSS += r"""
 .pickerbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0}.pickerbar label{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:5px}.filelist{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px}.fileitem{display:grid;grid-template-columns:22px minmax(190px,1fr) 155px 88px 175px;align-items:center;gap:12px;padding:11px;border-bottom:1px solid var(--line)}.fileitem:last-child{border-bottom:0}.fileitem .name{overflow-wrap:anywhere;font-weight:600}.fileitem .sub{display:block}.fileitem input[type=date]{max-width:155px}.library{border-top:1px solid var(--line);margin-top:17px;padding-top:12px}.library h3{font-size:14px}.library-item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}.library-item a{overflow-wrap:anywhere}.fetchbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
 @media(max-width:700px){.fileitem{grid-template-columns:22px minmax(0,1fr);gap:8px}.fileitem .name{grid-column:2}.fileitem .sizedate{grid-column:2}.fileitem .firstdate{grid-column:2}}
+"""
+CSS += r"""
+.library-report-group{border:1px solid var(--line);border-radius:10px;margin:10px 0;overflow:hidden}
+.library-report-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:var(--pane2)}
+.library-report-heading strong{overflow-wrap:anywhere}
+.library-report-group .library-item{padding:9px 12px}
+.library-report-group .library-item:last-child{border-bottom:0}
+.library-current{color:var(--accent);border-color:var(--accent)}
+
+.local-source{display:grid;gap:7px;margin-top:14px;max-width:100%}
+.local-source[hidden]{display:none}
+.local-source label{font-size:12px;color:var(--muted)}
+.local-source input{width:100%;font-family:ui-monospace,Consolas,monospace}
+.local-source .small{margin:0}
 """
 CAT_EXTRA: set[str] = set()
 

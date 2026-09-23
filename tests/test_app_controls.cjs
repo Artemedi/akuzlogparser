@@ -90,3 +90,49 @@ test('report library groups versions by verified source identity, without summin
   assert.equal(entries[2].children[0].href,'/reports/another-host/index.html');
   assert.equal(entries[3].children[0].href,'/reports/combined/index.html');
 });
+
+test('local input is sent to list/latest, restored from status and clears stale file choices',async()=>{
+  const nodes=new Map();
+  const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
+  const posted=[];
+  const context={
+    document:{getElementById:get,createElement:()=>new Element()},
+    location:{hostname:'127.0.0.1',protocol:'http:',pathname:'/',assign(){}},
+    setTimeout:()=>1,clearTimeout(){},confirm:()=>true,
+    fetch:async (url,options)=>{
+      if(options&&options.method==='POST')posted.push([url,JSON.parse(options.body)]);
+      return {ok:true,json:async()=>url==='/api/status'?
+        {busy:false,source:'local',local_path:'C:\\AKUZ\\Logs',listing:[],stage:'Ready'}:
+        url==='/api/reports'?{reports:[]}:{started:true}};
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../app_controls.js'),'utf8'),context);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(get('fetch-source').value,'local');
+  assert.equal(get('local-path-panel').hidden,false);
+  assert.equal(get('local-path').value,'C:\\AKUZ\\Logs');
+  get('local-path').value='D:\\AKUZ Logs';
+  get('local-path').listeners.input();
+  assert.equal(get('picker-files').children.length,0);
+  await get('fetch-list').listeners.click();
+  assert.equal(posted[0][0],'/api/list');
+  assert.equal(posted[0][1].local_path,'D:\\AKUZ Logs');
+  await get('fetch-latest').listeners.click();
+  assert.equal(posted[1][0],'/api/fetch');
+  assert.equal(posted[1][1].source,'local');
+  get('fetch-source').value='linux';
+  get('fetch-source').listeners.change();
+  assert.equal(get('local-path-panel').hidden,true);
+});
+
+test('legacy HTML reports without source controls do not break the reader',()=>{
+  const nodes=new Map();
+  const get=id=>{if(id==='fetch-source'||id==='local-path')return null;
+    if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../app_controls.js'),'utf8'),{
+    document:{getElementById:get},
+    location:{hostname:'127.0.0.1',protocol:'http:',pathname:'/reports/v4_old/index.html'}
+  });
+  assert.match(get('fetch-status').textContent,/старой версией/);
+  assert.equal(get('fetch-latest').disabled,true);
+});

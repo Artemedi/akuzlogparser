@@ -74,6 +74,40 @@ def main():
                         raise
                 else:
                     raise RuntimeError('Config must not be served over HTTP')
+                # Exercise the packaged LOCAL path source end-to-end, without SSH
+                # credentials, network shares, or Python on the child PATH.
+                source_folder = root / 'Локальные журналы'
+                source_folder.mkdir()
+                local_log = source_folder / '20260923_smoke.log'
+                original = ('12:00:00.000,AKUZ,s1,user: '
+                            'System.InvalidOperationException: Failed patient 1234\n'
+                            ' at AKUZ.Serialize()\n').encode('utf-8')
+                local_log.write_bytes(original)
+                for endpoint, local_path in (('/api/list', source_folder),
+                                             ('/api/fetch', local_log)):
+                    payload = json.dumps(dict(source='local', local_path=str(local_path))).encode('utf-8')
+                    req = urllib.request.Request(base + endpoint, data=payload, method='POST',
+                         headers={'Origin':base, 'Content-Type':'application/json'})
+                    with opener.open(req, timeout=15) as response:
+                        if response.status != 202:
+                            raise RuntimeError('Local source refused: '+endpoint)
+                    until = time.monotonic() + 45
+                    while True:
+                        with opener.open(base+'/api/status',timeout=5) as response:
+                            status = json.load(response)
+                        if not status['busy']:
+                            if status.get('error'):
+                                raise RuntimeError('Local source: '+status['error'])
+                            break
+                        if time.monotonic() > until:
+                            raise RuntimeError('Local source timed out: '+endpoint)
+                        time.sleep(.1)
+                if status['result']['reports'][0]['events'] != 1:
+                    raise RuntimeError('Local file failed to produce a report')
+                if local_log.read_bytes() != original:
+                    raise RuntimeError('Local input file was modified')
+                if not (app/'cache'/'inventory.json').is_file():
+                    raise RuntimeError('Local source did not register the report')
                 if config.read_bytes() != saved_config:
                     raise RuntimeError('Operator config was overwritten')
                 if not (app/'cache'/'error_analytics.sqlite').is_file():

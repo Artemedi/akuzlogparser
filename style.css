@@ -74,3 +74,9 @@ button.analytics-group .analytics-count{color:var(--accent);white-space:nowrap}
 .library-report-group .library-item{padding:9px 12px}
 .library-report-group .library-item:last-child{border-bottom:0}
 .library-current{color:var(--accent);border-color:var(--accent)}
+
+.local-source{display:grid;gap:7px;margin-top:14px;max-width:100%}
+.local-source[hidden]{display:none}
+.local-source label{font-size:12px;color:var(--muted)}
+.local-source input{width:100%;font-family:ui-monospace,Consolas,monospace}
+.local-source .small{margin:0}

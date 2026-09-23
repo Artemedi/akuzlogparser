@@ -16,6 +16,7 @@ import webbrowser
 
 from akuz_fetch import FetchError, fetch_selected, list_remote, load_config
 from akuz_windows import fetch_windows, list_windows, load_windows_config
+from akuz_local import fetch_local, list_local, load_local_config
 from akuz_html_explorer import generate
 from akuz_log_parser import event_stream
 from akuz_store import (cached_download, cached_report, clear_cache, key_for,
@@ -41,6 +42,7 @@ class State:
         self.result = None
         self.listing = []
         self.source = 'linux'
+        self.local_path = ''
         self.started = None
         self.notice = ''
 
@@ -48,6 +50,7 @@ class State:
         with self.lock:
             return dict(busy=self.busy, stage=self.stage, error=self.error,
                         result=self.result, listing=self.listing, source=self.source,
+                         local_path=self.local_path,
                         started=self.started, notice=self.notice)
 
     def set_stage(self, stage):
@@ -82,25 +85,35 @@ def _worker(state, root, action, *args):
             state.busy = False
 
 
-def source_config(root: Path, source: str):
+def source_config(root: Path, source: str, local_path: str = ''):
     if source == 'linux':
         return load_config(root/'ConnectConf.cfg', root)
     if source == 'windows':
         return load_windows_config(root/'ConnectConf.cfg', root)
+    if source == 'local':
+        return load_local_config(local_path, root)
     raise FetchError('Неизвестный источник журналов')
 
 
 def source_list(cfg, source, notify):
-    return list_windows(cfg, notify) if source == 'windows' else list_remote(cfg, notify)
+    if source == 'windows':
+        return list_windows(cfg, notify)
+    if source == 'local':
+        return list_local(cfg, notify)
+    return list_remote(cfg, notify)
 
 
 def source_fetch(cfg, source, remote, notify):
-    return fetch_windows(cfg, remote, notify) if source == 'windows' else fetch_selected(cfg, remote, notify)
+    if source == 'windows':
+        return fetch_windows(cfg, remote, notify)
+    if source == 'local':
+        return fetch_local(cfg, remote, notify)
+    return fetch_selected(cfg, remote, notify)
 
 
-def perform_list(root: Path, state: State, list_fn=list_remote, source='linux'):
-    cfg = source_config(root, source)
-    listing = source_list(cfg, source, state.set_stage) if source == 'windows' else list_fn(cfg, state.set_stage)
+def perform_list(root: Path, state: State, list_fn=list_remote, source='linux', local_path=''):
+    cfg = source_config(root, source, local_path)
+    listing = list_fn(cfg, state.set_stage) if source == 'linux' else source_list(cfg, source, state.set_stage)
     store = load_store(root)
     for file in listing:
         file['date'] = date_from_log_name(file['name'])
@@ -108,7 +121,8 @@ def perform_list(root: Path, state: State, list_fn=list_remote, source='linux'):
     with state.lock:
         state.listing = listing
         state.source = source
-        state.notice = f'На сервере найдено {len(listing)} журналов'
+        state.local_path = cfg.remote_log_dir if source == 'local' else ''
+        state.notice = f'Найдено {len(listing)} журналов'
         state.stage = 'Список файлов обновлён'
 
 
@@ -185,8 +199,9 @@ def perform_build(root: Path, state: State, selections,
                   fetch_fn=fetch_selected, gen_fn=generate, refresh_remote=False):
     with state.lock:
         source = state.source
+        local_path = state.local_path
         listed = {f['id']:f for f in state.listing}
-    cfg = source_config(root, source)
+    cfg = source_config(root, source, local_path)
     store = load_store(root)
     if refresh_remote:
         # A cached report based on an old visible inventory must not mask a grown file.
@@ -236,7 +251,7 @@ def perform_build(root: Path, state: State, selections,
     dropped_bytes = 0
     def download(remote):
         nonlocal active_count, dropped_bytes
-        result = source_fetch(cfg, source, remote, state.set_stage) if source == 'windows' else fetch_fn(cfg, remote, state.set_stage)
+        result = fetch_fn(cfg, remote, state.set_stage) if source == 'linux' else source_fetch(cfg, source, remote, state.set_stage)
         path, digest = result[:2]
         details = result[2] if len(result) > 2 else {}
         if details.get('active'):
@@ -360,8 +375,8 @@ def perform_build_current(root, state, selections):
     return perform_build(root, state, selections, refresh_remote=True)
 
 
-def perform_latest(root, state, source='linux'):
-    perform_list(root, state, source=source)
+def perform_latest(root, state, source='linux', local_path=''):
+    perform_list(root, state, source=source, local_path=local_path)
     with state.lock:
         latest = state.listing[0] if state.listing else None
     if latest is None:
@@ -538,8 +553,14 @@ def make_handler(root: Path, state: State, port: int):
                         return self._json(500, {'error':'Не удалось обновить аналитические даты'})
                     return self._json(200,result)
             if endpoint in ('/api/list', '/api/fetch'):
-                if payload.get('source', 'linux') not in ('linux','windows'):
+                if payload.get('source', 'linux') not in ('linux','windows','local'):
                     return self._json(400, {'error':'Неизвестный источник'})
+            if endpoint in ('/api/list', '/api/fetch') and payload.get('source') == 'local':
+                local_path = payload.get('local_path')
+                if not isinstance(local_path, str) or not local_path.strip() or len(local_path) > 2048:
+                    return self._json(400, {'error':'Укажите абсолютный путь к локальному файлу .log или каталогу'})
+            else:
+                local_path = ''
             if endpoint == '/api/build':
                 selected = payload.get('selections')
                 with state.lock:
@@ -562,9 +583,9 @@ def make_handler(root: Path, state: State, port: int):
                 state.result=None
                 state.notice=''
             if endpoint == '/api/list':
-                args=(root, perform_list, list_remote, payload.get('source', 'linux'))
+                args=(root, perform_list, list_remote, payload.get('source', 'linux'), local_path)
             elif endpoint == '/api/fetch':
-                args=(root, perform_latest, payload.get('source', 'linux'))
+                args=(root, perform_latest, payload.get('source', 'linux'), local_path)
             elif endpoint == '/api/build':
                 args=(root, perform_build_current, selected)
             else:
