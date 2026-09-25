@@ -2,20 +2,75 @@
 'use strict';
 const rows=A.rows, number=fmt, per=70;let filtered=[],page=0,searchEpoch=0,lastQuery='',lastMode='quick';
 const state={q:'',request:'',component:'',category:'',hour:'',from:'',to:'',source:'',dayfile:'',full:false};
+// Chart data comes from this report's catalog; library snapshot grouping is UI-only.
+const hourlyBuckets=new Map((A.hourly||[]).map(([day,hour,events])=>[
+  day+' '+hour,{day,hour,events,errors:0}
+]));
+const errorIds=A.errorFingerprints||{};
+for(const r of rows){
+  if(!Object.prototype.hasOwnProperty.call(errorIds,String(r[F.id])))continue;
+  const bucket=hourlyBuckets.get(r[F.day]+' '+r[F.time].slice(0,2));
+  if(bucket)bucket.errors++;
+}
+const observedDays=[...new Set((A.hourly||[]).map(h=>h[0]))].sort((a,b)=>a-b);
+function calendarDay(day){
+  if(!A.meta.base_date)return 'D+'+day;
+  const base=Date.parse(A.meta.base_date+'T00:00:00Z');
+  return Number.isFinite(base)?new Date(base+day*86400000).toISOString().slice(0,10):'D+'+day;
+}
+function hourlyProfile(){
+  const hours=Array.from({length:24},(_,i)=>({
+    hour:String(i).padStart(2,'0'),events:0,errors:0,parts:[]
+  }));
+  const unknown={hour:'??',events:0,errors:0,parts:[]};
+  for(const hour of hours.concat(unknown)){
+    for(const day of observedDays){
+      const bucket=hourlyBuckets.get(day+' '+hour.hour);
+      if(!bucket)continue;
+      hour.events+=bucket.events;hour.errors+=bucket.errors;
+      hour.parts.push(calendarDay(day)+': '+fmt(bucket.events)+' событий, '+fmt(bucket.errors)+' ошибок');
+    }
+  }
+  return unknown.events?hours.concat(unknown):hours;
+}
+function renderHours(){
+  const view=$('hour-view').value||'profile';
+  if(view==='timeline'&&$('hour-metric').value==='average')$('hour-metric').value='events';
+  const metric=$('hour-metric').value||'events';
+  const dailyCount=Math.max(1,observedDays.length);
+  const data=view==='timeline'
+    ?[...hourlyBuckets.values()].sort((a,b)=>a.day-b.day||a.hour.localeCompare(b.hour))
+    :hourlyProfile();
+  const value=h=>metric==='errors'?h.errors:metric==='average'?h.events/dailyCount:h.events;
+  const maximum=Math.max(1,...data.map(value));
+  const valueLabel=n=>metric==='average'?n.toLocaleString('ru-RU',{maximumFractionDigits:1}):fmt(n);
+  $('hours-note').textContent=view==='profile'
+    ?'Сложены одинаковые часы '+dailyCount+' дн. · Ошибки — распознанные исключения, а не все текстовые признаки. '+(metric==='average'?'Среднее = сумма / число дней; неполные сутки не корректируются.':'Неполные сутки влияют на сопоставление дней.')
+    :'Хронология по датам · нажатие фильтрует один день и один час.';
+  $('hours').innerHTML=data.map(h=>{
+    const label=view==='timeline'?calendarDay(h.day)+' '+h.hour+':xx':h.hour+':00';
+    const hourKey=view==='timeline'?h.day+' '+h.hour:'* '+h.hour;
+    const tooltip=(view==='profile'?h.parts.join(String.fromCharCode(10)):calendarDay(h.day)+': '+fmt(h.events)+' событий, '+fmt(h.errors)+' ошибок')||
+      'Нет событий';
+    return `<div class="barrow"><button type="button" data-hour="${escapeHtml(hourKey)}" title="${escapeHtml(tooltip)}" aria-label="${escapeHtml(label+', фильтровать события')}">${escapeHtml(label)}</button><div class="bartrack" title="${escapeHtml(tooltip)}"><div class="barfill" style="width:${(100*value(h)/maximum).toFixed(2)}%"></div></div><div class="num" title="${escapeHtml(tooltip)}">${valueLabel(value(h))}</div></div>`;
+  }).join('');
+  $('hours').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+    $('hour').value=b.dataset.hour;search();$('explore').scrollIntoView({behavior:'smooth',block:'start'});
+  }));
+}
 function summary(){
  $('source').textContent=A.meta.source; $('total').textContent=fmt(A.meta.events);$('lines').textContent=fmt(A.meta.physical_lines);
  $('multi').textContent=fmt(A.meta.continuation_lines);$('components').textContent=fmt(A.meta.component_count);
  $('date-note').textContent=A.meta.base_date?'Дата первой записи: '+A.meta.base_date:'Исходный журнал без календарной даты — показано D+0, D+1 и т. д.';
  $('integrity').textContent='В исходном файле: '+fmt(A.meta.replacement_chars||0)+' символов замены кодировки; '+fmt(A.meta.out_of_order_timestamps||0)+' нарушений порядка времени; '+fmt(A.meta.midnight_rollovers||0)+' переходов через полночь.';
  $('catview').innerHTML=A.category_counts.map(([c,n])=>`<div class="category-row"><span class="tag" data-cat="${escapeHtml(catLabel(c))}">${escapeHtml(catLabel(c))}</span><b>${fmt(n)}</b></div>`).join('');
- const mx=Math.max(1,...A.hourly.map(h=>h[2]));
- $('hours').innerHTML=A.hourly.map(h=>`<div class="barrow"><button data-hour="${escapeHtml(h[0]+' '+h[1])}" title="Фильтровать этот час">D+${h[0]} ${escapeHtml(h[1])}:xx</button><div class="bartrack"><div class="barfill" style="width:${(100*h[2]/mx).toFixed(2)}%"></div></div><div class="num">${fmt(h[2])}</div></div>`).join('');
- $('hours').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{$('hour').value=b.dataset.hour;search()}));
+ renderHours();
  for(const [i,name] of (A.sources||[]).entries()){const o=document.createElement('option');o.value=String(i);o.textContent=name;$('source-file').appendChild(o)}
- for(const d of [...new Set(rows.map(r=>r[F.day]))].sort((a,b)=>a-b)){const o=document.createElement('option');o.value=String(d);o.textContent=A.meta.base_date?new Date(Date.parse(A.meta.base_date+'T00:00:00Z')+d*86400000).toISOString().slice(0,10):'D+'+d;$('day-file').appendChild(o)}
+ for(const d of observedDays){const o=document.createElement('option');o.value=String(d);o.textContent=calendarDay(d);$('day-file').appendChild(o)}
  for(const [value,label] of A.components){const option=document.createElement('option');option.value=value;option.textContent=label;$('component').appendChild(option)}
  for(const [code,label] of A.categories.map((label,index)=>[index,label])){const option=document.createElement('option');option.value=String(code);option.textContent=label;$('category').appendChild(option)}
- for(const h of A.hourly){const option=document.createElement('option');option.value=h[0]+' '+h[1];option.textContent='D+'+h[0]+' '+h[1]+':xx';$('hour').appendChild(option)}
+ for(let i=0;i<24;i++){const h=String(i).padStart(2,'0'),option=document.createElement('option');option.value='* '+h;option.textContent='Все дни · '+h+':xx';$('hour').appendChild(option)}
+ for(const h of A.hourly){const option=document.createElement('option');option.value=h[0]+' '+h[1];option.textContent=calendarDay(h[0])+' '+h[1]+':xx';$('hour').appendChild(option)}
  $('patterns').innerHTML=A.patterns.map(p=>`<tr><td class="num">${fmt(p[0])}</td><td>${escapeHtml(p[1])}</td><td><span class="tag" data-cat="${escapeHtml(catLabel(p[2]))}">${escapeHtml(catLabel(p[2]))}</span></td><td class="truncate" title="${escapeHtml(p[3])}"><a href="event.html?id=${p[4]}">${escapeHtml(p[3])}</a></td></tr>`).join('');
  $('durations').innerHTML=A.durations.length?A.durations.map(d=>`<tr><td class="num">${fmt(d[0].toFixed(1))}</td><td>${escapeHtml(d[1])}</td><td>${escapeHtml(d[2])}</td><td><a href="event.html?id=${d[3]}">#${d[3]}</a></td></tr>`).join(''):'<tr><td colspan="4">Нет распознанных длительностей</td></tr>';
  $('requests').innerHTML=A.requests.map(d=>`<tr><td class="truncate" title="${escapeHtml(d[0])}">${escapeHtml(d[0])}</td><td class="num">${fmt(d[1])}</td><td><button data-req="${escapeHtml(d[0])}">Показать</button></td></tr>`).join('');
@@ -27,7 +82,7 @@ function rowMatches(r){
  if(state.dayfile!==''&&r[F.day]!==Number(state.dayfile))return false;
  if(state.component!==''&&r[F.component]!==Number(state.component))return false;
  if(state.category!==''&&r[F.category]!==Number(state.category))return false;
- if(state.hour!==''&&r[F.day]+' '+r[F.time].slice(0,2)!==state.hour)return false;
+ if(state.hour!==''&&(state.hour.startsWith('* ')?r[F.time].slice(0,2)!==state.hour.slice(2):r[F.day]+' '+r[F.time].slice(0,2)!==state.hour))return false;
  if(state.from&&r[F.time].slice(0,5)<state.from)return false;
  if(state.to&&r[F.time].slice(0,5)>state.to)return false;
  if(state.request&&!r[F.request].toLocaleLowerCase().includes(state.request))return false;
@@ -77,4 +132,5 @@ $('prev').addEventListener('click',()=>{page--;render();$('results').scrollIntoV
 $('next').addEventListener('click',()=>{page++;render();$('results').scrollIntoView({behavior:'smooth',block:'start'})});
 $('theme').addEventListener('click',theme);const requested=new URLSearchParams(location.search).get('request');if(requested)$('request').value=requested;$('q').addEventListener('keydown',e=>{if(e.key==='Enter')search()});$('request').addEventListener('keydown',e=>{if(e.key==='Enter')search()});
 for(const id of ['component','category','hour','from','to','source-file','day-file'])$(id).addEventListener('change',search);
+for(const id of ['hour-view','hour-metric'])$(id).addEventListener('change',renderHours);
 summary();search();

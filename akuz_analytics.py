@@ -137,6 +137,10 @@ def source_key(info,rid,sid,aliases):
     return key
 
 def ingest(db,rid,info,catalog_path,aliases):
+    from akuz_diagnostics import event as perf_event
+    from time import perf_counter
+    started = perf_counter()
+    perf_root = catalog_path.parent.parent.parent.parent
     catalog=read_js(catalog_path,"window.AKUZ_DATA=")
     base=catalog["meta"].get("base_date")
     base_day=date.fromisoformat(base) if base else None
@@ -177,7 +181,10 @@ def ingest(db,rid,info,catalog_path,aliases):
             (identity,)).fetchone()["conflict"]),has_source_date,chosen)
     part=None
     raw_shard=[]
-    for row in catalog["rows"]:
+    for index, row in enumerate(catalog["rows"], 1):
+        if index % 50000 == 0:
+            perf_event(perf_root, 'analytics.ingest', 'progress', events=index,
+                       elapsed_s=round(perf_counter()-started, 3))
         sid=int(row[12]) if len(row)>12 else 0
         key,skip,date_conflict,has_source_date,chosen_source_date=mapping.get(
             sid,(rid+":"+str(sid),False,False,False,""))
@@ -411,12 +418,15 @@ def update_source_date(root,identity,first_date):
 
 def refresh(root):
     """Idempotent processing of *reports*, never a network operation."""
+    from akuz_diagnostics import event as perf_event, phase as perf_phase
     root=Path(root)
     with LOCK:
         db=connect(root)
         try:
             migrated=db.total_changes>0
-            available=reports(root)
+            with perf_phase(root, 'analytics.inventory'):
+                available=reports(root)
+            perf_event(root, 'analytics.inventory', 'summary', reports=len(available))
             desired={rid:stamp for rid,_,_,stamp in available}
             prior={r["id"]:r["stamp"] for r in db.execute("SELECT id,stamp FROM indexed")}
             removed = any(desired.get(rid)!=stamp for rid,stamp in prior.items())
@@ -428,17 +438,20 @@ def refresh(root):
             aliases={r["sha"]:r["source_key"] for r in
                      db.execute("SELECT sha,source_key FROM source_files")}
             changed=removed or migrated
-            for rid,info,catalog,stamp in available:
+            for report_index, (rid,info,catalog,stamp) in enumerate(available, 1):
                 if rid in prior:
                     continue
-                with db:
-                    ingest(db,rid,info,catalog,aliases)
-                    db.execute("INSERT INTO indexed VALUES(?,?)",(rid,stamp))
-                    for sha,key in aliases.items():
-                        db.execute("INSERT OR IGNORE INTO source_files VALUES(?,?)",(sha,key))
+                with perf_phase(root, 'analytics.ingest', report_index=report_index):
+                    with db:
+                        ingest(db,rid,info,catalog,aliases)
+                        db.execute("INSERT INTO indexed VALUES(?,?)",(rid,stamp))
+                        for sha,key in aliases.items():
+                            db.execute("INSERT OR IGNORE INTO source_files VALUES(?,?)",(sha,key))
                 changed=True
             if changed or not (root/"data"/"analytics.js").exists():
-                export(db,root)
-            return overview(db)
+                with perf_phase(root, 'analytics.export'):
+                    export(db,root)
+            with perf_phase(root, 'analytics.overview'):
+                return overview(db)
         finally:
             db.close()

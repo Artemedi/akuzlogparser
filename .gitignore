@@ -5,6 +5,7 @@ data/
 reports/
 downloads/
 cache/
+diagnostics/
 *.log
 *.log.*
 *.jsonl

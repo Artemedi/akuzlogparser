@@ -11,6 +11,7 @@ import secrets
 import shutil
 import tempfile
 import threading
+from time import perf_counter
 from urllib.parse import unquote, urlsplit
 import webbrowser
 
@@ -24,6 +25,7 @@ from akuz_store import (cached_download, cached_report, clear_cache, key_for,
 
 from akuz_runtime import DOCUMENTS, app_root, prepare_runtime
 from akuz_version import __version__
+from akuz_diagnostics import event as perf_event, phase as perf_phase
 
 ROOT = app_root()
 STATIC = {'index.html', 'event.html', 'errors.html', 'errors.js', 'style.css', 'common.js', 'index.js',
@@ -75,7 +77,8 @@ def safe_error(exc, root):
 
 def _worker(state, root, action, *args):
     try:
-        action(root, state, *args)
+        with perf_phase(root, 'worker.' + action.__name__):
+            action(root, state, *args)
     except Exception as exc:
         with state.lock:
             state.error = safe_error(exc, root)
@@ -113,7 +116,9 @@ def source_fetch(cfg, source, remote, notify):
 
 def perform_list(root: Path, state: State, list_fn=list_remote, source='linux', local_path=''):
     cfg = source_config(root, source, local_path)
-    listing = list_fn(cfg, state.set_stage) if source == 'linux' else source_list(cfg, source, state.set_stage)
+    with perf_phase(root, 'inventory.list'):
+        listing = list_fn(cfg, state.set_stage) if source == 'linux' else source_list(cfg, source, state.set_stage)
+    perf_event(root, 'inventory.list', 'count', files=len(listing))
     store = load_store(root)
     for file in listing:
         file['date'] = date_from_log_name(file['name'])
@@ -144,7 +149,10 @@ def _publish(root, store, key, raw_path, base, sources, label, kind, gen_fn=gene
     temp = parent/(rid+'.building')
     final = parent/rid
     try:
-        meta = gen_fn(raw_path, temp, base, 1000, 35)
+        with perf_phase(root, 'report.generate', input_bytes=raw_path.stat().st_size):
+            meta = gen_fn(raw_path, temp, base, 1000, 35)
+        perf_event(root, 'report.generate', 'summary', events=meta['events'],
+                   chunks=meta.get('chunks', 0))
         if not (temp/'index.html').is_file() or not (temp/'data'/'catalog.js').is_file():
             raise FetchError('Генератор не сохранил необходимые файлы отчёта')
         # Include provenance in a local file; static server deliberately does not serve it.
@@ -156,7 +164,8 @@ def _publish(root, store, key, raw_path, base, sources, label, kind, gen_fn=gene
             events=meta['events'], lines=meta['physical_lines'],
             created=datetime.now().isoformat(timespec='seconds'))
         store['reports'][rid] = value
-        save_store(root, store)
+        with perf_phase(root, 'report.inventory_save'):
+            save_store(root, store)
         return dict(value, url='/reports/'+rid+'/index.html', reused=False)
     finally:
         if temp.exists():
@@ -171,13 +180,19 @@ def _combine_sources(selected, scratch: Path, base: date):
     """
     total_lines = 0
     count = 0
+    started = perf_counter()
+    perf_root = scratch.parent.parent
     with scratch.open('w', encoding='utf-8', newline='\n') as output:
-        for item in sorted(selected, key=lambda x:(x['date'], x['remote']['mtime'], x['remote']['name'])):
+        for index, item in enumerate(sorted(selected, key=lambda x:(x['date'], x['remote']['mtime'], x['remote']['name'])), 1):
             d = date.fromisoformat(item['date'])
             source = item['remote']['name'] + ' · ' + item['date']
             stats = Counter()
+            before_source = count
             for ev in event_stream(item['local'], stats):
                 count += 1
+                if count % 50000 == 0:
+                    perf_event(perf_root, 'combined.merge', 'progress', events=count,
+                               elapsed_s=round(perf_counter() - started, 3))
                 original_start, original_end = ev['start_line'], ev['end_line']
                 ev['original_start_line'] = original_start
                 ev['original_end_line'] = original_end
@@ -190,6 +205,8 @@ def _combine_sources(selected, scratch: Path, base: date):
                 ev['end_line'] = total_lines + original_end
                 output.write(json.dumps(ev, ensure_ascii=False, separators=(',', ':'))+'\n')
             total_lines += stats['physical_lines']
+            perf_event(perf_root, 'combined.source', 'done', source_index=index,
+                       source_events=count-before_source, total_events=count)
     if count == 0:
         raise FetchError('В выбранных файлах не обнаружены события AKUZ')
     return count, total_lines
@@ -251,9 +268,11 @@ def perform_build(root: Path, state: State, selections,
     dropped_bytes = 0
     def download(remote):
         nonlocal active_count, dropped_bytes
-        result = fetch_fn(cfg, remote, state.set_stage) if source == 'linux' else source_fetch(cfg, source, remote, state.set_stage)
+        with perf_phase(root, 'source.fetch', bytes_expected=remote.get('size', 0)):
+            result = fetch_fn(cfg, remote, state.set_stage) if source == 'linux' else source_fetch(cfg, source, remote, state.set_stage)
         path, digest = result[:2]
         details = result[2] if len(result) > 2 else {}
+        perf_event(root, 'source.fetch', 'summary', bytes_saved=path.stat().st_size)
         if details.get('active'):
             active_count += 1
             dropped_bytes += details.get('dropped_tail_bytes', 0)
@@ -334,7 +353,10 @@ def perform_build(root: Path, state: State, selections,
                 scratch = Path(tmp.name)
             try:
                 first = date.fromisoformat(files[0]['date'])
-                _combine_sources(files, scratch, first)
+                with perf_phase(root, 'combined.merge', files=len(files)):
+                    count, physical_lines = _combine_sources(files, scratch, first)
+                perf_event(root, 'combined.merge', 'summary', events=count,
+                           lines=physical_lines, bytes_saved=scratch.stat().st_size)
                 sources = [dict(name=f['remote']['name'], date=f['date'],
                                 sha256=f['sha'], remote_path=f['remote']['path'], host=cfg.host) for f in files]
                 label = f'Общая выборка · {files[0]["date"]} — {files[-1]["date"]} · {len(files)} файлов'
@@ -347,7 +369,8 @@ def perform_build(root: Path, state: State, selections,
     analytics_warning = ''
     try:
         from akuz_analytics import refresh as update_analytics
-        update_analytics(root)
+        with perf_phase(root, 'analytics.refresh'):
+            update_analytics(root)
     except Exception as exc:
         # The report remains usable even if a derived, rebuildable analytics
         # cache cannot be updated. Do not expose exception details in HTML.

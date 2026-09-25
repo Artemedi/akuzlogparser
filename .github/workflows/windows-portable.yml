@@ -27,7 +27,7 @@ jobs:
       - name: Test application
         run: python -m unittest discover -s tests -v
       - name: Test browser controls
-        run: node --test tests/test_app_controls.cjs
+        run: node --test tests/test_app_controls.cjs tests/test_hourly_view.cjs
       - name: Build portable ZIP
         run: python scripts/build_portable.py
       - name: Verify packaged executable

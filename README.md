@@ -1,4 +1,4 @@
-# AKUZ Log Explorer 4.4.0
+# AKUZ Log Explorer 4.5.0
 
 Локальное приложение для загрузки и разбора файловых журналов АКУЗ: HTML-отчёты, поиск событий, повторяющиеся ошибки и графики по дням/часам. Источники — файловые .log приложения АКУЗ по Linux/SSH, Windows/SMB или из локального файла/каталога. Системные журналы и VCLib в проект не входят.
 
@@ -34,6 +34,7 @@ Portable-версия для Windows 10/11 x64 включает Python, Paramiko
 | `cache/inventory.json` | Реестр загрузок и отчётов |
 | `cache/error_analytics.sqlite` | Перестраиваемый индекс ошибок, схема 5 |
 | `data/` | Статический снимок общей аналитики |
+| `diagnostics/performance.txt` | Локальная хронология этапов, длительности и счётчики без исходных записей; ротация до 3 файлов по 3 МБ |
 
 При обновлении EXE сохраняйте конфиг и все каталоги данных. Подробности — в [руководстве запуска](README_START_HERE.md).
 
@@ -65,7 +66,7 @@ python akuz_html_explorer.py /path/to/application.log -o /path/to/report --date 
 
 ```bash
 python -m unittest discover -s tests -v
-node --test tests/test_app_controls.cjs
+node --test tests/test_app_controls.cjs tests/test_hourly_view.cjs
 ```
 
 Windows EXE собирается на Windows x64 с Python 3.12:

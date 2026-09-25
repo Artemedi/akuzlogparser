@@ -258,6 +258,8 @@ def read_input(source: Path, base: date | None, stats: Counter[str]) -> Iterator
 def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: int) -> dict[str, Any]:
     from akuz_log_parser import classify, normalize, extract_duration
     from akuz_analytics import recognize_error
+    from akuz_diagnostics import event as perf_event, phase as perf_phase
+    from time import perf_counter
     if not source.is_file():
         raise ValueError(f"Исходный файл не найден: {source}")
     source, out = source.resolve(), out.resolve()
@@ -267,6 +269,10 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         raise ValueError("--chunk-size должен быть в пределах 10–10000")
     data = out / "data"
     data.mkdir(parents=True, exist_ok=True)
+    perf_root = out.parent.parent if out.parent.name == 'reports' else out.parent
+    started = perf_counter()
+    shard_time = 0.0
+    perf_event(perf_root, 'generate.input', 'start', input_bytes=source.stat().st_size)
     stats: Counter[str] = Counter()
     category = Counter()
     component = Counter()
@@ -289,8 +295,11 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     prev_day = prev_ms = None
 
     def flush(part: int) -> None:
+        nonlocal shard_time
+        stamp = perf_counter()
         dest = data / f"raw_{part:05d}.js"
         dest.write_text("window.AKUZ_RAW=" + js_json(raw_shard) + ";\n", encoding="utf-8")
+        shard_time += perf_counter() - stamp
 
     for ev in read_input(source, base, stats):
         # Preserve an already documented date from a v1 JSONL archive unless
@@ -301,6 +310,9 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
             except (ValueError, TypeError) as exc:
                 raise ValueError(f"Некорректное поле date у события #{ev['event_id']}") from exc
         n = len(rows)
+        if n and n % 50000 == 0:
+            perf_event(perf_root, 'generate.parse', 'progress', events=n,
+                       elapsed_s=round(perf_counter() - started, 3))
         eid = ev["event_id"]
         if not isinstance(eid, int) or eid <= 0:
             raise ValueError(f"Недопустимый event_id: {eid}")
@@ -371,6 +383,9 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                 pass
     if raw_shard:
         flush((len(rows)-1)//chunk_size)
+    perf_event(perf_root, 'generate.parse', 'done', events=len(rows),
+               lines=prev_end, shards=(len(rows)+chunk_size-1)//chunk_size,
+               elapsed_s=round(perf_counter()-started, 3), shard_write_s=round(shard_time, 3))
     if not rows:
         raise ValueError("Нет распознанных событий")
     # A rerun into the same directory must not leave obsolete old event shards
@@ -397,7 +412,8 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                    hourly=[[d,h,c] for (d,h),c in sorted(hour.items())],
                    category_counts=[[catids[k],v] for k,v in category.most_common()],
                    patterns=patterns, durations=dur, requests=request.most_common(15))
-    (data / "catalog.js").write_text("window.AKUZ_DATA="+js_json(catalog)+";\n", encoding="utf-8")
+    with perf_phase(perf_root, 'generate.catalog', events=len(rows)):
+        (data / "catalog.js").write_text("window.AKUZ_DATA="+js_json(catalog)+";\n", encoding="utf-8")
     # One authoritative UI source for the initial page and every generated report.
     # The embedded v2 strings above remain as historical fallback, not a second v4 UI.
     ui = Path(__file__).resolve().parent
@@ -412,15 +428,17 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     from akuz_runtime import DOCUMENTS
     for name in DOCUMENTS:
         (out/name).write_text((ui/name).read_text(encoding="utf-8"), encoding="utf-8")
+    perf_event(perf_root, 'generate.assets', 'done', elapsed_s=round(perf_counter()-started, 3),
+               events=len(rows))
     return meta
 
 
 # v3: preserve offline reader and add a button only enabled on localhost.
 FETCH_PANEL = r"""<section class="panel" id="fetch-panel" style="margin-bottom:17px">
-<div class="fetchbar"><div><div class="eyebrow">SSH / Windows / Local · коллекция журналов · v4.4.0</div><h2 style="font-size:18px;margin:4px 0">Журналы по датам</h2>
+<div class="fetchbar"><div><div class="eyebrow">SSH / Windows / Local · коллекция журналов · v4.5.0</div><h2 style="font-size:18px;margin:4px 0">Журналы по датам</h2>
 <p class="small">Выбери один или несколько файлов, проверь дату из имени и открой отдельные отчёты или общую выборку.</p>
 <div id="fetch-status" class="status" role="status">Проверка локального сервиса…</div></div>
-<div class="actions"><label class="small">Источник <select id="fetch-source" aria-label="Источник журналов"><option value="linux">Linux · SSH</option><option value="windows">Windows · SMB / UNC</option><option value="local">Локальный .log / папка</option></select></label><button class="primary" id="fetch-latest">↓ Последний лог</button><button id="fetch-list">↻ Список файлов</button><button id="picker-toggle" type="button" aria-controls="remote-picker" aria-expanded="false" hidden>▾ Показать файлы</button><button id="fetch-cache">⌫ Очистить кэш</button><label class="small"><input type="checkbox" id="clear-reports"> Включая отчёты v4</label><a class="btn" id="fetch-open" href="#" hidden>Открыть отчёт →</a></div></div>
+<div class="actions"><label class="small">Источник <select id="fetch-source" aria-label="Источник журналов"><option value="linux">Linux · SSH</option><option value="windows">Windows · SMB / UNC</option><option value="local">Локальный .log / папка</option></select></label><button class="primary" id="fetch-latest">↓ Последний лог</button><button id="fetch-list">↻ Список файлов</button><button id="picker-toggle" type="button" aria-controls="remote-picker" aria-expanded="false" hidden>▾ Показать файлы</button><button id="fetch-cache" title="Удалить скачанные файлы кэша; готовые отчёты сохраняются">⌫ Очистить кэш</button><a class="btn" id="fetch-open" href="#" hidden>Открыть отчёт →</a></div></div>
 <div id="local-path-panel" class="local-source" hidden><label for="local-path">Путь к локальному .log или папке журналов на компьютере, где запущен Explorer</label><input id="local-path" type="text" placeholder="C:\AKUZ\Logs или C:\AKUZ\Logs\20260923_server.log" autocomplete="off" spellcheck="false" maxlength="2048"><p class="small">Укажите полный путь. Только файлы .log, без вложенных каталогов; исходные файлы не меняются. UNC-папки — через Windows · SMB.</p></div>
 <div id="remote-picker" hidden><div class="pickerbar"><span id="picker-count" class="sub"></span><label>Дата изменения на сервере с <input type="date" id="picker-from"></label><label>по <input type="date" id="picker-to"></label><button id="picker-today">Сбросить даты</button><button id="picker-select-all">Выбрать видимые</button><button id="picker-select-none">Снять выделение</button></div>
 <div class="filelist" id="picker-files"></div><div class="pickerbar"><button class="primary" id="picker-build">Создать отчёты по выбранным файлам</button><span class="small">Дата первой записи берётся из имени YYYYMMDD_*.log. Её можно исправить вручную.</span></div></div>

@@ -66,7 +66,7 @@ test('report library groups versions by verified source identity, without summin
     make('combined','2026-09-23T07:00:00',200000,'/srv/a/20260923_server.log','combined')
   ];
   const context={
-    document:{getElementById:get,createElement:()=>new Element()},
+    document:{getElementById:get,createElement:tag=>{const el=new Element();el.tagName=tag.toUpperCase();return el;}},
     location:{hostname:'127.0.0.1',protocol:'http:',pathname:'/',assign(){}},
     setTimeout:()=>1,clearTimeout(){},confirm:()=>true,
     fetch:async url=>({ok:true,json:async()=>url==='/api/status'?
@@ -78,6 +78,9 @@ test('report library groups versions by verified source identity, without summin
   const entries=get('report-items').children;
   assert.equal(entries.length,4,'different paths, hosts and merged reports remain separate');
   assert.equal(entries[0].className,'library-report-group');
+  assert.equal(entries[0].tagName,'DETAILS','snapshot history is natively collapsible');
+  assert.equal(entries[0].open,undefined,'snapshot history is collapsed by default');
+  assert.equal(entries[0].children[0].tagName,'SUMMARY');
   assert.equal(entries[0].children.length,3);
   assert.match(entries[0].children[0].children[1].textContent,/не суммируются/);
   assert.equal(entries[0].children[1].children[0].href,'/reports/new/index.html');
@@ -135,4 +138,30 @@ test('legacy HTML reports without source controls do not break the reader',()=>{
   });
   assert.match(get('fetch-status').textContent,/старой версией/);
   assert.equal(get('fetch-latest').disabled,true);
+});
+test('clear cache is cache-only and works without legacy report-deletion checkbox',async()=>{
+  const nodes=new Map();
+  const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
+  const posted=[],prompts=[];
+  const context={
+    document:{getElementById:get,createElement:()=>new Element()},
+    location:{hostname:'127.0.0.1',protocol:'http:',pathname:'/',assign(){}},
+    setTimeout:()=>1,clearTimeout(){},
+    confirm:text=>{prompts.push(text);return true;},
+    fetch:async (url,options)=>{
+      if(options?.method==='POST')posted.push([url,JSON.parse(options.body)]);
+      return {ok:true,json:async()=>url==='/api/status'?
+        {busy:false,source:'linux',listing:[],stage:'Ready'}:
+        url==='/api/reports'?{reports:[]}:{started:true}};
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../app_controls.js'),'utf8'),context);
+  await new Promise(resolve=>setImmediate(resolve));
+  await get('fetch-cache').listeners.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(posted.length,1);
+  assert.equal(posted[0][0],'/api/clear');
+  assert.equal(posted[0][1].reports,false);
+  assert.match(prompts[0],/Готовые отчёты сохранятся/);
+  assert.equal(nodes.has('clear-reports'),false);
 });

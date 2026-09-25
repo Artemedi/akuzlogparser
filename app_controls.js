@@ -109,16 +109,16 @@
       for(const reports of groups.values()){
         if(reports.length===1){appendReportRow(items,reports[0]);continue}
         reports.sort((a,b)=>String(b.created).localeCompare(String(a.created)));
-        const group=document.createElement('div');
+        const group=document.createElement('details');
         group.className='library-report-group';
-        const heading=document.createElement('div');
+        const heading=document.createElement('summary');
         heading.className='library-report-heading';
         const name=document.createElement('strong');
         name.textContent=reports[0].label;
         heading.appendChild(name);
         const note=document.createElement('span');
         note.className='sub';
-        note.textContent='Снимков: '+reports.length+' · события указаны для каждого снимка, не суммируются';
+        note.textContent='Снимков: '+reports.length+' · открыть список (события не суммируются)';
         heading.appendChild(note);
         group.appendChild(heading);
         reports.forEach((report,i)=>appendReportRow(group,report,i));
@@ -148,7 +148,7 @@
         }
         if(s.result && s.result.reused)status.textContent+=' · повторная загрузка не потребовалась';
         if(s.result && s.result.active_snapshots)status.textContent+=' · снимков активного журнала: '+s.result.active_snapshots;
-        if(s.result && s.result.cleanup){await getReports();if(awaitAction==='clear'&&$('clear-reports').checked&&location.pathname.startsWith('/reports/')){location.assign('/');return}}
+        if(s.result && s.result.cleanup)await getReports();
         if(s.result&&s.result.report_url&&['build','latest'].includes(awaitAction)){
           awaitAction='';await getReports();location.assign(s.result.report_url);return;
         }
@@ -184,9 +184,8 @@
     action('/api/build',{selections:selected},'build');
   });
   $('fetch-cache').addEventListener('click',()=>{
-    const include=$('clear-reports').checked;
-    if(!confirm(include?'Удалить кэш скачанных v4 файлов И все созданные отчёты v4? Старые v2/v3 отчёты не затрагиваются.':'Удалить только скачанные файлы из кэша v4? Готовые отчёты сохранятся.'))return;
-    action('/api/clear',{reports:include},'clear');
+    if(!confirm('Удалить скачанные файлы из кэша? Готовые отчёты сохранятся.'))return;
+    action('/api/clear',{reports:false},'clear');
   });
   for(const id of ['picker-from','picker-to'])$(id).addEventListener('change',renderFiles);
   $('picker-today').addEventListener('click',()=>{$('picker-from').value='';$('picker-to').value='';renderFiles()});
