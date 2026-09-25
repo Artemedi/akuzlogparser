@@ -178,22 +178,28 @@ def _iter_combined_sources(selected, base: date, trace_root: Path | None = None)
     """Yield combined events without materializing a second copy of all texts.
 
     Source identities, dates, original lines and ordering match the historical
-    JSONL merger. The optional trace measures end-to-end stream consumption.
+    JSONL merger. The optional trace measures end-to-end stream consumption;
+    active_s counts only generator-side time (parse + per-event augmentation),
+    not the consumer's processing while this generator is suspended.
     """
     total_lines = 0
     count = 0
     started = perf_counter()
+    active = 0.0
+    resume = perf_counter()
     for index, item in enumerate(sorted(
             selected, key=lambda x:(x['date'], x['remote']['mtime'], x['remote']['name'])), 1):
         d = date.fromisoformat(item['date'])
         source = item['remote']['name'] + ' · ' + item['date']
         stats = Counter()
         before_source = count
+        before_active = active
         for ev in event_stream(item['local'], stats):
             count += 1
             if trace_root is not None and count % 50000 == 0:
                 perf_event(trace_root, 'combined.stream', 'progress', events=count,
-                           elapsed_s=round(perf_counter() - started, 3))
+                           elapsed_s=round(perf_counter() - started, 3),
+                           active_s=round(active, 3))
             original_start, original_end = ev['start_line'], ev['end_line']
             ev['original_start_line'] = original_start
             ev['original_end_line'] = original_end
@@ -204,16 +210,21 @@ def _iter_combined_sources(selected, base: date, trace_root: Path | None = None)
             ev['date'] = (base + timedelta(days=ev['day_offset'])).isoformat()
             ev['start_line'] = total_lines + original_start
             ev['end_line'] = total_lines + original_end
+            active += perf_counter() - resume
             yield ev
+            resume = perf_counter()
         total_lines += stats['physical_lines']
         if trace_root is not None:
             perf_event(trace_root, 'combined.source', 'done', source_index=index,
-                       source_events=count-before_source, total_events=count)
+                       source_events=count-before_source, total_events=count,
+                       source_active_s=round(active-before_active, 3))
     if count == 0:
         raise FetchError('В выбранных файлах не обнаружены события AKUZ')
     if trace_root is not None:
         perf_event(trace_root, 'combined.stream', 'summary',
-                   events=count, lines=total_lines)
+                   events=count, lines=total_lines,
+                   elapsed_s=round(perf_counter() - started, 3),
+                   active_s=round(active, 3))
 
 
 def _combine_sources(selected, scratch: Path, base: date):
@@ -229,6 +240,7 @@ def _combine_sources(selected, scratch: Path, base: date):
 
 def perform_build(root: Path, state: State, selections,
                   fetch_fn=fetch_selected, gen_fn=generate, refresh_remote=False):
+    build_started = perf_counter()
     with state.lock:
         source = state.source
         local_path = state.local_path
@@ -281,6 +293,10 @@ def perform_build(root: Path, state: State, selections,
     source_seen = set()  # separate paths may contain independent identical events
     active_count = 0
     dropped_bytes = 0
+    fresh_downloads = 0
+    restore_downloads = 0
+    singles_new = 0
+    singles_reused = 0
     def download(remote):
         nonlocal active_count, dropped_bytes
         with perf_phase(root, 'source.fetch', bytes_expected=remote.get('size', 0),
@@ -310,10 +326,12 @@ def perform_build(root: Path, state: State, selections,
         prior = cached_report(store, remote_key, root)
         if prior:
             reports.append(dict(prior, url='/reports/'+prior['id']+'/index.html', reused=True))
+            singles_reused += 1
             cached = cached_download(store, fid)
             if cached is None and len(ids) > 1:
                 state.set_stage('Для общей выборки восстанавливаю исходный файл: '+remote['name'])
                 restored_path, restored_sha, details = download(remote)
+                restore_downloads += 1
                 store['downloads'][fid] = dict(path=str(restored_path), sha256=restored_sha,
                     size=restored_path.stat().st_size, host=cfg.host, remote=remote['path'],
                     mtime=remote['mtime'], snapshot=details)
@@ -331,6 +349,7 @@ def perform_build(root: Path, state: State, selections,
         else:
             state.set_stage(f'{idx}/{len(ids)} · загружаю {remote["name"]}…')
             path, digest, details = download(remote)
+            fresh_downloads += 1
             store['downloads'][fid] = dict(path=str(path), sha256=digest,
                 size=path.stat().st_size, host=cfg.host, remote=remote['path'],
                 mtime=remote['mtime'], snapshot=details)
@@ -350,6 +369,7 @@ def perform_build(root: Path, state: State, selections,
             record['aliases']=list(set(record.get('aliases',[])+[remote_key]))
             save_store(root,store)
             reports.append(dict(by_content, url='/reports/'+by_content['id']+'/index.html', reused=True))
+            singles_reused += 1
             continue
         state.set_stage(f'{idx}/{len(ids)} · разбираю {remote["name"]}…')
         label = remote['name'] + (' · ' + chosen if chosen else ' · дата не задана')
@@ -362,6 +382,7 @@ def perform_build(root: Path, state: State, selections,
             store['reports'][report['id']].get('aliases', []) + [remote_key]))
         save_store(root, store)
         reports.append(report)
+        singles_new += 1
     combined = None
     if len(files) > 1 and all(f['date'] for f in files):
         files.sort(key=lambda f:(f['date'], f['remote']['mtime'], f['remote']['name']))
@@ -412,6 +433,13 @@ def perform_build(root: Path, state: State, selections,
         # The report remains usable even if a derived, rebuildable analytics
         # cache cannot be updated. Do not expose exception details in HTML.
         analytics_warning = safe_error(exc,root)
+    perf_event(root, 'build.summary', 'done', selected=len(ids),
+               fresh_downloads=fresh_downloads, restore_downloads=restore_downloads,
+               singles_new=singles_new, singles_reused=singles_reused,
+               skipped_identical=len(skipped), active_snapshots=active_count,
+               combined_status=(0 if combined is None else (1 if combined['reused'] else 2)),
+               analytics_warning=bool(analytics_warning),
+               elapsed_s=round(perf_counter() - build_started, 3))
     result = dict(reports=reports, combined=combined, skipped_identical=skipped,
                   active_snapshots=active_count, dropped_tail_bytes=dropped_bytes,
                   report_url=(combined or (reports[0] if reports else {})).get('url'),

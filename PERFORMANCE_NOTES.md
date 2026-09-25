@@ -262,3 +262,50 @@ regex `generate()` 8.9788 с, исправленный find `generate()` 5.6081 
 Ускорение регулярных выражений классификации не меняет SSH-транспорт,
 анализ ошибок в SQLite, повторную обработку исходных файлов для
 общей выборки или формат отчёта.
+
+## Этап 6. Телеметрия подфаз разбора и стоимость прогона сборки
+
+Это только диагностическое инструментирование после v4.6.0; формат исходных
+снимков, событий, raw-осколков, каталога и аналитической БД не изменён.
+Выходные файлы должны побайтово совпадать с версией до инструментирования.
+
+generate.parse progress/done: source_next_s — wall-время получения следующего
+события из итератора, включающее чтение, multiline assembly, разбор заголовка,
+создание словаря, а для combined — изменение даты/индекса/источника.
+Для одиночного log из source_next_s вычтено время classify внутри read_input.
+source_next_s НЕ измеряет физический дисковый I/O отдельно.
+
+classify_s — wall-время classify; normalize_s — normalize;
+duration_s — extract_duration; errors_s — recognize_error;
+shard_write_s — сериализация JS и запись raw-осколков;
+other_s — остаток на проверки, накопление и индексацию данных.
+Таймеры включают накладные расходы инструментирования; суммы после округления
+приблизительно равны elapsed_s. generate.catalog — отдельная фаза ПОСЛЕ parse;
+не прибавлять её к other_s. thread_cpu_s — CPU-time ТЕКУЩЕГО потока на всю
+generate.parse, не wall-время классификатора и не отдельная добавочная фаза.
+Из разности elapsed_s и thread_cpu_s НЕЛЬЗЯ однозначно вывести физический
+дисковый I/O: там также планировщик, блокировки и ожидания.
+
+classify_calls — реально выполненные вызовы classify; classify_regex_fallback_events
+— выбор исходного regex при Unicode с изменением длины casefold либо U+0345;
+classify_literal_path_events = classify_calls - classify_regex_fallback_events.
+Literal path включает результат «прочее». Внешние JSONL могут содержать
+готовую категорию: для них classify_calls может быть меньше events.
+
+combined.source source_active_s и combined.stream active_s — приближённое
+wall-время работы генератора (повторный parse + augmentation) без основного
+времени приостановки на yield; elapsed_s включает время потребителя и другие
+накладные расходы. active_s частично совпадает с generate.parse.source_next_s,
+СКЛАДЫВАТЬ ИХ НЕЛЬЗЯ. elapsed_s - active_s — не точный прогноз выигрыша от
+однопроходного алгоритма.
+
+build.summary фиксирует состав: selected, fresh_downloads, restore_downloads,
+singles_new, singles_reused, skipped_identical, active_snapshots,
+combined_status (0 — нет, 1 — переиспользован, 2 — создан), analytics_warning,
+elapsed_s. Это отдельная сводка, не прибавлять к worker.perform_build_current.
+
+Для реального теста используйте новый локально собранный EXE Phase 6;
+опубликованный v4.6.0 пока не заменён. Не удаляйте рабочие журналы и кэш
+ради проверки метрик без отдельной причины. Эксперимент агента на синтетике
+3.377 → 3.450 с (+2.2%) проведён до уточнения метрик и не является
+контрольным замером итогового инструментирования.

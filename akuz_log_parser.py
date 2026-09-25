@@ -162,14 +162,18 @@ def _classify_regex(message: str) -> str:
     return "прочее"
 
 
-def classify(message: str) -> str:
+def classify(message: str, *, diagnostics: Counter[str] | None = None) -> str:
     # Preserve category priority, not the textual order of matching markers.
     # Fast find-based matching for ordinary AKUZ strings; fall back to exact
     # regex semantics for folds like ß -> ss that change character positions.
     lowered = message.casefold().replace("ı", "i").replace("i\u0307", "i")
     # U+0345 casefolds from a non-word combining mark into a word letter,
     # changing Unicode regex word boundaries without changing string length.
+    if diagnostics is not None:
+        diagnostics["classify_calls"] += 1
     if len(lowered) != len(message) or "\u0345" in message:
+        if diagnostics is not None:
+            diagnostics["classify_regex_fallback_events"] += 1
         return _classify_regex(message)
     if ("time" in lowered or "тайм" in lowered or "истекло" in lowered) and _timeout_hit(lowered):
         return "таймаут"

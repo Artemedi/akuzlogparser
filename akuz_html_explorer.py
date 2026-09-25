@@ -249,8 +249,15 @@ def read_input(source: Path, base: date | None, stats: Counter[str]) -> Iterator
             from akuz_log_parser import event_stream, classify
         except ImportError as exc:
             raise RuntimeError("Для обработки .log положите akuz_log_parser.py рядом с akuz_html_explorer.py") from exc
+        from time import perf_counter
+        from inspect import signature
+        supports_diagnostics = "diagnostics" in signature(classify).parameters
         for ev in event_stream(source, stats):
-            ev["category"] = classify(ev["message"])
+            stamp = perf_counter()
+            # Preserve injected one-argument classifiers for legacy comparisons.
+            ev["category"] = (classify(ev["message"], diagnostics=stats)
+                              if supports_diagnostics else classify(ev["message"]))
+            stats["classify_s"] += perf_counter() - stamp
             stats["events"] += 1
             yield ev
 
@@ -260,7 +267,9 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     from akuz_log_parser import classify, normalize, extract_duration
     from akuz_analytics import recognize_error
     from akuz_diagnostics import event as perf_event, phase as perf_phase
-    from time import perf_counter
+    from time import perf_counter, thread_time
+    from inspect import signature
+    supports_diagnostics = "diagnostics" in signature(classify).parameters
     if not source.is_file():
         raise ValueError(f"Исходный файл не найден: {source}")
     source, out = source.resolve(), out.resolve()
@@ -272,7 +281,13 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     data.mkdir(parents=True, exist_ok=True)
     perf_root = out.parent.parent if out.parent.name == 'reports' else out.parent
     started = perf_counter()
+    cpu_started = thread_time()
     shard_time = 0.0
+    read_time = 0.0
+    classify_time = 0.0
+    normalize_time = 0.0
+    error_time = 0.0
+    duration_time = 0.0
     raw_chars = 0
     max_event_chars = 0
     perf_event(perf_root, 'generate.input', 'start',
@@ -305,7 +320,13 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         dest.write_text("window.AKUZ_RAW=" + js_json(raw_shard) + ";\n", encoding="utf-8")
         shard_time += perf_counter() - stamp
 
-    for ev in (read_input(source, base, stats) if event_source is None else event_source):
+    events_iter = iter(read_input(source, base, stats) if event_source is None else event_source)
+    while True:
+        stamp = perf_counter()
+        ev = next(events_iter, None)
+        read_time += perf_counter() - stamp
+        if ev is None:
+            break
         if event_source is not None:
             stats['events'] += 1
         # Preserve an already documented date from a v1 JSONL archive unless
@@ -317,9 +338,19 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                 raise ValueError(f"Некорректное поле date у события #{ev['event_id']}") from exc
         n = len(rows)
         if n and n % 50000 == 0:
+            src_classify = stats.get("classify_s", 0.0)
             perf_event(perf_root, 'generate.parse', 'progress', events=n,
                        raw_chars=raw_chars, max_event_chars=max_event_chars,
-                       elapsed_s=round(perf_counter() - started, 3))
+                       elapsed_s=round(perf_counter() - started, 3),
+                       source_next_s=round(read_time - src_classify, 3),
+                       classify_s=round(classify_time + src_classify, 3),
+                       normalize_s=round(normalize_time, 3),
+                       errors_s=round(error_time, 3),
+                       shard_write_s=round(shard_time, 3),
+                       duration_s=round(duration_time, 3),
+                       classify_calls=stats["classify_calls"],
+                       classify_regex_fallback_events=stats["classify_regex_fallback_events"],
+                       classify_literal_path_events=stats["classify_calls"]-stats["classify_regex_fallback_events"])
         eid = ev["event_id"]
         if not isinstance(eid, int) or eid <= 0:
             raise ValueError(f"Недопустимый event_id: {eid}")
@@ -343,7 +374,12 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
             source_ids[source_label] = len(sources)
             sources.append(source_label)
         sid = source_ids[source_label]
-        label = ev.get("category") or classify(text)
+        label = ev.get("category")
+        if not label:
+            stamp = perf_counter()
+            label = (classify(text, diagnostics=stats)
+                     if supports_diagnostics else classify(text))
+            classify_time += perf_counter() - stamp
         if label not in CAT:
             # Future parser categories are kept, not incorrectly collapsed to "прочее".
             CAT_EXTRA.add(label)
@@ -357,11 +393,16 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         hour[(ev["day_offset"], ev["time"][:2] if ev["time"] else "??")] += 1
         if ev["request_id"]:
             request[ev["request_id"]] += 1
-        key = (comp, label, normalize(text))
+        stamp = perf_counter()
+        norm = normalize(text)
+        normalize_time += perf_counter() - stamp
+        key = (comp, label, norm)
         pattern[key] += 1
         if key not in pattern_first:
             pattern_first[key] = eid
+        stamp = perf_counter()
         dur = extract_duration(text)
+        duration_time += perf_counter() - stamp
         if dur is not None:
             millis, kind = dur
             duration.append((millis, comp, kind, eid))
@@ -372,7 +413,9 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         rows.append([eid, ev["day_offset"], ev["time"], cid, label, ev["request_id"], ev["user"],
                      headline, ev.get("original_start_line", ev["start_line"]),
                      ev.get("original_end_line", ev["end_line"]), n // chunk_size, n % chunk_size, sid])
+        stamp = perf_counter()
         match = recognize_error(ev["raw"])
+        error_time += perf_counter() - stamp
         if match:
             error_fingerprints[str(eid)] = match["fp"]
         raw_shard.append(ev["raw"])
@@ -394,10 +437,24 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                 pass
     if raw_shard:
         flush((len(rows)-1)//chunk_size)
+    total = perf_counter() - started
+    thread_cpu = thread_time() - cpu_started
+    src_classify = stats.get("classify_s", 0.0)
+    classify_total = classify_time + src_classify
+    read_total = read_time - src_classify
+    other_total = max(0.0, total - shard_time - read_total - classify_total
+                      - normalize_time - error_time - duration_time)
     perf_event(perf_root, 'generate.parse', 'done', events=len(rows),
                lines=prev_end, shards=(len(rows)+chunk_size-1)//chunk_size,
                raw_chars=raw_chars, max_event_chars=max_event_chars,
-               elapsed_s=round(perf_counter()-started, 3), shard_write_s=round(shard_time, 3))
+               elapsed_s=round(total, 3), shard_write_s=round(shard_time, 3),
+               source_next_s=round(read_total, 3), classify_s=round(classify_total, 3),
+               normalize_s=round(normalize_time, 3), errors_s=round(error_time, 3),
+               duration_s=round(duration_time, 3), other_s=round(other_total, 3),
+               thread_cpu_s=round(thread_cpu, 3),
+               classify_calls=stats["classify_calls"],
+               classify_regex_fallback_events=stats["classify_regex_fallback_events"],
+               classify_literal_path_events=stats["classify_calls"]-stats["classify_regex_fallback_events"])
     if not rows:
         raise ValueError("Нет распознанных событий")
     # A rerun into the same directory must not leave obsolete old event shards
