@@ -229,7 +229,8 @@ def js_json(value: Any) -> str:
             .replace("\u2029", "\\u2029"))
 
 
-def read_input(source: Path, base: date | None, stats: Counter[str]) -> Iterator[dict[str, Any]]:
+def read_input(source: Path, base: date | None, stats: Counter[str],
+               *, defer_classify: bool = False) -> Iterator[dict[str, Any]]:
     if source.name.endswith(".jsonl.gz") or source.suffix.lower() == ".jsonl":
         open_file = gzip.open if source.suffix.lower() == ".gz" else open
         with open_file(source, "rt", encoding="utf-8") as src:
@@ -253,11 +254,12 @@ def read_input(source: Path, base: date | None, stats: Counter[str]) -> Iterator
         from inspect import signature
         supports_diagnostics = "diagnostics" in signature(classify).parameters
         for ev in event_stream(source, stats):
-            stamp = perf_counter()
-            # Preserve injected one-argument classifiers for legacy comparisons.
-            ev["category"] = (classify(ev["message"], diagnostics=stats)
-                              if supports_diagnostics else classify(ev["message"]))
-            stats["classify_s"] += perf_counter() - stamp
+            if not defer_classify:
+                stamp = perf_counter()
+                # Preserve the public read_input API and injected classifiers.
+                ev["category"] = (classify(ev["message"], diagnostics=stats)
+                                  if supports_diagnostics else classify(ev["message"]))
+                stats["classify_s"] += perf_counter() - stamp
             stats["events"] += 1
             yield ev
 
@@ -269,7 +271,10 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     from akuz_diagnostics import event as perf_event, phase as perf_phase
     from time import perf_counter, thread_time
     from inspect import signature
-    supports_diagnostics = "diagnostics" in signature(classify).parameters
+    classify_params = signature(classify).parameters
+    supports_diagnostics = "diagnostics" in classify_params
+    supports_folded = "folded" in classify_params
+    duration_supports_folded = "folded" in signature(extract_duration).parameters
     if not source.is_file():
         raise ValueError(f"Исходный файл не найден: {source}")
     source, out = source.resolve(), out.resolve()
@@ -288,6 +293,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     normalize_time = 0.0
     error_time = 0.0
     duration_time = 0.0
+    fold_time = 0.0
     raw_chars = 0
     max_event_chars = 0
     perf_event(perf_root, 'generate.input', 'start',
@@ -320,7 +326,8 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         dest.write_text("window.AKUZ_RAW=" + js_json(raw_shard) + ";\n", encoding="utf-8")
         shard_time += perf_counter() - stamp
 
-    events_iter = iter(read_input(source, base, stats) if event_source is None else event_source)
+    events_iter = iter(read_input(source, base, stats, defer_classify=True)
+                       if event_source is None else event_source)
     while True:
         stamp = perf_counter()
         ev = next(events_iter, None)
@@ -348,6 +355,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                        errors_s=round(error_time, 3),
                        shard_write_s=round(shard_time, 3),
                        duration_s=round(duration_time, 3),
+                       fold_s=round(fold_time, 3),
                        classify_calls=stats["classify_calls"],
                        classify_regex_fallback_events=stats["classify_regex_fallback_events"],
                        classify_literal_path_events=stats["classify_calls"]-stats["classify_regex_fallback_events"])
@@ -369,6 +377,9 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
             raise ValueError(f"Разрыв покрытия строк у события #{eid}: expected {prev_end+1}, got {ev['start_line']}")
         prev_end = ev["end_line"]
         text = ev["message"]
+        stamp = perf_counter()
+        folded = text.casefold()
+        fold_time += perf_counter() - stamp
         source_label = ev.get("source_file") or source.name
         if source_label not in source_ids:
             source_ids[source_label] = len(sources)
@@ -377,8 +388,11 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         label = ev.get("category")
         if not label:
             stamp = perf_counter()
-            label = (classify(text, diagnostics=stats)
-                     if supports_diagnostics else classify(text))
+            label = (classify(text, diagnostics=stats, folded=folded)
+                     if supports_diagnostics and supports_folded
+                     else classify(text, diagnostics=stats) if supports_diagnostics
+                     else classify(text, folded=folded) if supports_folded
+                     else classify(text))
             classify_time += perf_counter() - stamp
         if label not in CAT:
             # Future parser categories are kept, not incorrectly collapsed to "прочее".
@@ -401,7 +415,8 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         if key not in pattern_first:
             pattern_first[key] = eid
         stamp = perf_counter()
-        dur = extract_duration(text)
+        dur = (extract_duration(text, folded=folded) if duration_supports_folded
+               else extract_duration(text))
         duration_time += perf_counter() - stamp
         if dur is not None:
             millis, kind = dur
@@ -443,14 +458,15 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     classify_total = classify_time + src_classify
     read_total = read_time - src_classify
     other_total = max(0.0, total - shard_time - read_total - classify_total
-                      - normalize_time - error_time - duration_time)
+                      - normalize_time - error_time - duration_time - fold_time)
     perf_event(perf_root, 'generate.parse', 'done', events=len(rows),
                lines=prev_end, shards=(len(rows)+chunk_size-1)//chunk_size,
                raw_chars=raw_chars, max_event_chars=max_event_chars,
                elapsed_s=round(total, 3), shard_write_s=round(shard_time, 3),
                source_next_s=round(read_total, 3), classify_s=round(classify_total, 3),
                normalize_s=round(normalize_time, 3), errors_s=round(error_time, 3),
-               duration_s=round(duration_time, 3), other_s=round(other_total, 3),
+               duration_s=round(duration_time, 3), fold_s=round(fold_time, 3),
+               other_s=round(other_total, 3),
                thread_cpu_s=round(thread_cpu, 3),
                classify_calls=stats["classify_calls"],
                classify_regex_fallback_events=stats["classify_regex_fallback_events"],

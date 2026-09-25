@@ -162,11 +162,12 @@ def _classify_regex(message: str) -> str:
     return "прочее"
 
 
-def classify(message: str, *, diagnostics: Counter[str] | None = None) -> str:
+def classify(message: str, *, diagnostics: Counter[str] | None = None,
+             folded: str | None = None) -> str:
     # Preserve category priority, not the textual order of matching markers.
     # Fast find-based matching for ordinary AKUZ strings; fall back to exact
     # regex semantics for folds like ß -> ss that change character positions.
-    lowered = message.casefold().replace("ı", "i").replace("i\u0307", "i")
+    lowered = (message.casefold() if folded is None else folded).replace("ı", "i").replace("i\u0307", "i")
     # U+0345 casefolds from a non-word combining mark into a word letter,
     # changing Unicode regex word boundaries without changing string length.
     if diagnostics is not None:
@@ -203,9 +204,9 @@ def to_ms(raw: str) -> float:
     return ((int(hh) * 60 + int(mm)) * 60 + float(rem)) * 1000
 
 
-def extract_duration(message: str) -> tuple[float, str] | None:
+def extract_duration(message: str, *, folded: str | None = None) -> tuple[float, str] | None:
     # Preserve precedence: 'общее время' wins even when 'за N ms' comes first.
-    lowered = message.casefold()
+    lowered = message.casefold() if folded is None else folded
     if "общее" in lowered and "время" in lowered:
         match = DURATION.search(message)
         if match:

@@ -32,7 +32,7 @@ class Phase6InstrumentationTests(unittest.TestCase):
             fields = dict(item.split("=", 1) for item in done.split()
                           if "=" in item)
             for key in ("source_next_s", "classify_s", "normalize_s",
-                        "duration_s", "errors_s", "shard_write_s", "other_s",
+                        "duration_s", "errors_s", "shard_write_s", "fold_s", "other_s",
                         "thread_cpu_s", "classify_calls",
                         "classify_regex_fallback_events",
                         "classify_literal_path_events"):
@@ -41,7 +41,7 @@ class Phase6InstrumentationTests(unittest.TestCase):
             self.assertEqual(int(fields["classify_regex_fallback_events"]), 1)
             self.assertEqual(int(fields["classify_literal_path_events"]), 1)
             components = ("source_next_s", "classify_s", "normalize_s",
-                          "duration_s", "errors_s", "shard_write_s", "other_s")
+                          "duration_s", "errors_s", "shard_write_s", "fold_s", "other_s")
             self.assertAlmostEqual(sum(float(fields[k]) for k in components),
                                    float(fields["elapsed_s"]), delta=0.005)
             self.assertNotIn("notfound", trace)
