@@ -283,11 +283,20 @@ def perform_build(root: Path, state: State, selections,
     dropped_bytes = 0
     def download(remote):
         nonlocal active_count, dropped_bytes
-        with perf_phase(root, 'source.fetch', bytes_expected=remote.get('size', 0)):
-            result = fetch_fn(cfg, remote, state.set_stage) if source == 'linux' else source_fetch(cfg, source, remote, state.set_stage)
+        with perf_phase(root, 'source.fetch', bytes_expected=remote.get('size', 0),
+                        source_kind={'linux': 1, 'windows': 2, 'local': 3}.get(source, 0)):
+            if source == 'linux':
+                # Only our built-in SSH adapter accepts the optional trace_root.
+                # Preserve the signature of caller-injected fetch functions.
+                result = (fetch_fn(cfg, remote, state.set_stage, trace_root=root)
+                          if fetch_fn is fetch_selected
+                          else fetch_fn(cfg, remote, state.set_stage))
+            else:
+                result = source_fetch(cfg, source, remote, state.set_stage)
         path, digest = result[:2]
         details = result[2] if len(result) > 2 else {}
-        perf_event(root, 'source.fetch', 'summary', bytes_saved=path.stat().st_size)
+        perf_event(root, 'source.fetch', 'summary', bytes_saved=path.stat().st_size,
+                   source_kind={'linux': 1, 'windows': 2, 'local': 3}.get(source, 0))
         if details.get('active'):
             active_count += 1
             dropped_bytes += details.get('dropped_tail_bytes', 0)

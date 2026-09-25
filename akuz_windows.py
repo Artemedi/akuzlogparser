@@ -127,12 +127,14 @@ def fetch_windows(cfg: WindowsConfig, selected: dict, notify=lambda msg: None):
                 raise FetchError('Файл пока пустой')
             notify(f'Скачиваю первые {bound} байт файла {current["name"]}…')
             copied = 0
+            digest_stream = hashlib.sha256()
             with part.open('xb') as target:
                 while copied < bound:
                     block = stream.read(min(256*1024, bound-copied))
                     if not block:
                         raise FetchError('Файл усечён во время чтения')
                     target.write(block)
+                    digest_stream.update(block)
                     copied += len(block)
             after = os.fstat(stream.fileno())
         # Path identity is checked *after* closing the handle too.
@@ -149,7 +151,9 @@ def fetch_windows(cfg: WindowsConfig, selected: dict, notify=lambda msg: None):
         if active and not _ends_with_newline(part):
             tail = _discard_incomplete_tail(part)
             notify(f'Активный Windows-журнал: исключено {tail} байт незавершённой строки')
-        digest = _sha_file(part)
+        # A static snapshot has already been hashed during the copy.
+        # Active snapshots need a second pass only if the tail was truncated.
+        digest = _sha_file(part) if tail else digest_stream.hexdigest()
         part.replace(dest)
         return dest, digest, dict(active=active, captured_bytes=bound,
             stored_bytes=dest.stat().st_size, dropped_tail_bytes=tail,

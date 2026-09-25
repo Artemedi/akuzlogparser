@@ -7,6 +7,7 @@ Remote commands target Linux with GNU find/stat/head and sudo when required.
 from __future__ import annotations
 
 import configparser
+from contextlib import nullcontext
 from dataclasses import dataclass
 import fnmatch
 import os
@@ -15,6 +16,8 @@ import re
 import shlex
 import time
 from typing import Callable
+
+from akuz_diagnostics import event as perf_event, phase as perf_phase
 
 
 class FetchError(RuntimeError):
@@ -33,6 +36,7 @@ class ConnectConfig:
     local_dest: Path
     file_pattern: str
     base_date: str
+    compression: bool = False
 
 
 def load_config(path: Path, app_root: Path) -> ConnectConfig:
@@ -53,6 +57,7 @@ def load_config(path: Path, app_root: Path) -> ConnectConfig:
         local = logs.get('local_dest', '').strip()
         pattern = logs.get('file_pattern', '*').strip() or '*'
         base_date = logs.get('base_date', '').strip()
+        compression = ssh.getboolean('compression', fallback=False)
     except (configparser.Error, KeyError, ValueError) as exc:
         raise FetchError('Проверьте секции [ssh], [logs] и числовой port в ConnectConf.cfg') from exc
     if not host or not username or not remote:
@@ -75,7 +80,8 @@ def load_config(path: Path, app_root: Path) -> ConnectConfig:
     if not dest.is_absolute():
         dest = app_root/dest
     return ConnectConfig(host, port, username, password, sudo_password,
-                         key_file, remote, dest.resolve(), pattern, base_date)
+                         key_file, remote, dest.resolve(), pattern, base_date,
+                         compression)
 
 
 def remote_find_command(directory: str, sudo: bool, has_password: bool) -> str:
@@ -155,7 +161,8 @@ def fetch_latest(cfg: ConnectConfig, notify: Callable[[str], None] = lambda x: N
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
         kw = dict(hostname=cfg.host, port=cfg.port, username=cfg.username,
                   timeout=15, auth_timeout=25, banner_timeout=20,
-                  look_for_keys=True, allow_agent=True)
+                  look_for_keys=True, allow_agent=True,
+                  compress=cfg.compression)
         if cfg.password:
             kw['password'] = cfg.password
         if cfg.key_file:
@@ -265,7 +272,8 @@ def _connect(cfg: ConnectConfig, notify=lambda msg: None, client_factory=None):
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
         kw = dict(hostname=cfg.host, port=cfg.port, username=cfg.username,
                   timeout=15, auth_timeout=25, banner_timeout=20,
-                  look_for_keys=True, allow_agent=True)
+                  look_for_keys=True, allow_agent=True,
+                  compress=cfg.compression)
         if cfg.password:
             kw['password'] = cfg.password
         if cfg.key_file:
@@ -363,29 +371,36 @@ def _discard_incomplete_tail(path: Path) -> int:
 
 
 def fetch_selected(cfg: ConnectConfig, selected: dict,
-                   notify=lambda msg: None, client_factory=None) -> tuple[Path, str, dict]:
+                   notify=lambda msg: None, client_factory=None,
+                   *, trace_root: Path | None = None) -> tuple[Path, str, dict]:
     """Download byte-bounded prefix from an append-only live file, or exact static file.
 
     The selection must come from server-side inventory, NOT untrusted browser paths.
     Returns local path, SHA256 of actually stored bytes, capture details.
     """
-    client = _connect(cfg, notify, client_factory)
+    def trace(stage: str, **metrics):
+        return perf_phase(trace_root, stage, **metrics) if trace_root is not None else nullcontext()
+
+    with trace('source.ssh.connect'):
+        client = _connect(cfg, notify, client_factory)
     part = None
     try:
         # The old id includes mtime and size and is expected to become stale for live logs.
         # Resolve ONLY a trusted path that was already present in server-side inventory.
-        current = next((f for f in _listing(client, cfg) if f['path'] == selected['path']), None)
+        with trace('source.ssh.inventory'):
+            current = next((f for f in _listing(client, cfg) if f['path'] == selected['path']), None)
         if current is None:
             raise FetchError('Удалённый файл исчез или ротирован. Обновите список файлов.')
         if selected.get('inode') is not None and (selected['device'], selected['inode']) != (current.get('device'),current.get('inode')):
             raise FetchError('Файл заменён ротацией с момента получения списка. Обновите список файлов.')
         quoted = shlex.quote(current['path'])
         notify('Фиксирую границу снимка ' + current['name'] + '…')
-        before, err = _remote_metadata(client, cfg, quoted)
-        use_sudo = False
-        if before is None:
-            use_sudo = True
-            before, err = _remote_metadata(client, cfg, quoted, True)
+        with trace('source.ssh.stat_before'):
+            before, err = _remote_metadata(client, cfg, quoted)
+            use_sudo = False
+            if before is None:
+                use_sudo = True
+                before, err = _remote_metadata(client, cfg, quoted, True)
         if before is None:
             raise FetchError('Не удалось проверить файл: ' + _clean_error(err, cfg))
         dev, inode, bound, first_mtime = before
@@ -412,6 +427,8 @@ def fetch_selected(cfg: ConnectConfig, selected: dict,
             stdin.channel.shutdown_write()
             h = hashlib.sha256()
             copied = 0
+            transfer_started = time.perf_counter()
+            next_progress = 64 * 1024 * 1024
             with part.open('xb') as output:
                 while True:
                     block = stdout.read(256 * 1024)
@@ -422,18 +439,33 @@ def fetch_selected(cfg: ConnectConfig, selected: dict,
                         raise FetchError('Сервер отправил больше байт, чем зафиксировано')
                     h.update(block)
                     output.write(block)
+                    if trace_root is not None and copied >= next_progress:
+                        elapsed = max(time.perf_counter() - transfer_started, 0.001)
+                        perf_event(trace_root, 'source.ssh.transfer', 'progress',
+                                   bytes_received=copied, bytes_expected=bound,
+                                   elapsed_s=round(elapsed, 3),
+                                   mib_per_s=round(copied / (1024 * 1024) / elapsed, 3))
+                        next_progress = ((copied // (64 * 1024 * 1024)) + 1) * 64 * 1024 * 1024
             error = stderr.read(32768).decode('utf-8', 'replace').strip()
             rc = stdout.channel.recv_exit_status()
+            if trace_root is not None:
+                elapsed = max(time.perf_counter() - transfer_started, 0.001)
+                perf_event(trace_root, 'source.ssh.transfer', 'summary',
+                           bytes_received=copied, bytes_expected=bound,
+                           elapsed_s=round(elapsed, 3),
+                           mib_per_s=round(copied / (1024 * 1024) / elapsed, 3))
             return rc, copied, h.hexdigest(), error
-        rc, copied, digest, err = transfer(use_sudo)
-        if rc and not use_sudo and copied == 0:
-            part.unlink(missing_ok=True)
-            notify('Чтение с sudo…')
-            rc, copied, digest, err = transfer(True)
-            use_sudo = True
+        with trace('source.ssh.transfer', bytes_expected=bound):
+            rc, copied, digest, err = transfer(use_sudo)
+            if rc and not use_sudo and copied == 0:
+                part.unlink(missing_ok=True)
+                notify('Чтение с sudo…')
+                rc, copied, digest, err = transfer(True)
+                use_sudo = True
         if rc or copied != bound:
             raise FetchError(f'Передача неполная: {copied}/{bound} байт. ' + _clean_error(err, cfg))
-        after, err = _remote_metadata(client, cfg, quoted, use_sudo)
+        with trace('source.ssh.stat_after'):
+            after, err = _remote_metadata(client, cfg, quoted, use_sudo)
         if after is None:
             raise FetchError('Файл ротирован или недоступен после чтения: ' + _clean_error(err, cfg))
         if after[:2] != (dev, inode):
@@ -443,8 +475,9 @@ def fetch_selected(cfg: ConnectConfig, selected: dict,
         active = (current['size'] != bound or after[2] != bound or after[3] != first_mtime)
         tail = 0
         if active and not _ends_with_newline(part):
-            tail = _discard_incomplete_tail(part)
-            digest = _sha_file(part)
+            with trace('source.ssh.trim_rehash', bytes_expected=bound):
+                tail = _discard_incomplete_tail(part)
+                digest = _sha_file(part)
             notify(f'Активный лог: отброшено {tail} байт незавершённой строки')
         if active:
             notify(f'Снимок активного журнала готов: {part.stat().st_size} байт из границы {bound}')

@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 import akuz_app as app
 from akuz_analytics import refresh
@@ -90,7 +91,8 @@ class LocalSourceTests(unittest.TestCase):
         original = self.write()
         cfg = load_local_config(str(self.logs), self.root)
         item = list_local(cfg)[0]
-        source, digest, details = fetch_local(cfg, item)
+        with patch('akuz_local._sha_file', side_effect=AssertionError('second disk read')):
+            source, digest, details = fetch_local(cfg, item)
         self.assertEqual(source.read_bytes(), original.read_bytes())
         self.assertEqual(digest, hashlib.sha256(original.read_bytes()).hexdigest())
         self.assertFalse(details['active'])

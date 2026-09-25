@@ -92,7 +92,8 @@ class WindowsSourceTests(unittest.TestCase):
         data = b'12:00:00.000,AKUZ,s1,user: final'
         self.write_log(data=data)
         selected = win._inventory(self.share, self.cfg)[0]
-        with patch.object(win, 'os', self.fake_os):
+        with patch.object(win, 'os', self.fake_os), patch.object(
+                win, '_sha_file', side_effect=AssertionError('second disk read')):
             path, digest, meta = win.fetch_windows(self.cfg, selected)
         self.assertEqual(path.read_bytes(), data)
         self.assertEqual(digest, hashlib.sha256(data).hexdigest())
