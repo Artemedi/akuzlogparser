@@ -272,6 +272,8 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     perf_root = out.parent.parent if out.parent.name == 'reports' else out.parent
     started = perf_counter()
     shard_time = 0.0
+    raw_chars = 0
+    max_event_chars = 0
     perf_event(perf_root, 'generate.input', 'start', input_bytes=source.stat().st_size)
     stats: Counter[str] = Counter()
     category = Counter()
@@ -312,6 +314,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         n = len(rows)
         if n and n % 50000 == 0:
             perf_event(perf_root, 'generate.parse', 'progress', events=n,
+                       raw_chars=raw_chars, max_event_chars=max_event_chars,
                        elapsed_s=round(perf_counter() - started, 3))
         eid = ev["event_id"]
         if not isinstance(eid, int) or eid <= 0:
@@ -320,6 +323,9 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
             raise ValueError(f"event_id не возрастают у записи #{eid}")
         if not isinstance(ev["raw"], str):
             raise ValueError(f"Неверный raw для события #{eid}")
+        event_chars = len(ev["raw"])
+        raw_chars += event_chars
+        max_event_chars = max(max_event_chars, event_chars)
         if not isinstance(ev["message"], str):
             raise ValueError(f"Неверный message для события #{eid}")
         if not isinstance(ev["start_line"], int) or not isinstance(ev["end_line"], int) or ev["start_line"] > ev["end_line"]:
@@ -385,6 +391,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         flush((len(rows)-1)//chunk_size)
     perf_event(perf_root, 'generate.parse', 'done', events=len(rows),
                lines=prev_end, shards=(len(rows)+chunk_size-1)//chunk_size,
+               raw_chars=raw_chars, max_event_chars=max_event_chars,
                elapsed_s=round(perf_counter()-started, 3), shard_write_s=round(shard_time, 3))
     if not rows:
         raise ValueError("Нет распознанных событий")

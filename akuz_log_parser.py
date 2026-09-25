@@ -118,6 +118,7 @@ def event_stream(source: Path, stats: Counter[str]) -> Iterator[dict[str, Any]]:
     """Yield one event per timestamped header, preserving continuation lines."""
     current: dict[str, Any] | None = None
     raw_lines: list[str] = []
+    message_lines: list[str] = []
     prev_ms: int | None = None
     day = 0
     event_id = 0
@@ -135,6 +136,8 @@ def event_stream(source: Path, stats: Counter[str]) -> Iterator[dict[str, Any]]:
             if match or windows:
                 if current is not None:
                     current["raw"] = "\n".join(raw_lines)
+                    if len(message_lines) > 1:
+                        current["message"] = "\n".join(message_lines)
                     current["end_line"] = line_number - 1
                     yield current
                 event_id += 1
@@ -173,6 +176,7 @@ def event_stream(source: Path, stats: Counter[str]) -> Iterator[dict[str, Any]]:
                     "start_line": line_number,
                 }
                 raw_lines = [clean]
+                message_lines = [message]
             else:
                 stats["continuation_lines"] += 1
                 if current is None:
@@ -183,12 +187,15 @@ def event_stream(source: Path, stats: Counter[str]) -> Iterator[dict[str, Any]]:
                         "user": "", "message": clean, "start_line": line_number,
                     }
                     raw_lines = [clean]
+                    message_lines = [clean]
                     stats["preamble_events"] += 1
                 else:
                     raw_lines.append(clean)
-                    current["message"] += "\n" + clean
+                    message_lines.append(clean)
         if current is not None:
             current["raw"] = "\n".join(raw_lines)
+            if len(message_lines) > 1:
+                current["message"] = "\n".join(message_lines)
             current["end_line"] = stats["physical_lines"]
             yield current
 
