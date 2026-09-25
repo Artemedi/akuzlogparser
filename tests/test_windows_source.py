@@ -181,7 +181,9 @@ class WindowsSourceTests(unittest.TestCase):
              patch.object(app,"source_fetch",side_effect=fetch):
             app.perform_list(self.root,state,source="windows")
             choices=[{"id":item["id"],"date":"2026-09-22"} for item in state.listing]
-            app.perform_build(self.root,state,choices,refresh_remote=True)
+            with patch.object(app,"_combine_sources",
+                              side_effect=AssertionError("legacy JSONL bridge used")):
+                app.perform_build(self.root,state,choices,refresh_remote=True)
         singles=[r for r in state.result["reports"] if r["kind"]=="single"]
         self.assertEqual(len(singles),2)
         self.assertEqual(len({r["id"] for r in singles}),2)

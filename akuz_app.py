@@ -139,7 +139,8 @@ def _fresh_report_id(root: Path):
     raise FetchError('Не удалось назначить идентификатор отчёта')
 
 
-def _publish(root, store, key, raw_path, base, sources, label, kind, gen_fn=generate):
+def _publish(root, store, key, raw_path, base, sources, label, kind,
+             gen_fn=generate, input_bytes=None):
     old = cached_report(store, key, root)
     if old is not None:
         return dict(old, url='/reports/'+old['id']+'/index.html', reused=True)
@@ -149,7 +150,8 @@ def _publish(root, store, key, raw_path, base, sources, label, kind, gen_fn=gene
     temp = parent/(rid+'.building')
     final = parent/rid
     try:
-        with perf_phase(root, 'report.generate', input_bytes=raw_path.stat().st_size):
+        with perf_phase(root, 'report.generate',
+                        input_bytes=raw_path.stat().st_size if input_bytes is None else input_bytes):
             meta = gen_fn(raw_path, temp, base, 1000, 35)
         perf_event(root, 'report.generate', 'summary', events=meta['events'],
                    chunks=meta.get('chunks', 0))
@@ -172,43 +174,56 @@ def _publish(root, store, key, raw_path, base, sources, label, kind, gen_fn=gene
             shutil.rmtree(temp)
 
 
-def _combine_sources(selected, scratch: Path, base: date):
-    """Create one JSONL without false 'same message == duplicate' assumptions.
+def _iter_combined_sources(selected, base: date, trace_root: Path | None = None):
+    """Yield combined events without materializing a second copy of all texts.
 
-    Each source is independent, first event date is operator-selected. Original
-    source event ID and line ranges are retained as auxiliary fields.
+    Source identities, dates, original lines and ordering match the historical
+    JSONL merger. The optional trace measures end-to-end stream consumption.
     """
     total_lines = 0
     count = 0
     started = perf_counter()
-    perf_root = scratch.parent.parent
-    with scratch.open('w', encoding='utf-8', newline='\n') as output:
-        for index, item in enumerate(sorted(selected, key=lambda x:(x['date'], x['remote']['mtime'], x['remote']['name'])), 1):
-            d = date.fromisoformat(item['date'])
-            source = item['remote']['name'] + ' · ' + item['date']
-            stats = Counter()
-            before_source = count
-            for ev in event_stream(item['local'], stats):
-                count += 1
-                if count % 50000 == 0:
-                    perf_event(perf_root, 'combined.merge', 'progress', events=count,
-                               elapsed_s=round(perf_counter() - started, 3))
-                original_start, original_end = ev['start_line'], ev['end_line']
-                ev['original_start_line'] = original_start
-                ev['original_end_line'] = original_end
-                ev['source_event_id'] = ev['event_id']
-                ev['source_file'] = source
-                ev['event_id'] = count
-                ev['day_offset'] = (d-base).days + ev['day_offset']
-                ev['date'] = (base + timedelta(days=ev['day_offset'])).isoformat()
-                ev['start_line'] = total_lines + original_start
-                ev['end_line'] = total_lines + original_end
-                output.write(json.dumps(ev, ensure_ascii=False, separators=(',', ':'))+'\n')
-            total_lines += stats['physical_lines']
-            perf_event(perf_root, 'combined.source', 'done', source_index=index,
+    for index, item in enumerate(sorted(
+            selected, key=lambda x:(x['date'], x['remote']['mtime'], x['remote']['name'])), 1):
+        d = date.fromisoformat(item['date'])
+        source = item['remote']['name'] + ' · ' + item['date']
+        stats = Counter()
+        before_source = count
+        for ev in event_stream(item['local'], stats):
+            count += 1
+            if trace_root is not None and count % 50000 == 0:
+                perf_event(trace_root, 'combined.stream', 'progress', events=count,
+                           elapsed_s=round(perf_counter() - started, 3))
+            original_start, original_end = ev['start_line'], ev['end_line']
+            ev['original_start_line'] = original_start
+            ev['original_end_line'] = original_end
+            ev['source_event_id'] = ev['event_id']
+            ev['source_file'] = source
+            ev['event_id'] = count
+            ev['day_offset'] = (d-base).days + ev['day_offset']
+            ev['date'] = (base + timedelta(days=ev['day_offset'])).isoformat()
+            ev['start_line'] = total_lines + original_start
+            ev['end_line'] = total_lines + original_end
+            yield ev
+        total_lines += stats['physical_lines']
+        if trace_root is not None:
+            perf_event(trace_root, 'combined.source', 'done', source_index=index,
                        source_events=count-before_source, total_events=count)
     if count == 0:
         raise FetchError('В выбранных файлах не обнаружены события AKUZ')
+    if trace_root is not None:
+        perf_event(trace_root, 'combined.stream', 'summary',
+                   events=count, lines=total_lines)
+
+
+def _combine_sources(selected, scratch: Path, base: date):
+    """Keep the legacy JSONL merger for CLI/tests/custom generators."""
+    count = total_lines = 0
+    with scratch.open('w', encoding='utf-8', newline='\n') as output:
+        for ev in _iter_combined_sources(selected, base, scratch.parent.parent):
+            count = ev['event_id']
+            total_lines = ev['end_line']
+            output.write(json.dumps(ev, ensure_ascii=False, separators=(',', ':'))+'\n')
     return count, total_lines
 
 
@@ -353,15 +368,28 @@ def perform_build(root: Path, state: State, selections,
                 scratch = Path(tmp.name)
             try:
                 first = date.fromisoformat(files[0]['date'])
-                with perf_phase(root, 'combined.merge', files=len(files)):
-                    count, physical_lines = _combine_sources(files, scratch, first)
-                perf_event(root, 'combined.merge', 'summary', events=count,
-                           lines=physical_lines, bytes_saved=scratch.stat().st_size)
                 sources = [dict(name=f['remote']['name'], date=f['date'],
                                 sha256=f['sha'], remote_path=f['remote']['path'], host=cfg.host) for f in files]
                 label = f'Общая выборка · {files[0]["date"]} — {files[-1]["date"]} · {len(files)} файлов'
-                combined = _publish(root, store, multi_key, scratch, first,
-                                    sources, label, 'combined', gen_fn)
+                if gen_fn is generate:
+                    # The normal app path streams joined events directly to the
+                    # existing generator; only the disposable marker file stays.
+                    source_bytes = sum(f['local'].stat().st_size for f in files)
+                    def stream_gen(raw, out, base, chunk_size, top):
+                        return generate(raw, out, base, chunk_size, top,
+                                        event_source=_iter_combined_sources(files, base, root),
+                                        input_bytes=source_bytes)
+                    combined = _publish(root, store, multi_key, scratch, first,
+                                        sources, label, 'combined', stream_gen,
+                                        input_bytes=source_bytes)
+                else:
+                    # Custom generators still receive the historical JSONL file.
+                    with perf_phase(root, 'combined.merge', files=len(files)):
+                        count, physical_lines = _combine_sources(files, scratch, first)
+                    perf_event(root, 'combined.merge', 'summary', events=count,
+                               lines=physical_lines, bytes_saved=scratch.stat().st_size)
+                    combined = _publish(root, store, multi_key, scratch, first,
+                                        sources, label, 'combined', gen_fn)
             finally:
                 scratch.unlink(missing_ok=True)
     elif len(files) > 1:

@@ -255,7 +255,8 @@ def read_input(source: Path, base: date | None, stats: Counter[str]) -> Iterator
             yield ev
 
 
-def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: int) -> dict[str, Any]:
+def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: int,
+             *, event_source=None, input_bytes=None) -> dict[str, Any]:
     from akuz_log_parser import classify, normalize, extract_duration
     from akuz_analytics import recognize_error
     from akuz_diagnostics import event as perf_event, phase as perf_phase
@@ -274,7 +275,8 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     shard_time = 0.0
     raw_chars = 0
     max_event_chars = 0
-    perf_event(perf_root, 'generate.input', 'start', input_bytes=source.stat().st_size)
+    perf_event(perf_root, 'generate.input', 'start',
+               input_bytes=source.stat().st_size if input_bytes is None else input_bytes)
     stats: Counter[str] = Counter()
     category = Counter()
     component = Counter()
@@ -303,7 +305,9 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         dest.write_text("window.AKUZ_RAW=" + js_json(raw_shard) + ";\n", encoding="utf-8")
         shard_time += perf_counter() - stamp
 
-    for ev in read_input(source, base, stats):
+    for ev in (read_input(source, base, stats) if event_source is None else event_source):
+        if event_source is not None:
+            stats['events'] += 1
         # Preserve an already documented date from a v1 JSONL archive unless
         # the caller explicitly supplies the date for this investigation.
         if base is None and ev.get("date"):
