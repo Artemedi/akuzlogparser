@@ -46,6 +46,8 @@ class FastTextTests(unittest.TestCase):
             ("таймßаут\nSystem.Exception", "таймаут"),
             ("notfoundİнайден", "прочее"),
             ("not\u00a0found", "не найдено"),
+            ("\u0345timeout", "таймаут"),
+            ("\u0345error", "ошибка/исключение"),
         ]
         for value, expected in cases:
             with self.subTest(message=repr(value)):

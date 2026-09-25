@@ -167,7 +167,9 @@ def classify(message: str) -> str:
     # Fast find-based matching for ordinary AKUZ strings; fall back to exact
     # regex semantics for folds like ß -> ss that change character positions.
     lowered = message.casefold().replace("ı", "i").replace("i\u0307", "i")
-    if len(lowered) != len(message):
+    # U+0345 casefolds from a non-word combining mark into a word letter,
+    # changing Unicode regex word boundaries without changing string length.
+    if len(lowered) != len(message) or "\u0345" in message:
         return _classify_regex(message)
     if ("time" in lowered or "тайм" in lowered or "истекло" in lowered) and _timeout_hit(lowered):
         return "таймаут"

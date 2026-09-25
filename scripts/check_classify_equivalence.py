@@ -52,6 +52,7 @@ def variants():
         "TİMEOUT", "tımeout", "тайм\nаут",
         "not\u00a0found", "не\u00a0найдена", "истекло\nвремя\tожидания",
         "timeoutошибка", "ошибкаtimeout",
+        "\u0345timeout", "\u0345error", "prefix\u0345timeout",
     )
     rng = random.Random(SEED)
     for _ in range(130000):

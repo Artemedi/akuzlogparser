@@ -32,7 +32,16 @@ def original(root):
     return module.classify
 
 
-def create_log(path, total):
+def create_log(path, total, mode="mixed"):
+    if mode == "heavy":
+        # Long multi-line records with category markers late in the message:
+        # a bounded synthetic approximation of heavy AKUZ stack/XML events.
+        payload = "X" * 65536
+        with path.open("w", encoding="utf-8", newline="") as out:
+            for i in range(total):
+                out.write(f"12:00:{i%60:02d}.000,AKUZ,req{i},user: synthetic\n")
+                out.write(payload + (" timeout" if i % 2 else " System.Exception: synthetic") + "\n")
+        return
     rng = random.Random(42)
     words = ["пациент", "запрос", "данные", "сервер", "AKUZ.Service", "обработка"]
     with path.open("w", encoding="utf-8", newline="") as out:
@@ -71,11 +80,11 @@ def compare_files(old, new):
     return len(left), total
 
 
-def main(events=50000):
+def main(events=50000, mode="mixed"):
     with tempfile.TemporaryDirectory(prefix="akuz_bench_find_") as td:
         root = Path(td)
         source = root / "20260925_synthetic.log"
-        create_log(source, events)
+        create_log(source, events, mode=mode)
         original_classify = original(root)
         print(f"events_requested={events} input_bytes={source.stat().st_size}",
               flush=True)
@@ -102,4 +111,5 @@ def main(events=50000):
 
 
 if __name__ == "__main__":
-    main(int(sys.argv[1]) if len(sys.argv) > 1 else 50000)
+    main(int(sys.argv[1]) if len(sys.argv) > 1 else 50000,
+         sys.argv[2] if len(sys.argv) > 2 else "mixed")
