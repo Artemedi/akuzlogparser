@@ -31,10 +31,18 @@ def normalize(message):
 def recognize_error(raw):
     """A fingerprint groups matching exception type, normalized message and top frame."""
     text=raw[:24000]
-    match=EXCEPTION.search(text)
-    serial=SERIAL.search(text)
-    if not match and not serial and not ERROR.search(raw.split("\n",1)[0]):
-        return None
+    # Most AKUZ entries are not exceptions. Avoid searching the same long
+    # prefix twice when mandatory literal fragments cannot be present.
+    probe=text.casefold().replace("ı","i").replace("i\u0307","i")
+    match=EXCEPTION.search(text) if ("exception" in probe or "error" in probe) else None
+    serial=SERIAL.search(text) if ("serializ" in probe or "сериализац" in probe) else None
+    if not match and not serial:
+        newline=raw.find("\n")
+        first=raw if newline<0 else raw[:newline]
+        first_probe=probe if newline<0 and len(raw)<=24000 else first.casefold().replace("ı","i").replace("i\u0307","i")
+        if not any(token in first_probe for token in
+                   ("exception","failed","failure","error","time","ошибк","тайм")) or not ERROR.search(first):
+            return None
     if match:
         exception=match.group(1)
         message=text[match.end():].split("\n",1)[0].strip(": -\t\r ")

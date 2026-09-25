@@ -362,7 +362,8 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
             millis, kind = dur
             duration.append((millis, comp, kind, eid))
         replacement_chars += ev["raw"].count("\ufffd")
-        headline = text.split("\n", 1)[0].strip()[:1400]
+        newline = text.find("\n")
+        headline = (text if newline < 0 else text[:newline]).strip()[:1400]
         # The raw JS stores the ORIGINAL raw event, not the normalized headline.
         rows.append([eid, ev["day_offset"], ev["time"], cid, label, ev["request_id"], ev["user"],
                      headline, ev.get("original_start_line", ev["start_line"]),

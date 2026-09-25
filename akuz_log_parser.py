@@ -57,21 +57,24 @@ def clock_ms(time: str) -> int:
 
 
 def classify(message: str) -> str:
-    # Check actual exception text before generic 'not found'. This is a textual
-    # indicator only; the AKUZ log format does not provide log levels.
-    if TIMEOUT.search(message):
+    # Keep the original category precedence, regardless of which marker appears
+    # first. A cheap substring gate skips regex scans across large records
+    # when the regex's required literal is absent.
+    lowered = message.casefold().replace("ı", "i").replace("i\u0307", "i")
+    if any(token in lowered for token in ("time", "тайм", "истекло")) and TIMEOUT.search(message):
         return "таймаут"
-    if EXCEPTION.search(message):
+    if any(token in lowered for token in ("exception", "error", "failed", "failure", "fatal", "traceback", "ошибк")) and EXCEPTION.search(message):
         return "ошибка/исключение"
-    if REJECTED.search(message):
+    if any(token in lowered for token in ("nack", "rejected", "refused", "отклонен", "отклонён", "отказ")) and REJECTED.search(message):
         return "отказ/NACK"
-    if NOTFOUND.search(message):
+    if ("найден" in lowered or "found" in lowered) and NOTFOUND.search(message):
         return "не найдено"
     return "прочее"
 
 
 def normalize(message: str) -> str:
-    first = message.split("\n", 1)[0][:700]
+    newline = message.find("\n", 0, 700)
+    first = message[:700 if newline < 0 else newline]
     first = UUID.sub("{UUID}", first)
     first = HEX.sub("{HEX}", first)
     first = LONG_HEX.sub("{HEX}", first)
@@ -87,13 +90,16 @@ def to_ms(raw: str) -> float:
 
 
 def extract_duration(message: str) -> tuple[float, str] | None:
-    # A narrow whitelist: generic numbers in external API logs have unknown units.
-    match = DURATION.search(message)
-    if match:
-        return to_ms(match.group(1)), "общее время"
-    match = CACHE_DURATION.search(message)
-    if match:
-        return float(match.group(1)), "кэш"
+    # Preserve precedence: 'общее время' wins even when 'за N ms' comes first.
+    lowered = message.casefold()
+    if "общее" in lowered and "время" in lowered:
+        match = DURATION.search(message)
+        if match:
+            return to_ms(match.group(1)), "общее время"
+    if "за" in lowered and "ms" in lowered:
+        match = CACHE_DURATION.search(message)
+        if match:
+            return float(match.group(1)), "кэш"
     return None
 
 
