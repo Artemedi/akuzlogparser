@@ -65,6 +65,9 @@ class SSHTraceTests(unittest.TestCase):
             self.assertNotIn("/srv/akuz/test.log", trace)
             self.assertNotIn("example.test", trace)
             self.assertIn("stage=source.ssh.transfer status=summary", trace)
+            self.assertIn("stage=source.ssh.connect status=start compression=0", trace)
+            self.assertIn("stage=source.ssh.transfer status=start bytes_expected=", trace)
+            self.assertIn("compression=0", trace)
             self.assertIn("mib_per_s=", trace)
             return trace
 

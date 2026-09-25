@@ -381,7 +381,7 @@ def fetch_selected(cfg: ConnectConfig, selected: dict,
     def trace(stage: str, **metrics):
         return perf_phase(trace_root, stage, **metrics) if trace_root is not None else nullcontext()
 
-    with trace('source.ssh.connect'):
+    with trace('source.ssh.connect', compression=int(cfg.compression)):
         client = _connect(cfg, notify, client_factory)
     part = None
     try:
@@ -455,7 +455,8 @@ def fetch_selected(cfg: ConnectConfig, selected: dict,
                            elapsed_s=round(elapsed, 3),
                            mib_per_s=round(copied / (1024 * 1024) / elapsed, 3))
             return rc, copied, h.hexdigest(), error
-        with trace('source.ssh.transfer', bytes_expected=bound):
+        with trace('source.ssh.transfer', bytes_expected=bound,
+                   compression=int(cfg.compression)):
             rc, copied, digest, err = transfer(use_sudo)
             if rc and not use_sudo and copied == 0:
                 part.unlink(missing_ok=True)
