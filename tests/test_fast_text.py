@@ -20,6 +20,37 @@ class FastTextTests(unittest.TestCase):
             with self.subTest(label=raw[:40]):
                 self.assertEqual(classify(raw),expected)
 
+    def test_find_classifier_regex_semantics(self):
+        # The optional whitespace in timed?\\s*out differs from the mandatory
+        # whitespace in not\\s+found and истекло\\s+время\\s+ожидания.
+        cases=[
+            ("notfound", "прочее"),
+            ("not found", "не найдено"),
+            ("not"+chr(9)+"found", "не найдено"),
+            ("не найден", "не найдено"),
+            ("ненайден", "прочее"),
+            ("истекловремяожидания", "прочее"),
+            ("истекло время ожидания", "таймаут"),
+            ("истекло"+chr(10)+"время"+chr(9)+"ожидания", "таймаут"),
+            ("timedout", "таймаут"),
+            ("time out", "таймаут"),
+            ("timed out", "таймаут"),
+            ("тайм"+chr(10)+"аут", "прочее"),
+            ("TİMEOUT", "таймаут"),
+            ("tımeout", "таймаут"),
+            ("no_data_found", "не найдено"),
+            # casefold expands ß into two chars; original тайм.?аут
+            # considers it one wildcard char, so fast path must fall back.
+            ("таймßаут", "таймаут"),
+            ("таймßаут rejected", "таймаут"),
+            ("таймßаут\nSystem.Exception", "таймаут"),
+            ("notfoundİнайден", "прочее"),
+            ("not\u00a0found", "не найдено"),
+        ]
+        for value, expected in cases:
+            with self.subTest(message=repr(value)):
+                self.assertEqual(classify(value), expected)
+
     def test_duration_priority_and_bounds(self):
         self.assertEqual(extract_duration("за 7 ms then общее время: 00:00:01.500"),
                          (1500.0,"общее время"))

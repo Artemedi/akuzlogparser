@@ -56,18 +56,126 @@ def clock_ms(time: str) -> int:
     return ((int(hh) * 60 + int(mm)) * 60 + int(ss)) * 1000 + int(millis)
 
 
-def classify(message: str) -> str:
-    # Keep the original category precedence, regardless of which marker appears
-    # first. A cheap substring gate skips regex scans across large records
-    # when the regex's required literal is absent.
-    lowered = message.casefold().replace("ı", "i").replace("i\u0307", "i")
-    if any(token in lowered for token in ("time", "тайм", "истекло")) and TIMEOUT.search(message):
+def _find_word(hay: str, needle: str) -> bool:
+    start = 0
+    while True:
+        i = hay.find(needle, start)
+        if i < 0:
+            return False
+        j = i + len(needle)
+        before = hay[i - 1] if i > 0 else ""
+        after = hay[j] if j < len(hay) else ""
+        if not (before.isalnum() or before == "_") and not (after.isalnum() or after == "_"):
+            return True
+        start = i + 1
+
+
+def _skip_ws(hay: str, j: int) -> int:
+    while j < len(hay) and hay[j].isspace():
+        j += 1
+    return j
+
+
+def _rskip_ws(hay: str, k: int) -> int:
+    while k >= 0 and hay[k].isspace():
+        k -= 1
+    return k
+
+
+def _timeout_hit(low: str) -> bool:
+    if _find_word(low, "timeout"):
+        return True
+    for needle in ("timed", "time"):
+        start = 0
+        while True:
+            i = low.find(needle, start)
+            if i < 0:
+                break
+            if low.startswith("out", _skip_ws(low, i + len(needle))):
+                return True
+            start = i + 1
+    i = low.find("тайм")
+    while i >= 0:
+        j = i + 4
+        if low.startswith("аут", j):
+            return True
+        if j < len(low) and low[j] != "\n" and low.startswith("аут", j + 1):
+            return True
+        i = low.find("тайм", i + 1)
+    i = low.find("истекло")
+    while i >= 0:
+        j = _skip_ws(low, i + 7)
+        if j > i + 7 and low.startswith("время", j):
+            k = _skip_ws(low, j + 5)
+            if k > j + 5 and low.startswith("ожидания", k):
+                return True
+        i = low.find("истекло", i + 1)
+    return False
+
+
+def _exception_hit(low: str) -> bool:
+    if "ошибк" in low:
+        return True
+    return any(_find_word(low, w) for w in
+               ("exception", "error", "failed", "failure", "fatal", "traceback"))
+
+
+def _rejected_hit(low: str) -> bool:
+    if "отклонен" in low or "отклонён" in low or "отказано" in low or "отказ в доступе" in low:
+        return True
+    return _find_word(low, "nack") or _find_word(low, "rejected") or _find_word(low, "refused")
+
+
+def _notfound_hit(low: str) -> bool:
+    if "no_data_found" in low:
+        return True
+    start = 0
+    while True:
+        i = low.find("not", start)
+        if i < 0:
+            break
+        j = _skip_ws(low, i + 3)
+        if j > i + 3 and low.startswith("found", j):
+            return True
+        start = i + 1
+    start = 0
+    while True:
+        i = low.find("найден", start)
+        if i < 0:
+            return False
+        k = _rskip_ws(low, i - 1)
+        if k < i - 1 and k >= 1 and low.startswith("не", k - 1):
+            return True
+        start = i + 1
+
+
+def _classify_regex(message: str) -> str:
+    """Preserve the original rules for strings with length-changing Unicode folds."""
+    if TIMEOUT.search(message):
         return "таймаут"
-    if any(token in lowered for token in ("exception", "error", "failed", "failure", "fatal", "traceback", "ошибк")) and EXCEPTION.search(message):
+    if EXCEPTION.search(message):
         return "ошибка/исключение"
-    if any(token in lowered for token in ("nack", "rejected", "refused", "отклонен", "отклонён", "отказ")) and REJECTED.search(message):
+    if REJECTED.search(message):
         return "отказ/NACK"
-    if ("найден" in lowered or "found" in lowered) and NOTFOUND.search(message):
+    if NOTFOUND.search(message):
+        return "не найдено"
+    return "прочее"
+
+
+def classify(message: str) -> str:
+    # Preserve category priority, not the textual order of matching markers.
+    # Fast find-based matching for ordinary AKUZ strings; fall back to exact
+    # regex semantics for folds like ß -> ss that change character positions.
+    lowered = message.casefold().replace("ı", "i").replace("i\u0307", "i")
+    if len(lowered) != len(message):
+        return _classify_regex(message)
+    if ("time" in lowered or "тайм" in lowered or "истекло" in lowered) and _timeout_hit(lowered):
+        return "таймаут"
+    if any(token in lowered for token in ("exception", "error", "failed", "failure", "fatal", "traceback", "ошибк")) and _exception_hit(lowered):
+        return "ошибка/исключение"
+    if any(token in lowered for token in ("nack", "rejected", "refused", "отклонен", "отклонён", "отказ")) and _rejected_hit(lowered):
+        return "отказ/NACK"
+    if ("найден" in lowered or "found" in lowered) and _notfound_hit(lowered):
         return "не найдено"
     return "прочее"
 
