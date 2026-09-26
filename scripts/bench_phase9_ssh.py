@@ -30,6 +30,7 @@ DAYS = ("20260923", "20260924", "20260925")
 DIAG = ROOT / "diagnostics"
 MARKER = ".akuz_phase9_ssh_disposable"
 RESULT = DIAG / "phase9_ssh_private.json"
+RESULT_SPOOL = DIAG / "phase9_ssh_spool_private.json"
 
 
 def scrub_stale_temp():
@@ -39,7 +40,7 @@ def scrub_stale_temp():
             shutil.rmtree(p)
 
 
-def build_once(workspace: Path):
+def build_once(workspace: Path, use_derived_spool=False):
     import akuz_app
     from akuz_app import State, perform_build_current, perform_list
     from akuz_analytics import read_js
@@ -83,7 +84,8 @@ def build_once(workspace: Path):
         monitor.start()
         wall_start, cpu_start = perf_counter(), process_time()
         try:
-            perform_build_current(workspace, state, selected)
+            perform_build_current(workspace, state, selected,
+                                  use_derived_spool=use_derived_spool)
         finally:
             elapsed, cpu_s = perf_counter()-wall_start, process_time()-cpu_start
             stop.set()
@@ -128,7 +130,8 @@ def build_once(workspace: Path):
               line.startswith("generate.parse status=done") or
               line.startswith("report.generate status=done") or
               line.startswith("source.ssh.transfer status=summary") or
-              line.startswith("analytics.refresh status=done")]
+              line.startswith("analytics.refresh status=done") or
+              line.startswith("derived.spool status=summary")]
     fresh = dict(wall_s=round(elapsed, 3), cpu_s=round(cpu_s, 3),
                  listing_s=round(listing_s, 3), build_memory=memory,
                  report_counts=reports, snapshot=snapshot,
@@ -143,7 +146,8 @@ def build_once(workspace: Path):
                  trace=traces)
     with patch.object(akuz_app, "source_config", return_value=cfg):
         started, cpu = perf_counter(), process_time()
-        perform_build_current(workspace, state, selected)
+        perform_build_current(workspace, state, selected,
+                              use_derived_spool=use_derived_spool)
         warm = dict(wall_s=round(perf_counter()-started, 3),
                     cpu_s=round(process_time()-cpu, 3),
                     reused=state.result["reused"])
@@ -162,6 +166,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--reference", type=Path,
                         help="Previously generated local-private JSON to compare")
+    parser.add_argument("--derived-spool", action="store_true",
+                        help="EXPERIMENTAL: temporary derived spool on fresh singles")
     args=parser.parse_args()
     if os.name != "nt":
         raise SystemExit("Windows working-set instrumentation required")
@@ -169,7 +175,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="phase9_ssh_",dir=DIAG) as folder:
         home = Path(folder)
         (home / MARKER).write_text("disposable\n",encoding="ascii")
-        run = build_once(home / "workspace")
+        run = build_once(home / "workspace", args.derived_spool)
         # All DB snapshots are closed; collect any remaining cursor cycles on
         # Windows before removing the private ~3.3 GB workspace.
         import gc
@@ -180,7 +186,7 @@ def main():
         ["git","status","--porcelain"],cwd=ROOT,text=True).strip()),
         platform=platform.platform(),python=sys.version.split()[0],
         root_isolated=True,temp_workspace_deleted=True,
-        raw_payload_saved=False,**run)
+        raw_payload_saved=False,derived_spool=args.derived_spool,**run)
     if args.reference:
         old=json.loads(args.reference.read_text(encoding="utf8"))
         previous=old["fresh"]
@@ -192,7 +198,8 @@ def main():
         record["reference_comparison"]=checks
         if not checks["report_hashes"] or not checks["inventory_sha256"]:
             raise AssertionError("REAL REPORT BYTE EQUIVALENCE FAILED")
-    RESULT.write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding="utf8")
+    (RESULT_SPOOL if args.derived_spool else RESULT).write_text(
+        json.dumps(record,ensure_ascii=False,indent=2),encoding="utf8")
     print("PHASE9_SSH_PASS")
     print("INPUT_SHA256",[(s["date"],s["bytes"],s["sha256"])
                           for s in run["fresh"]["snapshot"]])

@@ -580,3 +580,19 @@ Additional Phase 9.1 synthetic 3-repeat full cache matrix PASS:
 fresh-all, warm-no-op, combined-only-miss, single-only-miss and
 mixed-cache-distinct-source; fresh 1.100303 / 1.086495 / 1.077086 s.
 Real remote mixed-cache/fault and three-pair A/B gates remain OPEN.
+
+## Phase 9.3a — ephemeral spool prototype
+
+Real SSH controlled runs: baseline 387.798s, prototype 322.783s.
+Combined parse 104.784s -> 38.829s on same three source hashes.
+Temporary spool 253634909 bytes; cleaned after each build.
+Real reports and inventory matched the reference.
+Repeated optimized fresh runs: 324.547s, 321.474s, 322.783s.
+Baseline CPU 275.219s; optimized CPU 222.641s in final run.
+SSH transfer variation affects whole-build wall measurements.
+Windows OS peak Working Set: 1385324544 B baseline; 1450266624 B spool.
+The extra transient space and memory must be accounted for in adoption.
+Spool SHA-256 is verified before replay; synthetic corruption and retry
+and disk-full tests PASS. 80 Python and 8 Node tests PASS.
+Cross-fresh SQLite indexed.stamp and JS export report IDs remain volatile.
+Experimental feature is opt-in; release artifact not changed.

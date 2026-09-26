@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse
 from collections import Counter
+from contextlib import nullcontext
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -20,8 +21,9 @@ from akuz_windows import fetch_windows, list_windows, load_windows_config
 from akuz_local import fetch_local, list_local, load_local_config
 from akuz_html_explorer import generate
 from akuz_log_parser import event_stream
+from akuz_derived_spool import SpoolWriter, replay, verified_next, verify_exhausted
 from akuz_store import (cached_download, cached_report, clear_cache, key_for,
-                         load_store, report_summary, save_store, date_from_log_name)
+                         load_store, report_summary, save_store, date_from_log_name, sha256)
 
 from akuz_runtime import DOCUMENTS, app_root, prepare_runtime
 from akuz_version import __version__
@@ -174,7 +176,8 @@ def _publish(root, store, key, raw_path, base, sources, label, kind,
             shutil.rmtree(temp)
 
 
-def _iter_combined_sources(selected, base: date, trace_root: Path | None = None):
+def _iter_combined_sources(selected, base: date, trace_root: Path | None = None,
+                           derived_spools=None):
     """Yield combined events without materializing a second copy of all texts.
 
     Source identities, dates, original lines and ordering match the historical
@@ -194,25 +197,36 @@ def _iter_combined_sources(selected, base: date, trace_root: Path | None = None)
         stats = Counter()
         before_source = count
         before_active = active
-        for ev in event_stream(item['local'], stats):
-            count += 1
-            if trace_root is not None and count % 50000 == 0:
-                perf_event(trace_root, 'combined.stream', 'progress', events=count,
-                           elapsed_s=round(perf_counter() - started, 3),
-                           active_s=round(active, 3))
-            original_start, original_end = ev['start_line'], ev['end_line']
-            ev['original_start_line'] = original_start
-            ev['original_end_line'] = original_end
-            ev['source_event_id'] = ev['event_id']
-            ev['source_file'] = source
-            ev['event_id'] = count
-            ev['day_offset'] = (d-base).days + ev['day_offset']
-            ev['date'] = (base + timedelta(days=ev['day_offset'])).isoformat()
-            ev['start_line'] = total_lines + original_start
-            ev['end_line'] = total_lines + original_end
-            active += perf_counter() - resume
-            yield ev
-            resume = perf_counter()
+        spool_entry = (derived_spools.get(
+            (item['remote']['path'], item['sha'], item['date']))
+            if derived_spools else None)
+        spool_path, expected_sha = spool_entry if spool_entry else (None, None)
+        if spool_path and sha256(spool_path) != expected_sha:
+            raise ValueError('Derived spool content checksum mismatch')
+        with (replay(spool_path) if spool_path else nullcontext(None)) as spooled:
+            for ev in event_stream(item['local'], stats):
+                if spooled is not None:
+                    ev['_phase9_derived'] = verified_next(spooled, ev)
+                count += 1
+                if trace_root is not None and count % 50000 == 0:
+                    perf_event(trace_root, 'combined.stream', 'progress', events=count,
+                               elapsed_s=round(perf_counter() - started, 3),
+                               active_s=round(active, 3))
+                original_start, original_end = ev['start_line'], ev['end_line']
+                ev['original_start_line'] = original_start
+                ev['original_end_line'] = original_end
+                ev['source_event_id'] = ev['event_id']
+                ev['source_file'] = source
+                ev['event_id'] = count
+                ev['day_offset'] = (d-base).days + ev['day_offset']
+                ev['date'] = (base + timedelta(days=ev['day_offset'])).isoformat()
+                ev['start_line'] = total_lines + original_start
+                ev['end_line'] = total_lines + original_end
+                active += perf_counter() - resume
+                yield ev
+                resume = perf_counter()
+            if spooled is not None:
+                verify_exhausted(spooled)
         total_lines += stats['physical_lines']
         if trace_root is not None:
             perf_event(trace_root, 'combined.source', 'done', source_index=index,
@@ -239,7 +253,20 @@ def _combine_sources(selected, scratch: Path, base: date):
 
 
 def perform_build(root: Path, state: State, selections,
-                  fetch_fn=fetch_selected, gen_fn=generate, refresh_remote=False):
+                  fetch_fn=fetch_selected, gen_fn=generate, refresh_remote=False,
+                  use_derived_spool=False):
+    if not use_derived_spool or gen_fn is not generate or len(selections) < 2:
+        return _perform_build(root, state, selections, fetch_fn, gen_fn,
+                              refresh_remote, None)
+    (root/'cache').mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='akuz-phase9-derived-',
+                                     dir=root/'cache') as folder:
+        return _perform_build(root, state, selections, fetch_fn, gen_fn,
+                              refresh_remote, Path(folder))
+
+
+def _perform_build(root, state, selections, fetch_fn, gen_fn,
+                   refresh_remote, spool_root):
     build_started = perf_counter()
     with state.lock:
         source = state.source
@@ -289,6 +316,7 @@ def perform_build(root: Path, state: State, selections,
         dates[selected['id']] = value
     reports = []
     files = []
+    spools = {}
     skipped = []
     source_seen = set()  # separate paths may contain independent identical events
     active_count = 0
@@ -373,10 +401,27 @@ def perform_build(root: Path, state: State, selections,
             continue
         state.set_stage(f'{idx}/{len(ids)} · разбираю {remote["name"]}…')
         label = remote['name'] + (' · ' + chosen if chosen else ' · дата не задана')
-        report = _publish(root, store, content_key, path,
-                          date.fromisoformat(chosen) if chosen else None,
-                          [dict(name=remote['name'], date=chosen, sha256=digest,
-                                remote_path=remote['path'], host=cfg.host)], label, 'single', gen_fn)
+        source_meta = [dict(name=remote['name'], date=chosen, sha256=digest,
+                            remote_path=remote['path'], host=cfg.host)]
+        if spool_root is not None and all(dates.values()):
+            spool_path = spool_root / f'{len(spools):04d}.jsonl'
+            with SpoolWriter(spool_path) as sink:
+                def single_gen(raw, out, base, chunk_size, top):
+                    meta = generate(raw, out, base, chunk_size, top,
+                                    derived_sink=sink)
+                    if sink.count != meta['events']:
+                        raise ValueError('Derived spool event count mismatch')
+                    return meta
+                report = _publish(root, store, content_key, path,
+                                  date.fromisoformat(chosen) if chosen else None,
+                                  source_meta, label, 'single', single_gen)
+            spools[(remote['path'], digest, chosen)] = (spool_path, sink.sha256)
+            perf_event(root, 'derived.spool', 'summary', events=sink.count,
+                       bytes_saved=sink.bytes_written)
+        else:
+            report = _publish(root, store, content_key, path,
+                              date.fromisoformat(chosen) if chosen else None,
+                              source_meta, label, 'single', gen_fn)
         # Store remote alias too, while preserving content-based de-duplication.
         store['reports'][report['id']]['aliases'] = list(set(
             store['reports'][report['id']].get('aliases', []) + [remote_key]))
@@ -407,8 +452,10 @@ def perform_build(root: Path, state: State, selections,
                     source_bytes = sum(f['local'].stat().st_size for f in files)
                     def stream_gen(raw, out, base, chunk_size, top):
                         return generate(raw, out, base, chunk_size, top,
-                                        event_source=_iter_combined_sources(files, base, root),
-                                        input_bytes=source_bytes)
+                                        event_source=_iter_combined_sources(files, base, root, spools),
+                                        input_bytes=source_bytes,
+                                        derived_hook=(lambda ev: ev.pop('_phase9_derived', None))
+                                        if spools else None)
                     combined = _publish(root, store, multi_key, scratch, first,
                                         sources, label, 'combined', stream_gen,
                                         input_bytes=source_bytes)
@@ -458,9 +505,10 @@ def perform_build(root: Path, state: State, selections,
         state.stage = state.notice
 
 
-def perform_build_current(root, state, selections):
+def perform_build_current(root, state, selections, use_derived_spool=False):
     """For GUI selections, refresh the listing before consulting cached snapshots."""
-    return perform_build(root, state, selections, refresh_remote=True)
+    return perform_build(root, state, selections, refresh_remote=True,
+                         use_derived_spool=use_derived_spool)
 
 
 def perform_latest(root, state, source='linux', local_path=''):

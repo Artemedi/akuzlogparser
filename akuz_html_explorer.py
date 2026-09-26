@@ -265,7 +265,8 @@ def read_input(source: Path, base: date | None, stats: Counter[str],
 
 
 def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: int,
-             *, event_source=None, input_bytes=None) -> dict[str, Any]:
+             *, event_source=None, input_bytes=None,
+             derived_sink=None, derived_hook=None) -> dict[str, Any]:
     from akuz_log_parser import classify, normalize, extract_duration
     from akuz_analytics import recognize_error
     from akuz_derived import Derivers, derive_event
@@ -397,7 +398,11 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         sid = source_ids[source_label]
         # Phase 9.1: derive context-free values, then write per-report IDs,
         # source coordinates, category order, patterns and raw shards below.
-        derived = derive_event(ev, stats, derivers)
+        derived = derived_hook(ev) if derived_hook is not None else None
+        if derived is None:
+            derived = derive_event(ev, stats, derivers)
+        if derived_sink is not None:
+            derived_sink(ev, derived)
         fold_time += derived.folded_s
         classify_time += derived.classify_s
         normalize_time += derived.normalize_s
