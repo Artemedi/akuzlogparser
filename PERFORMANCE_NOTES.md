@@ -1499,3 +1499,30 @@ writers' safety with the shared tmp filename. Those gates remain OPEN.
 Fable NOT RUN: Bazzite offline, Windows Clean APIs token unavailable.
 Unrelated in-progress category-isolation changes left untouched;
 commit ONLY new inventory crash test and these notes.
+
+## Phase 9.0w — report directory/inventory crash gap (2026-09-27)
+
+Step ID: P9-0W-01; initial HEAD `fe61057cd073537748bbf3939b67e0393896ff44`.
+Goal: probe two distinct _publish persistence boundaries with true
+synthetic child-process `os._exit`, no signal sent to real app.
+Added tests/test_phase9_report_crash.py; parent owns disposable
+workspace, child creates only one synthetic generated report.
+Exit 71 immediately AFTER `*.building` directory rename, BEFORE
+`save_store`: final report directory exists, inventory has zero
+reports. A retry creates a NEW indexed report and the first directory
+remains orphaned (2 directories, 1 indexed). This is a REPRODUCED
+crash-consistency GAP, not a closed functional gate. It does not
+imply analytics counts duplicate events from the orphan: only the
+indexed report is discoverable through report_summary.
+Exit 72 immediately AFTER successful inventory save: one final
+directory and one indexed report; retry reuses it, no new directory.
+Targeted reproducer 2/2 PASS (0.506 s), full Python 117/117 PASS
+(37.041 s), `git diff --check` PASS. No production change or real
+SSH/log tests; no key/config/user cache/Release touched.
+Do NOT globally delete unindexed `v4_*` as an apparent quick fix:
+no proof of ownership exists for arbitrary directories on user hosts.
+Need separate bounded design of a durable, ownership-validated
+publication intent/recovery protocol or explicit conservative orphan
+reconciliation before claiming whole-report crash consistency.
+Independent Fable review NOT RUN (Bazzite offline/token unavailable).
+Category-isolation workstream in same checkout remains untouched.
