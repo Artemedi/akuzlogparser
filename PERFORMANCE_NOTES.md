@@ -1165,3 +1165,50 @@ fresh/warm smoke 13 events, 0.320 s wall, 0.171875 s fresh CPU,
 Independent Fable review NOT RUN: Bazzite offline and no usable token
 on DBA-008D as recorded in P9-0L-01. No real SSH rerun or 3+ A/B
 is claimed for this identity-guard correction. Commit/push pending.
+
+Step ID: P9-0M-02 — real SSH Python/frozen fresh CPU verification.
+New local diagnostic ZIP built at HEAD `4af59728d256556bae500b3d2bcb951859c7a26e`,
+SHA-256 `a7693c1a5dd4bbd3f116353dbfad1aa17243936b60cb144023c9b5146ec9eab5`.
+Prior ignored private JSON preserved as
+`diagnostics/phase9_frozen_real_9_0l_backup_private.json`.
+No GitHub Release changed and no live config packaged (example only).
+NEW SSH fetch of exactly 23/24/25 September .log: three
+original snapshot date/size/SHA and inactive-source checks PASS,
+956,307,242 bytes; actual per-source SHA only in ignored private JSON.
+Python fresh wall 212.595 s, process_time CPU 201.844 s.
+Frozen fresh wall 205.517 s, GetProcessTimes tree CPU 200.625 s.
+Python lifecycle CPU sampled lower bound 222.59375 s;
+frozen lifecycle CPU sampled lower bound 203.609375 s.
+Sampled simultaneous tree WS: Python 1,400,430,592 B;
+frozen 1,474,555,904 B. Private: Python 1,697,488,896 B;
+frozen 1,741,369,344 B. Samples 5,290 / 4,738;
+CPU unreadable samples zero in both runs.
+`REAL_SNAPSHOT_SHA_GATE_PASS`, `PYTHON_FULL_BUILD_PASS`,
+`FROZEN_FULL_BUILD_PASS`, five content checks PASS (inventory,
+deterministic four report manifests, SQLite semantic, analytics
+semantic exports, 657,738 single events), warm/no-op both PASS,
+`WORKSPACE_CLEANED True`; exit 0 (598.93 s including SSH,
+processing, semantic verification and cleanup). Existing user
+reports/downloads/cache, unrelated benchmark folders untouched.
+This is one strict fresh CPU benchmark pair, not an A/B estimate.
+Python CPU is process_time around in-worker fresh; frozen is OS
+GetProcessTimes over both live PIDs at equivalent client POST/status
+boundaries, with small HTTP/phase-bracketing discrepancy. Neither
+CPU figure is wall time or the full lifecycle CPU lower bound.
+Fable: NOT RUN (no accessible Clean APIs token; Bazzite offline).
+Next gate: independent review; 3+ alternated old/new or mode-specific
+A/B with separate SSH and local timings, active-file/failure scenarios,
+then Phase 9.0 closure decision. No parser performance change claimed.
+
+Concurrency correction / provenance boundary: while the 4af5972 real
+benchmark was executing, another authorized repository session advanced
+main/origin to `166631c7733ff2f8b0760a05dee70d5ecd15ddc1`, adding
+creation-time PID identity guards. The private result explicitly records
+`git_sha=4af5972` and its ZIP SHA matches the earlier 4af5972 build.
+Thus the preceding real numbers VERIFY the initial fresh-CPU variant,
+NOT a post-166631c full benchmark of the newer recycled-PID guard.
+The latter has the separate synthetic and 96-test PASS documented in
+P9-0M-02, but its fresh-SSH real gate remains OPEN. Do not retroactively
+attribute these figures to 166631c or change its BUILD_INFO provenance.
+Because another session is actively writing this same checkout, no
+parallel third live benchmark was started on top of its workstream.
