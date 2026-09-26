@@ -25,6 +25,7 @@ from akuz_store import load_store, sha256
 from scripts.bench_phase9_baseline import (
     canonical_hash, disk_bytes, inventory_manifest, last_trace, sql_fingerprint)
 from scripts.phase9_memory import sample
+from scripts.phase9_semantic import semantic_sql, semantic_exports
 
 DAYS = ("20260923", "20260924", "20260925")
 DIAG = ROOT / "diagnostics"
@@ -139,8 +140,10 @@ def build_once(workspace: Path, use_derived_spool=False):
                  report_hashes={key: canonical_hash(val["files"])
                                 for key,val in inventory["reports"].items()},
                  sql_hashes=sql_fingerprint(workspace),
+                 sql_hashes_semantic=semantic_sql(workspace),
                  analytics_export={p.name:sha256(p)
                     for p in (workspace/"data").glob("*.js")},
+                 analytics_export_semantic=semantic_exports(workspace),
                  bytes_by_dir={folder:disk_bytes(workspace, folder)
                      for folder in ("downloads", "reports", "cache", "data")},
                  trace=traces)
@@ -157,8 +160,12 @@ def build_once(workspace: Path, use_derived_spool=False):
         raise AssertionError("Warm no-op mutated deterministic output")
     if sql_fingerprint(workspace) != fresh["sql_hashes"]:
         raise AssertionError("Warm no-op changed logical SQL content")
+    if semantic_sql(workspace) != fresh["sql_hashes_semantic"]:
+        raise AssertionError("Warm no-op changed semantic SQL")
     if {p.name:sha256(p) for p in (workspace/"data").glob("*.js")} != fresh["analytics_export"]:
         raise AssertionError("Warm no-op changed analytics exports")
+    if semantic_exports(workspace) != fresh["analytics_export_semantic"]:
+        raise AssertionError("Warm no-op changed semantic analytics exports")
     return dict(fresh=fresh,warm=warm)
 
 
@@ -201,9 +208,16 @@ def main():
         checks={key:previous[key]==run["fresh"][key] for key in
                 ("inventory_sha256","report_hashes","sql_hashes","analytics_export",
                  "report_counts")}
+        if ("sql_hashes_semantic" in previous
+            and "analytics_export_semantic" in previous):
+            for key in ("sql_hashes_semantic","analytics_export_semantic"):
+                checks[key] = previous[key] == run["fresh"][key]
         record["reference_comparison"]=checks
         if not checks["report_hashes"] or not checks["inventory_sha256"]:
             raise AssertionError("REAL REPORT BYTE EQUIVALENCE FAILED")
+        if any(checks.get(key) is False for key in
+               ("sql_hashes_semantic","analytics_export_semantic")):
+            raise AssertionError("REAL ANALYTICS SEMANTIC EQUIVALENCE FAILED")
     (RESULT_SPOOL if args.derived_spool or args.default_spool else RESULT).write_text(
         json.dumps(record,ensure_ascii=False,indent=2),encoding="utf8")
     print("PHASE9_SSH_PASS")

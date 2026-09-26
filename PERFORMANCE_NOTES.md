@@ -635,3 +635,47 @@ legacy combined equivalence, three event-stream differential seeds and
 Rollback for the Python application: set AKUZ_PHASE9_DERIVED_SPOOL=0
 before launch (or call the API with use_derived_spool=False). This does
 not alter the already-published standalone EXE.
+
+## Phase 9.0e — exact real SSH analytics semantic equality gate (2026-09-26)
+
+Step 1: introduced scripts/phase9_semantic.py, benchmark-only. SQL's
+indexed stamp is `catalog_size:catalog_mtime_ns:provenance_sha256`;
+normalize ONLY the middle mtime_ns, preserving size and provenance hash.
+Replace generated report IDs in all analytics detail items with their
+stable inventory keys; sort the complete normalized rows to remove the
+non-semantic SQL tie order by random report IDs. Do not drop any error
+fields. Overview arrays retain their original order and full content.
+The fingerprints never save real error text, identifiers, or file paths.
+
+Step 2: added synthetic differential tests: pristine Python baseline
+vs optimized spool must match every SQL table and analytics export.
+Mutating a real field (clock) or catalog size must change its semantic
+fingerprint; mutating only the catalog mtime must not. 82 Python tests
+PASS after introduction (other previous equivalence/UI gates retained).
+
+Step 3: two entirely NEW SSH reads of exactly the same immutable
+20260923/20260924/20260925 source SHA-256 values, no existing local
+downloads or cached reports used. Test workspace cleaned after EACH
+run. The Python benchmark's control (use_derived_spool=False): wall
+378.788s, CPU 280.000s, warm 3.461s, combined parse 107.174s.
+Normal default spool path: wall 368.348s, CPU 223.734s, warm 3.431s,
+combined parse 39.112s, 1,450,614,784 B Windows OS peak Working Set.
+Remote transfer of the largest file: baseline 72.141s vs optimized
+116.317s. Whole-build wall therefore conflates variable network speed;
+compare combined parse and CPU as well as fresh wall.
+
+Step 4: PASS strict normalized four report manifests, report counts,
+inventory hash, semantic digests of EVERY SQLite table, AND semantic
+digests of ALL 534 analytics JS exports. Original raw JS hashes differ
+due to ephemeral report UUIDs and SQL indexed stamp differs due to
+catalog mtime; this is NOT raw byte-equivalence of analytics artifacts.
+All test snapshots have unchanged SHA; both isolated workspaces were
+removed. The two private sanitized JSON summaries are ignored:
+diagnostics/phase9_ssh_private.json (non-spool control) and
+diagnostics/phase9_ssh_spool_private.json (normal default).
+
+Gate remaining OPEN: frozen Windows portable EXE full-workload parity;
+3+ alternating paired network-noise-controlled A/B; actual on-host
+mixed-cache and failure-mode matrix; Phase 9.2 in-flight tee comparison.
+Do not interpret this analytics normalizer as permission to ignore
+unexplained semantic changes.
