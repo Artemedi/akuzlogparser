@@ -97,7 +97,10 @@ def sql_fingerprint(root: Path):
         raise AssertionError("Missing analytics SQLite index")
     store = load_store(root)
     aliases = {entry["id"]: entry["key"] for entry in store["reports"].values()}
-    with sqlite3.connect(path) as db:
+    # sqlite3.Connection.__exit__ commits but does NOT close the OS file handle.
+    # Windows cannot remove a disposable benchmark workspace until it is closed.
+    from contextlib import closing
+    with closing(sqlite3.connect(path)) as db:
         tables = sorted(row[0] for row in db.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"))
         digest = {}
