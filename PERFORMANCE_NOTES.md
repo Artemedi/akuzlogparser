@@ -981,3 +981,59 @@ Still OPEN: process-isolated like-for-like memory and CPU benchmark,
 remaining active-file/failure matrix and architecture comparison to
 Phase 9.2. No further parser/cache optimization was performed in this
 instrumentation-and-verification step.
+
+## Phase 9.0k — isolate Python benchmark process and align memory-sampling scope (2026-09-26)
+
+Recovered `main == origin/main == 9ae3e44e383bcefd105644af7cc3160b3373bf7d`
+after accepted full real frozen content/cleanup gate. This is a separate
+benchmark instrumentation change; no application parser, derived spool,
+download, analytics or cache implementation was changed.
+
+The previous `python_build():monitor(os.getpid())` included the Python
+benchmark controller in measured memory, while the frozen run monitored
+the separate PyInstaller process tree. Preserved the exact pre-change
+benchmark source in an ignored `diagnostics/phase9_review_work/` backup
+before bounded edits.
+
+`python_build_isolated()` now starts the ordinary Python report build as
+a separate worker process and monitors that PID's process tree, excluding
+the benchmark controller. The child validates its parent disposable
+workspace marker and records ONLY SHA-derived signatures and numeric
+metrics in a temporary private JSON in that workspace; the parent
+consumes/deletes it. Python and frozen child now both report
+`memory.scope=isolated_process_tree_lifetime` with identical 30-ms
+sampler and sampled simultaneous tree Working Set/Private definitions.
+The monitor additionally preserves each observed PID's OS high-water
+Working Set and Pagefile readings. Per-PID high-water marks are not
+added across different times and must NOT be described as a simultaneous
+tree RSS peak. Python fresh `cpu_s` remains a worker process_time value;
+frozen CPU still requires separate instrumentation.
+
+The existing frozen run monitor has also been extended from fresh-build
+only to its full local process lifetime, encompassing startup and warm
+verification, to match the isolated Python worker scope. Fresh wall
+measurements remain separately bracketed and are NOT compared with
+lifetime RSS as though the windows were identical.
+
+Synthetic Windows integration: two independent processes consumed the
+same three tiny synthetic .log inputs; all five deterministic/semantic
+Python-vs-frozen signatures matched, 16 single events, Python memory
+sample count 25 / one observed PID OS peak, frozen count 32 / two
+observed PIDs OS peaks. Both scope labels matched, and disposable
+workspace cleanup passed. No real log was sent to a third-party model
+or committed, no existing user cache touched.
+
+Regression tests in `tests/test_phase9_frozen_memory.py` cover:
+- deterministic simultaneous-tree sample and per-PID OS high-water
+  aggregation with shuffled source PID set;
+- real Windows isolated Python child report build on synthetic logs,
+  parent PID excluded and temp result removed.
+Targeted: 2 PASS (1.222 s). Full Python unittest suite: 94 PASS
+(26.859 s); `git diff --check` PASS.
+
+Still OPEN: this new subprocess instrumentation has NOT YET been run on
+fresh SSH 23/24/25 September 956-MB snapshots; no like-for-like real
+memory numbers, frozen CPU parity, 3+ alternating A/B or full Phase 9.0
+closure can be claimed. Before a new strict real frozen benchmark,
+rebuild the LOCAL diagnostic ZIP from the accepted new HEAD; leave
+published Release unchanged.

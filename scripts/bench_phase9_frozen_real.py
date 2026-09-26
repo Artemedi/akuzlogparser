@@ -71,7 +71,7 @@ def frozen_snapshots(home: Path):
 def monitor_pid(pid, stop, peak):
     while not stop.wait(.03):
         try:
-            ids = tree_pids(pid)
+            ids = sorted(tree_pids(pid))
             rows = [sample(x) for x in ids]
             good = [x for x in rows if x]
             peak["samples"] += 1
@@ -79,11 +79,22 @@ def monitor_pid(pid, stop, peak):
                                             sum(x["working_set_bytes"] for x in good))
             peak["private_bytes"] = max(peak["private_bytes"],
                                         sum(x["private_bytes"] for x in good))
+            for observed_pid, row in zip(ids, rows):
+                if row:
+                    for field, metric in (
+                        ("os_peak_ws_per_pid", "peak_working_set_bytes"),
+                        ("os_peak_pagefile_per_pid", "peak_pagefile_bytes"),
+                    ):
+                        bucket = peak[field]
+                        bucket[observed_pid] = max(
+                            bucket.get(observed_pid, 0), row[metric])
         except (OSError, ValueError, ProcessLookupError):
             continue
 def monitor(start_pid):
     stop = threading.Event()
-    stats = {"samples": 0, "working_set_bytes": 0, "private_bytes": 0}
+    stats = {"samples": 0, "working_set_bytes": 0, "private_bytes": 0,
+             "scope": "isolated_process_tree_lifetime",
+             "os_peak_ws_per_pid": {}, "os_peak_pagefile_per_pid": {}}
     thread = threading.Thread(target=monitor_pid, args=(start_pid, stop, stats),
                               daemon=True)
     thread.start()
@@ -98,22 +109,50 @@ def python_build(root: Path, folder: Path):
                 for r in sorted(state.listing, key=lambda x: x["name"])]
     if len(selected) != len(DAYS):
         raise AssertionError("Python local listing is not exactly three")
-    stop, thread, mem = monitor(os.getpid())
     start, cpu = perf_counter(), process_time()
-    try:
-        perform_build_current(root, state, selected)
-        wall_s, cpu_s = perf_counter()-start, process_time()-cpu
-    finally:
-        stop.set()
-        thread.join()
+    perform_build_current(root, state, selected)
+    wall_s, cpu_s = perf_counter()-start, process_time()-cpu
     if state.result["reused"] or state.result["analytics_warning"]:
         raise AssertionError("Python fresh build failed")
     first = signature(root)
     perform_build_current(root, state, selected)
     if not state.result["reused"] or signature(root) != first:
         raise AssertionError("Python warm cache changed")
-    return first, {"wall_s": round(wall_s, 3), "cpu_s": round(cpu_s, 3),
-                   "memory": mem}
+    return first, {"wall_s": round(wall_s, 3), "cpu_s": round(cpu_s, 3)}
+
+
+def python_build_isolated(root: Path, folder: Path):
+    """Run normal Python build as a child, excluding benchmark controller RAM."""
+    output = root.parent / "python_worker_private.json"
+    if output.exists():
+        raise RuntimeError("Refusing stale Python worker result")
+    env = os.environ.copy()
+    env["AKUZ_PHASE9_DERIVED_SPOOL"] = "1"
+    env.pop("PYTHONPATH", None)
+    env.pop("PYTHONHOME", None)
+    proc = subprocess.Popen(
+        [sys.executable, "-B", str(Path(__file__).resolve()),
+         "--python-worker", str(root), str(folder), str(output)],
+        cwd=ROOT, env=env, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL)
+    stop, thread, mem = monitor(proc.pid)
+    try:
+        try:
+            exit_code = proc.wait(timeout=960)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise
+    finally:
+        stop.set()
+        thread.join()
+    if exit_code:
+        raise RuntimeError("Isolated Python benchmark worker failed")
+    record = json.loads(output.read_text(encoding="utf-8"))
+    output.unlink()
+    return record["signature"], dict(record["metrics"], memory=mem)
+
+
 def wait_for(opener, base, *, busy=None, seconds=960):
     until = monotonic() + seconds
     while monotonic() < until:
@@ -164,6 +203,7 @@ def frozen_build(root: Path, folder: Path, archive: Path):
         cwd=root, env=env, stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL)
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    stop, thread, mem = monitor(proc.pid)
     try:
         wait_for(opener, base)
         status = post(opener, base, "/api/list",
@@ -172,14 +212,9 @@ def frozen_build(root: Path, folder: Path, archive: Path):
                     for r in sorted(status["listing"], key=lambda x: x["name"])]
         if len(selected) != len(DAYS):
             raise AssertionError("Frozen local listing is not exactly three")
-        stop, thread, mem = monitor(proc.pid)
         start = perf_counter()
-        try:
-            state = post(opener, base, "/api/build", {"selections": selected})
-            elapsed = perf_counter() - start
-        finally:
-            stop.set()
-            thread.join()
+        state = post(opener, base, "/api/build", {"selections": selected})
+        elapsed = perf_counter() - start
         if state["result"]["reused"] or state["result"]["analytics_warning"]:
             raise AssertionError("Frozen fresh build failed")
         first = signature(app)
@@ -188,6 +223,8 @@ def frozen_build(root: Path, folder: Path, archive: Path):
             raise AssertionError("Frozen warm cache changed")
         return first, {"wall_s": round(elapsed, 3), "memory": mem}
     finally:
+        stop.set()
+        thread.join()
         subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         proc.wait(timeout=20)
@@ -226,7 +263,7 @@ def main():
     try:
         source, snapshots = frozen_snapshots(home)
         print("REAL_SNAPSHOT_SHA_GATE_PASS", flush=True)
-        old, python = python_build(home / "python", source)
+        old, python = python_build_isolated(home / "python", source)
         print("PYTHON_FULL_BUILD_PASS", python["wall_s"], flush=True)
         new, frozen = frozen_build(home / "frozen", source, archive)
         print("FROZEN_FULL_BUILD_PASS", frozen["wall_s"], flush=True)
@@ -247,4 +284,19 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 5 and sys.argv[1] == "--python-worker":
+        worker_root, source_dir, result_file = map(Path, sys.argv[2:])
+        home = worker_root.parent
+        if (home != source_dir.parent or home != result_file.parent or
+            home.parent.resolve() != DIAG.resolve() or
+            not home.name.startswith("phase9_frozen_") or
+            not (home / MARKER).is_file() or
+            (home / MARKER).read_text(encoding="ascii") != "disposable\n"):
+            raise RuntimeError("Worker requires owned isolated benchmark")
+        worker_root.mkdir()
+        worker_sig, worker_metrics = python_build(worker_root, source_dir)
+        result_file.write_text(json.dumps(
+            {"signature": worker_sig, "metrics": worker_metrics}),
+            encoding="utf-8")
+    else:
+        main()
