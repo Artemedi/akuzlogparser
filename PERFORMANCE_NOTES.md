@@ -596,3 +596,42 @@ Spool SHA-256 is verified before replay; synthetic corruption and retry
 and disk-full tests PASS. 80 Python and 8 Node tests PASS.
 Cross-fresh SQLite indexed.stamp and JS export report IDs remain volatile.
 Experimental feature is opt-in; release artifact not changed.
+
+## Phase 9.3b — normal application default on real fresh SSH (2026-09-26)
+
+Step 1: recovered HEAD 355a739 and existing experimental in-progress edits;
+did not overwrite or remove them. Target selection was EXACT remote
+20260923_server.log / 20260924_server.log / 20260925_server.log through
+the in-memory ConnectConf.cfg adapter. Original production directories and
+credentials were never used as a test destination. Isolated disposable
+workspace is deleted after the run, including its downloads/reports/cache.
+
+Step 2: ran `python scripts/bench_phase9_ssh.py --default-spool
+--reference diagnostics/phase9_ssh_baseline_private.json`.
+PASS on the same exact three original SSH snapshot SHA-256 values,
+total 956,307,242 input bytes. Fresh wall 321.276 s and CPU 223.906 s;
+normal-path combined generate.parse 38.999 s, report.generate 43.041 s,
+analytics.refresh 46.356 s. Warm no-op wall 3.325 s, reused=True.
+Windows OS PeakWorkingSetSize 1,448,513,536 bytes;
+PeakPagefileUsage 1,703,186,432 bytes (not a sampled RSS reading).
+Three fresh single reports: 211,117 / 221,082 / 225,539 events.
+Combined: 657,738 events, 892,423 physical lines, 658 shards.
+Source snapshot integrity, normalized deterministic hashes of all four
+reports, inventory SHA and report event counts MATCH baseline.
+Independent-run SQLite indexed freshness and raw JS export report-ID
+differences remain unresolved for full cross-fresh export equivalence.
+Real download/parse telemetry was retained ONLY in ignored diagnostics;
+no raw journal, source path, server name or secret was committed.
+
+Step 3: acceptance is limited to the default-Python SSH path and
+deterministic report/inventory correctness. The existing published
+portable v4.6.0 EXE was NOT rebuilt; full Python/EXE parity and
+3+ alternated A/B remain OPEN. Overall wall delta includes SSH variance;
+the combined parse 104.784 -> 38.999 s comparison is stage-specific.
+Step 4: regression suite on the default-on implementation: 81 Python
+unittest PASS; 8 explicit Node .cjs UI tests PASS; report byte-equivalence,
+legacy combined equivalence, three event-stream differential seeds and
+131,860 classifier equivalence checks PASS. `git diff --check` PASS.
+Rollback for the Python application: set AKUZ_PHASE9_DERIVED_SPOOL=0
+before launch (or call the API with use_derived_spool=False). This does
+not alter the already-published standalone EXE.

@@ -7,6 +7,7 @@ from contextlib import nullcontext
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import secrets
 import shutil
@@ -254,7 +255,9 @@ def _combine_sources(selected, scratch: Path, base: date):
 
 def perform_build(root: Path, state: State, selections,
                   fetch_fn=fetch_selected, gen_fn=generate, refresh_remote=False,
-                  use_derived_spool=False):
+                  use_derived_spool=None):
+    if use_derived_spool is None:
+        use_derived_spool = os.environ.get('AKUZ_PHASE9_DERIVED_SPOOL', '1').strip().lower() not in ('0', 'false', 'no', 'off')
     if not use_derived_spool or gen_fn is not generate or len(selections) < 2:
         return _perform_build(root, state, selections, fetch_fn, gen_fn,
                               refresh_remote, None)
@@ -505,7 +508,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         state.stage = state.notice
 
 
-def perform_build_current(root, state, selections, use_derived_spool=False):
+def perform_build_current(root, state, selections, use_derived_spool=None):
     """For GUI selections, refresh the listing before consulting cached snapshots."""
     return perform_build(root, state, selections, refresh_remote=True,
                          use_derived_spool=use_derived_spool)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -54,6 +55,25 @@ class SpoolPrototypeTests(unittest.TestCase):
                 verified_next(rows, event)
                 with self.assertRaisesRegex(ValueError, "before"):
                     verified_next(rows, dict(event, event_id=2))
+
+    def test_default_enable_and_environment_rollback(self):
+        with TemporaryDirectory() as td:
+            home = Path(td)
+            sources = home / "sources"
+            create_sources(sources, 5, 256)
+            observed = []
+            original = SpoolWriter.__call__
+            def track(self, ev, value):
+                observed.append(ev["event_id"])
+                return original(self, ev, value)
+            with patch.object(SpoolWriter, "__call__", track):
+                with patch.dict(os.environ, {"AKUZ_PHASE9_DERIVED_SPOOL": "0"}):
+                    _, old = build(home / "disabled", sources, None)
+                self.assertFalse(observed)
+                with patch.dict(os.environ, {"AKUZ_PHASE9_DERIVED_SPOOL": "1"}):
+                    _, new = build(home / "enabled", sources, None)
+                self.assertTrue(observed)
+                self.assertEqual(old, new)
 
     def test_fresh_byte_equivalence_and_warm_reuse(self):
         with TemporaryDirectory() as td:

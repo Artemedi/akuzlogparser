@@ -168,14 +168,19 @@ def main():
                         help="Previously generated local-private JSON to compare")
     parser.add_argument("--derived-spool", action="store_true",
                         help="EXPERIMENTAL: temporary derived spool on fresh singles")
+    parser.add_argument("--default-spool", action="store_true",
+                        help="Invoke the normal application default path")
     args=parser.parse_args()
+    if args.derived_spool and args.default_spool:
+        parser.error("Choose either explicit or default spool")
     if os.name != "nt":
         raise SystemExit("Windows working-set instrumentation required")
     scrub_stale_temp()
     with tempfile.TemporaryDirectory(prefix="phase9_ssh_",dir=DIAG) as folder:
         home = Path(folder)
         (home / MARKER).write_text("disposable\n",encoding="ascii")
-        run = build_once(home / "workspace", args.derived_spool)
+        run = build_once(home / "workspace",
+                         None if args.default_spool else args.derived_spool)
         # All DB snapshots are closed; collect any remaining cursor cycles on
         # Windows before removing the private ~3.3 GB workspace.
         import gc
@@ -186,7 +191,8 @@ def main():
         ["git","status","--porcelain"],cwd=ROOT,text=True).strip()),
         platform=platform.platform(),python=sys.version.split()[0],
         root_isolated=True,temp_workspace_deleted=True,
-        raw_payload_saved=False,derived_spool=args.derived_spool,**run)
+        raw_payload_saved=False,derived_spool=args.derived_spool or args.default_spool,
+        default_spool=args.default_spool,**run)
     if args.reference:
         old=json.loads(args.reference.read_text(encoding="utf8"))
         previous=old["fresh"]
@@ -198,7 +204,7 @@ def main():
         record["reference_comparison"]=checks
         if not checks["report_hashes"] or not checks["inventory_sha256"]:
             raise AssertionError("REAL REPORT BYTE EQUIVALENCE FAILED")
-    (RESULT_SPOOL if args.derived_spool else RESULT).write_text(
+    (RESULT_SPOOL if args.derived_spool or args.default_spool else RESULT).write_text(
         json.dumps(record,ensure_ascii=False,indent=2),encoding="utf8")
     print("PHASE9_SSH_PASS")
     print("INPUT_SHA256",[(s["date"],s["bytes"],s["sha256"])
