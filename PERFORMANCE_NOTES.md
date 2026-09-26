@@ -922,3 +922,62 @@ synthetic AKUZ .log files in a new owned `phase9_frozen_*` directory;
 nonzero memory samples. The new exact-workspace cleanup completed and the
 temporary directory no longer exists. Exit 0. No remote SSH, production
 data, existing user cache or published Release touched.
+
+## Phase 9.0j — successful fresh real SSH Python/frozen content + cleanup gate (2026-09-26)
+
+Authoritative checkpoint and archive were aligned after Phase 9.0i:
+`main == origin/main == c378e2e0f00daf5edde8506400846a65b6966509`
+at run start, no dirty tracked files. The local diagnostic ZIP was
+rebuilt (exit 0, BUILD_INFO commit matches HEAD), ZIP SHA-256
+`9ae29f13623210de943c340d72cbdc7726c1f6ba050264725072a5e7d119338c`.
+No published GitHub Release changed.
+
+The full frozen benchmark started a NEW isolated SSH transfer of exactly
+23, 24, 25 September 2026 AKUZ .log snapshots; original reference
+SHA-256 values were verified inside the ignored private diagnostic, along
+with date, size, inactive snapshot and second local SHA check.
+Input bytes: 171,378,567 + 140,361,291 + 644,567,384 = 956,307,242.
+No working-user report/download/cache directory was a benchmark target.
+The runner's own diagnostic output contains no raw medical/log content.
+
+Python local fresh+warm PASS, fresh wall 219.063 s; Python process
+`process_time()` 219.844 s. Frozen Windows local fresh+warm PASS,
+fresh wall 200.983 s. One pair does NOT establish stable speedup.
+Both independently built report workspaces passed complete signature
+comparison: inventory, normalized deterministic four report manifests,
+semantic SQLite tables, all semantically normalized analytics exports
+(534 in prior verified real baseline), and 657,738 single events.
+Do not claim independent fresh runs have raw byte-identical analytics JS
+or SQLite indexed.stamp: generated report UUID and catalog mtime are the
+previously isolated volatile fields, not a content waiver.
+
+Crucially, the full runner exited 0, wrote
+`diagnostics/phase9_frozen_real_private.json` (ignored; verified present)
+and completed the owned disposable workspace cleanup. The JSON records
+`raw_payload_saved=false`, `disposable_workspace_cleaned=true` and
+all five content checks `true`. This closes this SINGLE exact
+real-snapshot Python/frozen CONTENT + warm-cache + cleanup comparison.
+It does NOT close Phase 9.0 as a whole.
+
+Memory measurements captured for diagnostic context ONLY:
+Python monitor: 1,149,464,576 B sampled tree Working Set peak,
+1,129,725,952 B sampled tree Private peak (1,024 samples).
+Frozen monitor: 1,477,435,392 B sampled tree Working Set peak,
+1,745,600,512 B sampled tree Private peak (4,300 samples).
+These are not strict like-for-like Python/frozen memory metrics:
+Python monitor samples its in-process benchmark PID; frozen monitors
+the external PyInstaller process tree. OS per-PID high water and frozen
+CPU were not recorded by this runner. They are NOT evidence for an
+accepted RSS or CPU parity/speedup claim.
+
+The earlier failed Phase 9.0i first real run had equivalent content but
+Windows WinError 5 cleanup failure; this distinct post-correction run
+demonstrates that bounded owned-workspace cleanup worked on a full
+956-MB real snapshot workload. Other preexisting
+`diagnostics/phase9_frozen_*` folders must not be scrubbed globally.
+
+Still OPEN: process-isolated like-for-like memory and CPU benchmark,
+3+ alternating baseline/spool A/B with network phase separation,
+remaining active-file/failure matrix and architecture comparison to
+Phase 9.2. No further parser/cache optimization was performed in this
+instrumentation-and-verification step.
