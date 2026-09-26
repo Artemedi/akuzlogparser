@@ -1388,3 +1388,23 @@ No production logs/credentials/user cache/Release touched. This is
 synthetic fault injection; a process-kill between filesystem operations
 is still a separate crash-consistency question. Fable review NOT RUN:
 Bazzite remains offline and no usable Clean APIs token is on DBA-008D.
+
+## Phase 9.0s — alternating Python/frozen runtime A/B harness (2026-09-27)
+
+Step ID: P9-0S-01; starting HEAD `426fead3c159714e2f4586fa318d297f88c50444`.
+Goal: establish 3+ alternating runtime parity/performance observations
+without repeating SSH per trial or mixing network time into local build time.
+Added scripts/bench_phase9_python_frozen_ab.py. It performs one owned,
+reference-SHA-gated SSH fetch, then six isolated local fresh+warm builds
+ordered Python/Frozen, Frozen/Python, Python/Frozen (AB/BA/AB).
+Each trial has a separate report/cache/data root, full signature parity
+(inventory, normalized deterministic reports, semantic SQLite and
+analytics exports, event count), wall/CPU and process-tree memory metrics;
+the exact completed trial root is deleted before the next one.
+The runner refuses a dirty tree, wrong archive BUILD_INFO Git SHA,
+changed HEAD during the experiment, stale private output or wrong order.
+No raw payload is exported. Synthetic orchestration tests cover fixed
+order, fail-closed signature mismatch and exactly three trials/runtime.
+Targeted tests: 3/3 PASS (0.005 s); full Python suite 109/109 PASS
+(36.046 s); git diff --check PASS. No real runtime A/B result yet.
+Fable review NOT RUN: Bazzite remains offline and no usable Windows token.
