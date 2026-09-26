@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import replace
 import gc
 import json
+import shutil
 import os
 from pathlib import Path
 import socket
@@ -190,6 +191,26 @@ def frozen_build(root: Path, folder: Path, archive: Path):
         subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         proc.wait(timeout=20)
+def cleanup_owned_workspace(home: Path):
+    """Retry Windows executable-handle release; NEVER scrub another run."""
+    if (home.parent.resolve() != DIAG.resolve() or
+        not home.name.startswith("phase9_frozen_") or
+        not home.is_dir() or
+        not (home / MARKER).is_file() or
+        (home / MARKER).read_text(encoding="ascii") != "disposable\n"):
+        raise RuntimeError("Refusing cleanup outside this disposable benchmark")
+    # The first rmtree may remove MARKER before reaching a briefly locked EXE.
+    # Validate ownership once, then retry the SAME exact workspace only.
+    for attempt in range(30):
+        try:
+            shutil.rmtree(home)
+            return
+        except PermissionError as exc:
+            if getattr(exc, "winerror", None) not in (5, 32) or attempt == 29:
+                raise
+            sleep(.5)
+
+
 def main():
     if os.name != "nt":
         raise SystemExit("Windows-only full frozen parity benchmark")
@@ -200,9 +221,9 @@ def main():
     if package["build_git_sha"] != git_sha:
         raise AssertionError("Rebuild the frozen diagnostic from current HEAD")
     DIAG.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="phase9_frozen_", dir=DIAG) as td:
-        home = Path(td)
-        (home / MARKER).write_text("disposable\n", encoding="ascii")
+    home = Path(tempfile.mkdtemp(prefix="phase9_frozen_", dir=DIAG))
+    (home / MARKER).write_text("disposable\n", encoding="ascii")
+    try:
         source, snapshots = frozen_snapshots(home)
         print("REAL_SNAPSHOT_SHA_GATE_PASS", flush=True)
         old, python = python_build(home / "python", source)
@@ -217,6 +238,8 @@ def main():
                   "checks": checks, "raw_payload_saved": False,
                   "disposable_workspace_cleaned": True}
         gc.collect()
+    finally:
+        cleanup_owned_workspace(home)
     target = DIAG / "phase9_frozen_real_private.json"
     target.write_text(json.dumps(result, indent=2), encoding="utf-8")
     print("REAL_FROZEN_PARITY_PASS", checks, flush=True)

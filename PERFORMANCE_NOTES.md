@@ -849,3 +849,76 @@ The locally present diagnostic ZIP has BUILD_INFO SHA
 `84da1d1e980a5f1d2311f590656d9ede26dbaba9`; it must be rebuilt
 separately from an accepted implementation HEAD before running strict
 frozen-parity main() after this commit. GitHub Release unchanged.
+
+## Phase 9.0i — real Python/frozen parity run; Windows EXE cleanup gate (2026-09-26)
+
+Starting checkpoint: main and origin/main at
+`1e71bbebf1f685b12c41d2fc4cf173dbbdd8f10f`; clean working tree
+at benchmark launch. Windows diagnostic ZIP was rebuilt locally using
+`python -B scripts/build_portable.py` (exit 0); BUILD_INFO.json matched HEAD.
+ZIP SHA-256:
+`243c769b9db6871a9b5c1316368bdf5f0ff805f757b158d383375c9a92f3e55f`.
+Executable SHA-256:
+`d6a7ceb8d2aac8449957d89f89148fc96a9ed60887811ae28ba088b761ec0f15`.
+No GitHub Release mutation.
+
+One NEW SSH read of exactly the original 23/24/25 September logs passed
+`REAL_SNAPSHOT_SHA_GATE_PASS` (reference date, size, SHA and inactive
+source checks in isolated workspace; no user downloads/reports/cache reused).
+Python local fresh and warm build passed, fresh wall = 220.610 s. Windows
+portable EXE local fresh and warm build passed, fresh wall = 204.275 s.
+After both builds, `TemporaryDirectory.__exit__` failed with
+`PermissionError [WinError 5] Access is denied` on the disposable extracted
+`AKUZLogExplorer.exe`, so this invocation exited 1 and did NOT write
+`diagnostics/phase9_frozen_real_private.json`. Do NOT report full benchmark
+PASS, proper automatic cleanup or accepted CPU/RSS parity from this run.
+
+Before removing any failed-test files, a separate read-only check of the
+remaining two report workspaces re-ran `signature()` and found:
+`inventory=True, reports=True, sql=True, exports=True,
+single_events=True`; single event count 657,738. This establishes
+deterministic report/inventory and semantic SQL/analytics equivalence for
+this exact tested pair only. Analytics files may still differ in raw
+generated UUID bytes as documented in 9.0e; this is not strict raw export
+byte equality. A single Python vs EXE wall pair is NOT a speedup estimate.
+Peak memory scope and frozen CPU parity remain OPEN.
+
+Observed diagnostic EXE had ordinary Archive attributes, not ReadOnly.
+The test's new PyInstaller process tree was no longer running after exit;
+older unrelated `dist/phase8` processes were not touched. The failed
+workspace had been partially traversed by `TemporaryDirectory`, including
+deletion of its ownership marker. It was removed ONLY after verifying its
+exact run-specific name, known Python+frozen inventory paths, snapshot
+directory, and absence of a live test EXE using its path. No global
+cross-workspace cleanup or removal of an active workspace.
+
+Bounded harness correction: replace `TemporaryDirectory` automatic
+single-attempt cleanup with an explicit owned `mkdtemp` workspace, a
+validated disposable marker/parent/prefix, and a 30-attempt x 0.5-second
+retry only for Windows WinError 5/32 on the SAME exact workspace.
+Validate ownership once before retry because partial rmtree can remove
+the marker. Unexpected permission errors still fail. Do not overwrite
+the user's downloads/reports/cache or sweep other benchmark invocations.
+
+Synthetic cleanup tests (no SSH, medical/raw logs or production data):
+- removes one owned disposable workspace, preserves another active marker;
+- rejects a workspace without its marker;
+- retries after synthetic partial cleanup removes the marker;
+- does not mask unknown ACL failures.
+Four targeted tests PASS (0.049 s); full
+`python -B -m unittest discover -s tests -q`: 92 PASS (25.598 s).
+Eight Node UI tests PASS. `git diff --check` PASS.
+
+Gate still OPEN until this fix is committed, the local diagnostic portable
+is rebuilt to match that commit, an entirely new SHA-gated 23/24/25 SSH
+transfer is performed into its own workspace and the script terminates
+successfully with a private result JSON AND confirmed cleanup. Do not
+reuse prior downloaded test snapshots as the fresh-SSH gate.
+
+Additional synthetic frozen integration smoke (same diagnostic ZIP before
+this documentation/cleanup commit): independently created three tiny
+synthetic AKUZ .log files in a new owned `phase9_frozen_*` directory;
+`frozen_build` completed fresh+warm, reported 16 single events and
+nonzero memory samples. The new exact-workspace cleanup completed and the
+temporary directory no longer exists. Exit 0. No remote SSH, production
+data, existing user cache or published Release touched.
