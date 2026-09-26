@@ -736,3 +736,76 @@ that is an expected no-persistent-sidecar tradeoff, not a proof of a
 cache bug. Single-only miss presently writes an unnecessary spool when
 combined is already cached. No Phase 9.2/9.3 architectural decision
 follows automatically from this test. Portable and A/B gates remain OPEN.
+
+## Phase 9.0g — independent Clean APIs Fable review of frozen parity gate (2026-09-26)
+
+Recovery checkpoint: main and origin/main both at
+84da1d1e980a5f1d2311f590656d9ede26dbaba9. The pre-existing untracked
+`scripts/bench_phase9_frozen_real.py` was inspected read-only and was NOT
+overwritten, staged or run on real snapshots in this review. Existing
+diagnostic ZIP's BUILD_INFO.json commit matches current HEAD; published GitHub
+Release was not modified.
+
+External review: Clean APIs returned model label `claude-fable-5.1`, HTTP 200,
+for two completed bounded review passes of sanitized public benchmark code.
+Model identity/upstream routing is provider-reported, not independently
+verified. Only benchmark source and a narrow `akuz_app.py` endpoint excerpt
+were sent as prompt content; no real logs, raw events, SSH configuration,
+cache, medical content, or credentials were included in prompts.
+Temporary API request payloads on Windows were deleted after each request.
+The third-party review is a hypothesis source, NOT accepted evidence of a
+test pass or code defect without independent verification.
+
+Verified findings:
+- `wait_for(opener, base, busy=False)` immediately propagates a transient
+  `urllib.error.URLError`, whereas startup `wait_for(..., busy=None)`
+  retries it. An isolated mock with one transient error and then
+  `{"busy":false,"error":""}` observed 1 attempt/error versus
+  2 attempts/success, respectively. Retry only transient transport errors;
+  preserve early failure on HTTP rejection, actual application error and
+  deadline. Do not require seeing `busy=True` after HTTP 202.
+- Full-workload memory numbers are not yet like-for-like: Python
+  `monitor(os.getpid())` includes the benchmark harness while frozen
+  `monitor(proc.pid)` covers the standalone process tree. Both are sampled
+  at 30 ms and discard the OS high-water fields exposed by
+  `scripts/phase9_memory.py`; `bench_phase9_portable.py` uses separate
+  child-scoped aggregation at 20 ms. Frozen CPU time is also not measured,
+  unlike Python's `process_time()`. The resulting pair cannot establish
+  equivalent-workload CPU / peak-memory parity without narrower labeling
+  or a process-isolated Python worker with matched instrumentation.
+- The frozen crash/timeout path suppresses child stdout/stderr and lacks
+  an explicit `proc.poll()` early-exit check in the status wait loop. This
+  harms diagnosis of a failed EXE, though no such failure was observed
+  during this review. PATH truncation and taskkill behavior are hypotheses,
+  not independently demonstrated defects.
+
+Rejected model overclaims after verification and a second review:
+- No claimed pre-admission `busy=False` race: the server sets `busy=True`
+  under `state.lock` before starting the worker and returning HTTP 202.
+  Requiring a separately observed `busy=True` could miss a fast job.
+- `os.link` by itself does not mutate sources, and a failed
+  `TemporaryDirectory` cleanup raises before the script prints its
+  success marker; no demonstrated false `WORKSPACE_CLEANED True`.
+- The diagnostic ZIP SHA provenance/HEAD comparison is purposeful; the
+  local ZIP BUILD_INFO commit matched HEAD at the review checkpoint.
+  Published release is a separate artifact.
+- `signature()` already incorporates both `semantic_sql()` and
+  `semantic_exports()` (534 exports in prior real gates); claims of their
+  omission were false.
+
+Local review verification on DBA-008D:
+- `ast.parse` of the untracked frozen benchmark: PASS.
+- `python -B -m unittest discover -s tests -q`: 84 tests, PASS
+  (25.701 seconds).
+- Isolated mocked `wait_for` transport-error check: reproduced behavior
+  listed above; no network, SSH, user workspace or original logs involved.
+- Local Git status remained clean except for the same pre-existing untracked
+  benchmark file. No real portable parity run, no 3+ alternating A/B and
+  no real failure-injection gate were performed or accepted in this review.
+
+Next limited workstream: preserve ownership of the existing untracked
+benchmark, add targeted transport/retry tests, make equivalent-workload
+Python/frozen memory and CPU measurement scopes explicit, then run the
+full SHA-gated 23/24/25 September portable parity test in a separate
+disposable workspace. Do not declare Phase 9.0 or the portable gate complete
+from this review alone.
