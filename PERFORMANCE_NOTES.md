@@ -1408,3 +1408,42 @@ order, fail-closed signature mismatch and exactly three trials/runtime.
 Targeted tests: 3/3 PASS (0.005 s); full Python suite 109/109 PASS
 (36.046 s); git diff --check PASS. No real runtime A/B result yet.
 Fable review NOT RUN: Bazzite remains offline and no usable Windows token.
+
+## Phase 9.0t — real alternating Python/frozen runtime gate (2026-09-27)
+
+Step ID: P9-0T-01; clean experiment HEAD
+`5612560ce936545babf9432d6dbae277ef1dc40c`.
+Diagnostic ZIP rebuilt from exact HEAD; portable smoke PASS.
+ZIP SHA-256 `8f058d823f086d169dabd90fcb6508cf87396dd78f351ba7c4c57360b71bea59`.
+One new owned SSH fetch passed the established 2026-09-23/24/25
+reference date/size/SHA and inactive-source gates; 956,307,242 bytes.
+Network transfer occurred once and is excluded from per-trial wall/CPU.
+Six independent local fresh+warm trials, AB/BA/AB runtime order:
+1 Python  wall 212.373 s, CPU 201.156 s
+2 frozen  wall 201.451 s, CPU 197.609375 s
+3 frozen  wall 202.509 s, CPU 197.828125 s
+4 Python  wall 213.156 s, CPU 202.500 s
+5 Python  wall 213.496 s, CPU 202.891 s
+6 frozen  wall 201.084 s, CPU 197.562500 s
+Python medians: wall 213.156 s, CPU 202.500 s.
+Frozen medians: wall 201.451 s, CPU 197.609375 s.
+Observed median differences for this exact Windows/workload gate:
+11.705 s wall (5.49%) and 4.890625 s CPU (2.42%) lower for frozen.
+This does NOT prove an intrinsic packaging speed advantage; runtime,
+Defender/filesystem/startup/environment differences remain possible.
+All six trials produced one identical signature SHA: inventory, four
+normalized deterministic report manifests, semantic SQLite, normalized
+analytics exports and 657,738 single events PASS; warm/no-op PASS.
+Raw volatile analytics/index bytes are not claimed byte-identical.
+Median sampled process-lifetime tree Working Set:
+Python 1,392,066,560 B; frozen 1,464,082,432 B
+(frozen +72,015,872 B, about +5.17%).
+Median Private Bytes: Python 1,697,656,832 B; frozen 1,743,097,856 B
+(frozen +45,441,024 B, about +2.68%).
+Memory spans full worker lifetime, not only fresh wall/CPU interval.
+Result stores no raw payload; all six trial roots and owned workspace
+were removed. Runner exit 0 after 1540.04 s total.
+Published Release/user cache/config remained untouched.
+This closes the 3+ alternating Python/frozen runtime parity gate for
+these exact snapshots; it is not a general benchmark across machines.
+Fable independent review remains BLOCKED by unavailable Bazzite/token.
