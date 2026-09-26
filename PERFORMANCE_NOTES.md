@@ -390,3 +390,55 @@ Phase 8 = 0.9686/0.9743 ?, 19 ?????? ????????? ?????????.
 Phase 8 ? ????????????? ??????, ?? ?????????? ?????????:
 ?? ?????????? ? ?????????? ???????? ????????? ? ??????? ??????.
 ??????????????? ???????, SQLite, SSH-???????? ? combined ?? ????????.
+
+
+## Phase 9.0a — isolated Windows baseline harness (2026-09-26)
+
+Parent checkpoint: `fe733a8e79f49a1f549f42112513dc1fb0a5cdd8`.
+Only benchmark/test/docs files changed; the generator, parser, store, analytics,
+SSH transfer and existing cache layout were not modified.
+
+Commands, from the working repository:
+- `python scripts/bench_phase9_baseline.py --events 600 --chars 2048 --repeat 3 --output diagnostics/phase9_synthetic_baseline_600.json`
+- `python scripts/bench_phase9_errors.py --calls 600 --repeat 3 --output diagnostics/phase9_errors_600.json`
+Outputs are sanitized numeric metrics and hashes under the ignored diagnostics/.
+Sources are generated in disposable OS temp directories; no production files,
+ConnectConf.cfg or existing downloads/reports/cache are opened or deleted.
+
+Synthetic source sizes, with 600/600/601 parsed events:
+1,266,480 / 1,267,683 / 1,266,523 bytes. Three exact SHA-256 values
+are recorded in the local benchmark JSON, not substituted by size matches.
+Three fresh builds: wall 1.068624 / 1.066880 / 1.067058 seconds;
+CPU 0.953125 / 0.921875 / 0.906250 seconds;
+sampled peak tree Working Set 43,352,064 / 41,320,448 / 44,539,904 bytes.
+Warm builds: wall 0.043947 / 0.044442 / 0.043220 seconds.
+These are small Windows/Python synthetic measurements, NOT an AKUZ production
+speedup claim and NOT a portable EXE measurement.
+
+Fresh vs warm: report bytes/hashes, normalized inventory and SQLite table
+contents equal. Combined-only and single-only misses regenerated the same
+deterministic report content; mixed cache kept the copied-byte source from a
+different path separate (2,401 single events across four source files).
+For independently rebuilt combined reports, current code embeds a random
+temporary `akuz-v4-merge-*.jsonl` name in catalog meta.source; comparison
+normalizes ONLY that string. Provenance comparison excludes ONLY generated
+clock; all source identity, host/path and SHA fields remain checked.
+Raw-shard files and all other catalog bytes remain strict byte comparisons.
+
+The Windows sampler uses OS PeakWorkingSetSize per process, samples current
+PrivateUsage and simultaneously present process-tree sums at 20-ms intervals,
+and records PeakPagefileUsage separately; sampled peaks may miss short spikes.
+It enumerates descendants to cover a PyInstaller launcher/worker, but this
+run measured a Python child only. tracemalloc is not mislabeled as RSS.
+
+Outstanding Phase 9.0 gates: portable EXE comparison, real snapshot SHA A/B
+with no production raw in diagnostics, additional cache/fault/Unicode matrix,
+and an alternating old/new 3+-pair experiment after there is a candidate.
+No Phase 9.1-derived contract or Phase 9.2/9.3 architecture is approved here.
+
+Synthetic error-branch profile (600 calls per band, three repetitions):
+16 branch/size buckets, 48 numeric samples; truncated raw is probed over
+exactly 24,000 characters. For truncated synthetic entries, 600-call wall
+seconds: no_match 0.0341/0.0329/0.0338, exception 0.6670/0.6606/0.6660,
+serial 0.2737/0.2728/0.2728, firstline 0.6845/0.6856/0.6792.
+These are branch-conditioned synthetic costs, not measured production shares.

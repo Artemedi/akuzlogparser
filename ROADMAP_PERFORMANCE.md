@@ -6,6 +6,7 @@
 **Исходный checkpoint:** `1ce50a1dc46b1fd6e822a712919b39c9b921de7d` (Phase 8, основной branch `main`).
 **Последний выпущенный GitHub Release:** v4.6.0. Phase 6/7/8 коммитились в `main`; их диагностические EXE не являются заменой опубликованного релиза.
 **Главный следующий этап:** Phase 9 — сохранить корректность и кэш, перестать повторно вычислять производные признаки события в combined.
+**2026-09-26 Phase 9.0a:** synthetic Windows baseline + memory sampler + isolated cache matrix implemented; production/portable/A-B gate still OPEN. See PERFORMANCE_NOTES.md.
 **Статус каждой строки ниже:** OPEN / PROPOSED до отдельной реализации, тестирования и записи доказательств. Предыдущие фазы 6–8 COMPLETED.
 
 ## 0. Обязательное начало новой сессии: recovery и границы полномочий
@@ -60,7 +61,7 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 - Эталонный прогон должен включать cold/fresh-all, warm/no-op, combined-only-miss, single-only-miss, mixed-cache (2 старых + 1 новый), одинаковые bytes с разными host/path, смену даты, изменение активного источника во время чтения, повреждённый/устаревший кэш, некорректный Unicode, CRLF, полночь, большой XML/стек, отсутствие доступа к файлу и отмену сборки.
 - Условия отклонения: любые необъяснённые отличия контента, потеря provenance, нарушение кэша, скрытые дубли событий, существенно худший RSS, незафиксированная модель восстановления, ускорение лишь из-за другого SSH/другой нагрузки.
 
-## 3. Phase 9.0 — подготовить доказуемый benchmark и измерение памяти [OPEN]
+## 3. Phase 9.0 — подготовить доказуемый benchmark и измерение памяти [IN PROGRESS; 9.0a SYNTHETIC PASS]
 
 1. Ввести один воспроизводимый benchmark runner: фиксировать Git SHA, исходные snapshot SHA/bytes/events, ОС, Python/portable, режим кэша, состав build.summary, общий wall, CPU, timings фаз, размер output/cache, условия хранения; НЕ сохранять исходный raw в диагностике.
 2. Добавить Windows-измерение пикового Working Set/Private Bytes, учитывая процесс загрузчика/дочерний процесс PyInstaller; `tracemalloc` оставить **дополнительной**, а не заменяющей RSS метрикой. Использовать Windows API либо отдельный проверенный монитор; отдельно сравнить измерения обычного Python и portable EXE.
@@ -69,6 +70,8 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 5. Парные A/B по 3+ прогонов с чередованием порядка и одинаковыми SHA снимков, с разделением SSH и локальной генерации. Сохранять отрицательные результаты как часть журнала экспериментов.
 
 **Gate:** можно воспроизвести Phase 8 на синтетике, получить byte-equivalence, корректный пик памяти на Windows и понятную телеметрию. Это инструментальный этап, ускорение не обещается.
+
+**9.0a evidence:** `scripts/bench_phase9_baseline.py`, `scripts/phase9_memory.py`, `scripts/bench_phase9_errors.py`, `tests/test_phase9_baseline.py`; Windows Python synthetic fresh/warm/combined-miss/single-miss/mixed-cache and branch profiles. Details in `PERFORMANCE_NOTES.md`. This is NOT Phase 9.0 closure: portable EXE, unchanged real-snapshot SHA, full fault/corruption cases and old/new alternating A/B remain open.
 
 ## 4. Phase 9.1 — выделить контракт Derived/ProcessedEvent [OPEN]
 
