@@ -1581,3 +1581,52 @@ Raw shard file paths/sizes are verified; full per-raw-shard content
 hashing and physical power-loss durability are NOT claimed.
 Concurrency of multiple app processes writing same inventory remains
 OPEN, as does safe cleanup of abandoned, unindexed staging work.
+
+Step ID: P9-0X-02 — new exact-SHA real SSH Python/frozen gate.
+Candidate accepted as committed code at HEAD
+`be38fa1cdafb07523b5bdb586bc3f7e4cc057f82`.
+Because a separate category-isolation workstream kept the main checkout
+dirty, created an OWNED detached, CLEAN Git worktree of this exact SHA.
+Only local ignored copies of ConnectConf.cfg and prior snapshot SHA
+reference were put there; no real config was packaged or committed.
+PyInstaller 6.22.3 diagnostic build PASS; portable ZIP BUILD_INFO Git
+SHA equals be38fa1. ZIP SHA-256
+`3fd9c55b2cc81e3d29531a05b90a702b44d58b95acf66e80b29a9b1aa14d8b2c`.
+EXE SHA-256
+`3d07fbdfc9508a9fa9ce4ed777a647228871d41e64ec507bb38f6c5b788b15d8`.
+Isolated portable ZIP smoke PASS (143 samples, 118 observed child
+samples, 1 unreadable child memory sample); this tiny smoke is NOT a
+claim of zero loss. GitHub Release unchanged.
+Fresh SSH date/bytes/reference SHA, inactivity and second local SHA
+PASS for exactly 2026-09-23/24/25 .log; 956,307,242 input bytes.
+Actual source digests remain ONLY in ignored private JSON, never Git.
+One isolated fresh+warm build per runtime, same read-only hardlinked
+snapshots, runner exit 0 (595.58 s including network, checks, cleanup).
+Python fresh wall 214.583 s; process_time CPU 203.375 s.
+Frozen fresh wall 202.697 s; GetProcessTimes CPU 198.890625 s.
+Five normalized signature checks PASS: inventory, four deterministic
+report file manifests, SQLite semantic, analytics export semantic and
+657,738 single events; warm/no-op parity PASS.
+Raw volatile analytic/export bytes are NOT claimed byte-identical.
+Python sampled full-lifetime tree: 5,328 samples, peak Working Set
+1,411,678,208 B, peak Private 1,699,987,456 B, cumulative observed
+lifetime CPU 224.0625 s; zero unreadable memory/CPU samples.
+Frozen sampled full-lifetime tree: 4,692 samples, peak Working Set
+1,443,442,688 B, peak Private 1,734,922,240 B, cumulative observed
+lifetime CPU 201.9375 s; zero unreadable memory/CPU samples.
+Full-lifetime memory/CPU and fresh-only wall/CPU are DISTINCT scopes.
+No intrinsic Python/EXE speed advantage inferred from one pair.
+`raw_payload_saved=false` and `WORKSPACE_CLEANED True`.
+Private evidence copied with SHA equality verified into existing
+ignored diagnostics: `phase9_x_frozen_real_be38fa1_private.json`,
+`phase9_x_portable_smoke_be38fa1_private.json` and
+`phase9_x_portable_be38fa1_private.zip`; no raw AKUZ log persisted.
+The owned detached worktree, including temporary SSH configuration,
+was explicitly removed; original user's cache, reports, downloads,
+other benchmark folders and Release were never deleted or rewritten.
+Main checkout still contains unrelated uncommitted category-isolation
+edits, NOT included in the clean be38fa1 real/portable evidence.
+This is a first new-SHA real content/CPU/memory gate, NOT a 3+ new
+A/B or a real process-kill-on-production-log trial. Whole-report
+power-loss, multiprocess cache concurrency and independent Fable
+review remain OPEN; Bazzite offline and Windows token unavailable.

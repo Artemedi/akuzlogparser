@@ -1,10 +1,13 @@
 # Phase 9 — Report publication crash recovery: bounded design gate
 
-Status: **BOUNDED IMPLEMENTATION / SYNTHETIC GATES ONLY** (2026-09-27).
-Real SSH, portable, independent review, concurrent-writer and power-loss
-gates remain OPEN; Phase 9.2/9.3 architectural approval is separate.
+Status: **BOUNDED IMPLEMENTATION / SYNTHETIC + FIRST REAL GATE PASS**
+(2026-09-27). New-SHA real SSH Python/frozen parity and diagnostic
+portable smoke passed at be38fa1; 3+ new-SHA A/B, independent review,
+concurrent-writer and power-loss gates remain OPEN. Phase 9.2/9.3
+architectural approval is separate.
 Evidence: `PERFORMANCE_NOTES.md` P9-0R-01, P9-0U-01, P9-0V-01,
-P9-0W-01; synthetic regressions `tests/test_phase9_report_crash.py`.
+P9-0W-01 and P9-0X-01/02; synthetic regressions
+`tests/test_phase9_report_crash.py` and `test_phase9_recovery_spool.py`.
 
 ## Reproduced state transition
 
