@@ -442,3 +442,28 @@ exactly 24,000 characters. For truncated synthetic entries, 600-call wall
 seconds: no_match 0.0341/0.0329/0.0338, exception 0.6670/0.6606/0.6660,
 serial 0.2737/0.2728/0.2728, firstline 0.6845/0.6856/0.6792.
 These are branch-conditioned synthetic costs, not measured production shares.
+
+## Phase 9.0b — frozen child-process memory smoke (2026-09-26)
+
+Parent checkpoint: 041471e3308bf7b4bc3c60b60360203b4ea02ac9.
+Command: python scripts/bench_phase9_portable.py
+dist/phase8/AKUZLogExplorer-windows-x64.zip
+--output diagnostics/phase9_portable_phase8.json
+The script verifies the archive allowlist, BUILD_INFO version and build SHA,
+hashes both EXE and ZIP, and invokes existing smoke_portable.py. The smoke
+extracts into an OS temporary folder and tests a one-event synthetic local
+log; it does not run the source EXE in its working cache directory.
+
+PASS: local diagnostic Phase 8 portable v4.6.0, build SHA
+1ce50a1dc46b1fd6e822a712919b39c9b921de7d. Wall 4.557517 s includes
+extracting ZIP, two frozen launches/self-test, localhost and parsing one event.
+103 observed frozen-child samples, 20-ms polling. Peak sampled simultaneous
+child Working Set 53,309,440 bytes, private 25,763,840 bytes; host Python
+smoke monitor excluded. Individual OS per-PID high-water marks are also
+recorded in ignored diagnostics, and can be larger than sampled peaks.
+
+This is NOT equivalent-workload Python-vs-EXE performance A/B, NOT 956-MB
+snapshot workload, and not a result for a newly rebuilt 9.0 EXE. The
+production report code has not changed since this diagnostic Phase 8 build;
+the documented Phase 9.0a/b scripts are not packaged into that older EXE.
+No published Release, installed reports/cache, secrets or user .log touched.
