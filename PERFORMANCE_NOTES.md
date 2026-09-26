@@ -693,3 +693,46 @@ were targeted. Replaced proactive cross-run deletion with per-invocation
 `TemporaryDirectory` cleanup only; synthetic guard preserves an active
 marker and in-progress part file. This is safety, not a speed optimization.
 Never infer abandoned state merely from a disposable marker.
+
+## Phase 9.0f — real SSH partial-cache matrix (2026-09-26)
+
+Step 1: benchmark-only `scripts/bench_phase9_ssh_cache.py` uses the
+existing ConnectConf.cfg read in memory, forcibly overrides local_dest,
+selects exactly 23/24/25 Sep .log, and creates a fresh disposable
+workspace. A prior concurrent test exposed global cleanup interference;
+commit 4ece931 removed cross-invocation deletion. This new test started
+after that correction. No user cache/reports/downloads were removed.
+
+Step 2: new full SSH fetch + optimized fresh build: 342.961 s wall;
+956,307,242 source bytes, 657,738 combined events, 892,423 lines,
+658 shards and 39.686 s combined parse. Downloaded source SHA/size
+metadata matches EXACTLY both the original non-spool baseline (a08bc35)
+and previous spool reference. The private diagnostic JSON stores SHA
+hashes/counters only, not raw medical or log content.
+
+Step 3: deliberately invalidate reports ONLY inside this test workspace,
+run the normal application default, and compare after EACH scenario:
+
+- combined-only miss: 156.844 s wall / 152.703 s CPU; 3 singles reused, combined new;
+  normalized report/inventory/ALL semantic SQL and 534 JS exports PASS.
+- single-only miss: 74.300 s wall / 69.969 s CPU; 1 single new, combined reused;
+  1 temporary derived spool created (unused, then removed); same PASS.
+- mixed single + combined miss: 171.026 s wall / 165.469 s CPU; 1 single + combined new;
+  only the new single contributes a spool; both reused singles derive
+  normally during combined; same PASS.
+- final warm: 3.530 s wall / 2.406 s CPU; no reports recreated; same PASS.
+
+Step 4: all four modes PASS inventory, full normalized deterministic
+report manifests, all SQLite tables and all 534 semantic JS exports.
+No new SSH transfer was required during intentional warm/cache-miss
+substeps; a new SHA-verified SSH transfer happens at the beginning of
+EACH independent benchmark invocation. Its within-run partial-cache
+transitions deliberately preserve downloads so cache behavior is tested.
+The disposable workspace and spools were removed after successful test.
+Summary: ignored diagnostics/phase9_ssh_cache_matrix_private.json.
+
+Limits: combined-only miss necessarily rederives all 657,738 events;
+that is an expected no-persistent-sidecar tradeoff, not a proof of a
+cache bug. Single-only miss presently writes an unnecessary spool when
+combined is already cached. No Phase 9.2/9.3 architectural decision
+follows automatically from this test. Portable and A/B gates remain OPEN.
