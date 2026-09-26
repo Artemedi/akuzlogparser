@@ -22,6 +22,8 @@ from akuz_windows import fetch_windows, list_windows, load_windows_config
 from akuz_local import fetch_local, list_local, load_local_config
 from akuz_html_explorer import generate
 from akuz_log_parser import event_stream
+from akuz_publication import (recover_report, retire_indexed_intent,
+                              retire_intent, write_intent)
 from akuz_derived_spool import SpoolWriter, replay, verified_next, verify_exhausted
 from akuz_store import (cached_download, cached_report, clear_cache, key_for,
                          load_store, report_summary, save_store, date_from_log_name, sha256)
@@ -146,12 +148,17 @@ def _publish(root, store, key, raw_path, base, sources, label, kind,
              gen_fn=generate, input_bytes=None):
     old = cached_report(store, key, root)
     if old is not None:
+        retire_indexed_intent(root, old, key, sources, label, kind)
         return dict(old, url='/reports/'+old['id']+'/index.html', reused=True)
+    recovered = recover_report(root, store, key, sources, label, kind)
+    if recovered is not None:
+        return recovered
     rid = _fresh_report_id(root)
     parent = root/'reports'
     parent.mkdir(exist_ok=True)
     temp = parent/(rid+'.building')
     final = parent/rid
+    intent = None
     try:
         with perf_phase(root, 'report.generate',
                         input_bytes=raw_path.stat().st_size if input_bytes is None else input_bytes):
@@ -164,10 +171,11 @@ def _publish(root, store, key, raw_path, base, sources, label, kind,
         (temp/'provenance.json').write_text(json.dumps(dict(sources=sources, kind=kind,
             generated=datetime.now().isoformat(timespec='seconds'), events=meta['events']),
             ensure_ascii=False, indent=2), encoding='utf-8')
-        temp.rename(final)
         value = dict(id=rid, key=key, label=label, kind=kind, sources=sources,
             events=meta['events'], lines=meta['physical_lines'],
             created=datetime.now().isoformat(timespec='seconds'))
+        intent = write_intent(root, value, temp/'provenance.json')
+        temp.rename(final)
         store['reports'][rid] = value
         try:
             with perf_phase(root, 'report.inventory_save'):
@@ -179,6 +187,8 @@ def _publish(root, store, key, raw_path, base, sources, label, kind,
             raise
         return dict(value, url='/reports/'+rid+'/index.html', reused=False)
     finally:
+        if intent is not None:
+            retire_intent(intent)
         if temp.exists():
             shutil.rmtree(temp)
 
@@ -413,7 +423,9 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         source_meta = [dict(name=remote['name'], date=chosen, sha256=digest,
                             remote_path=remote['path'], host=cfg.host)]
         if spool_root is not None and all(dates.values()):
-            spool_path = spool_root / f'{len(spools):04d}.jsonl'
+            # Stable per-selection slot: a recovered single may create an
+            # empty writer but must not collide with the next source spool.
+            spool_path = spool_root / f'{idx-1:04d}.jsonl'
             with SpoolWriter(spool_path) as sink:
                 def single_gen(raw, out, base, chunk_size, top):
                     meta = generate(raw, out, base, chunk_size, top,
@@ -424,9 +436,12 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                 report = _publish(root, store, content_key, path,
                                   date.fromisoformat(chosen) if chosen else None,
                                   source_meta, label, 'single', single_gen)
-            spools[(remote['path'], digest, chosen)] = (spool_path, sink.sha256)
-            perf_event(root, 'derived.spool', 'summary', events=sink.count,
-                       bytes_saved=sink.bytes_written)
+            # A crash-recovered report did not execute single_gen: its empty
+            # writer must never be replayed as a sidecar for combined.
+            if not report['reused']:
+                spools[(remote['path'], digest, chosen)] = (spool_path, sink.sha256)
+                perf_event(root, 'derived.spool', 'summary', events=sink.count,
+                           bytes_saved=sink.bytes_written)
         else:
             report = _publish(root, store, content_key, path,
                               date.fromisoformat(chosen) if chosen else None,

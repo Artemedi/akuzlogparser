@@ -1,15 +1,16 @@
 # Phase 9 — Report publication crash recovery: bounded design gate
 
-Status: **PROPOSED, NOT IMPLEMENTED** (2026-09-27). Do not treat
-this document as approval to modify the Phase 9.2/9.3 architecture.
+Status: **BOUNDED IMPLEMENTATION / SYNTHETIC GATES ONLY** (2026-09-27).
+Real SSH, portable, independent review, concurrent-writer and power-loss
+gates remain OPEN; Phase 9.2/9.3 architectural approval is separate.
 Evidence: `PERFORMANCE_NOTES.md` P9-0R-01, P9-0U-01, P9-0V-01,
 P9-0W-01; synthetic regressions `tests/test_phase9_report_crash.py`.
 
 ## Reproduced state transition
 
-Current `_publish` in `akuz_app.py` generates `rid.building`, writes
-provenance, renames it to `reports/rid`, adds `rid` to in-memory store,
-and calls `save_store()` (atomic `inventory.json.tmp.replace`).
+Previously `_publish` (through `2917d28`) generated `rid.building`,
+wrote provenance, renamed it to `reports/rid`, added `rid` to the
+in-memory store and called `save_store()` (atomic inventory replace).
 Caught inventory-save errors roll back the newly published directory.
 Abrupt process exit does not execute that rollback.
 
@@ -27,10 +28,13 @@ never sweep unknown `reports/v4_*` or user report/cache directories.
 
 ## Candidate ownership-validated recovery protocol
 
-Candidate, not a chosen implementation: persist a narrowly scoped
-publication intent OUTSIDE the report output, associated with the exact
-report id and cache key, **before** renaming staging to final. Record
-only metadata needed to validate the specific owned transaction.
+The bounded candidate implementation in `akuz_publication.py` persists a
+narrowly scoped intent OUTSIDE the report output, associated with the exact
+report id and cache key, **before** renaming staging to final. It records
+value/provenance metadata, hashes of provenance/index/catalog, and paths
+and sizes of all generated files; raw shard contents are not rehashed.
+This is an identity and missing/truncated-file guard, not an assertion
+of tamper-proof integrity of every raw shard.
 Writing an intent must itself have atomic publication and explicit
 failure handling; no raw AKUZ event data, password or API token.
 
@@ -57,8 +61,14 @@ If `_publish` returns a recovered/cached single report without calling
 path breaks combined replay. The caller must explicitly distinguish
 fresh derive output from recovered report and use safe combined fallback
 or regenerate a valid sidecar; do not invent a zero-event sidecar.
+The candidate now registers spools ONLY when `single_gen` actually ran,
+and uses a per-selection temporary filename to prevent an empty writer
+from colliding with the next source's spool. A separate subprocess
+integration test checks one recovered plus two fresh sources against a
+non-spool baseline. An abandoned spool from the crashed process is NOT
+globally cleaned, because its ownership is not established on retry.
 
-## Acceptance matrix before a production change
+## Remaining acceptance matrix before Phase 9 closure / Release
 
 1. Original P9-0W-01 reproducer changes from observed orphan to a
    documented safe recovery without losing source provenance.

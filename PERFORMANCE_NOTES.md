@@ -1542,3 +1542,42 @@ This is DOCUMENTARY DESIGN, not synthetic, real or production PASS.
 No production source, SSH credential, user files, Release or
 architecture selection altered; unrelated category-isolation work
 remains uncommitted and untouched.
+
+## Phase 9.0x — ownership-validated report crash recovery (2026-09-27)
+
+Step ID: P9-0X-01; initial HEAD `4e0eea6bb1a8b315d9d4233d35a4e0a66be5ae5a`.
+Reproduced P9-0W-01 orphan changed to exact-report recovery:
+`akuz_publication.py` writes a per-report atomic intent BEFORE
+`*.building` -> final rename. Intent stores report id/key/kind/label,
+source/provenance identity, provenance/index/catalog hashes and sizes
+of all output paths, but NOT the raw event contents or passwords.
+`_publish` recovers only exact matching final and request; it registers
+that existing report into inventory once, then retires owned intent.
+An indexed matching report retires its stale intent on reuse.
+Corrupt/unknown/mismatched/unindexed directories are never swept.
+A crash before final rename leaves a staging dir and intent for
+manual diagnosis, NOT an automatically published partial report.
+
+Critical regression found and corrected: recovered `single_gen` did
+not run and its empty SpoolWriter occupied `0000.jsonl`; next source
+tried the same len(spools)-derived filename and failed FileExistsError.
+Only freshly generated singles now register spool entries; spool names
+use stable per-selection positions so the next fresh source cannot
+collide. Missing sidecar falls back to normal event derivation.
+A 3-source subprocess test (1 recovered + 2 fresh) now matches an
+independent no-spool inventory/report manifest, combined included.
+Targeted crash/spool 12/12 PASS (5.234 s); full Python suite
+127/127 PASS (44.851 s); five legacy equivalence scripts PASS:
+classify 131,860 cases, report 160 event raw/catalog bytes,
+combined 6 events, event stream 3 seeds, text semantics 560 cases.
+`git diff --check` PASS. No production SSH logs fetched for THIS
+candidate yet: old 2026-09-23/24/25 real evidence belongs to
+pre-recovery SHAs. Fresh real Python/frozen parity/CPU/Working Set,
+cache fault matrix, packaging and independent Fable review OPEN.
+Input/output payloads and credentials never included in these tests.
+User reports/downloads/cache and published GitHub Release untouched.
+Unrelated category-isolation changes remain unstaged and preserved.
+Raw shard file paths/sizes are verified; full per-raw-shard content
+hashing and physical power-loss durability are NOT claimed.
+Concurrency of multiple app processes writing same inventory remains
+OPEN, as does safe cleanup of abandoned, unindexed staging work.
