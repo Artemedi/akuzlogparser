@@ -127,6 +127,60 @@ class SSHTraceTests(unittest.TestCase):
             self.assertIn("stage=source.ssh.transfer status=done",
                           (root/"diagnostics"/"performance.txt").read_text("utf-8"))
 
+    def test_rotation_during_transfer_rejected_and_part_removed(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = b"12:00:00.000,AKUZ,s,user: stable\n"
+            cfg = fetch.ConnectConfig("example.test", 22, "reader", "", "",
+                "", "/srv/akuz", root/"downloads", "*.log", "")
+            selected = dict(id="a"*64, path="/srv/akuz/test.log",
+                name="test.log", size=len(data), device=1, inode=2)
+            before = ((1, 2, len(data), 100), "")
+            after = ((1, 9, len(data), 100), "")
+            with patch.object(fetch, "_connect", return_value=FakeSSH(data)), \
+                 patch.object(fetch, "_listing", return_value=[selected]), \
+                 patch.object(fetch, "_remote_metadata", side_effect=[before, after]):
+                with self.assertRaisesRegex(fetch.FetchError, "заменён ротацией"):
+                    fetch.fetch_selected(cfg, selected, trace_root=root)
+            self.assertEqual(list((root/"downloads").glob("*.part")), [])
+            self.assertEqual(list((root/"downloads").glob("akuz_v4_*")), [])
+
+    def test_truncation_during_transfer_rejected_and_part_removed(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = b"12:00:00.000,AKUZ,s,user: stable\n"
+            cfg = fetch.ConnectConfig("example.test", 22, "reader", "", "",
+                "", "/srv/akuz", root/"downloads", "*.log", "")
+            selected = dict(id="a"*64, path="/srv/akuz/test.log",
+                name="test.log", size=len(data), device=1, inode=2)
+            before = ((1, 2, len(data), 100), "")
+            after = ((1, 2, len(data)-1, 101), "")
+            with patch.object(fetch, "_connect", return_value=FakeSSH(data)), \
+                 patch.object(fetch, "_listing", return_value=[selected]), \
+                 patch.object(fetch, "_remote_metadata", side_effect=[before, after]):
+                with self.assertRaisesRegex(fetch.FetchError, "усечён"):
+                    fetch.fetch_selected(cfg, selected, trace_root=root)
+            self.assertEqual(list((root/"downloads").glob("*.part")), [])
+            self.assertEqual(list((root/"downloads").glob("akuz_v4_*")), [])
+
+    def test_active_without_complete_line_fails_closed_and_removes_part(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = b"12:00:00.000,AKUZ,s,user: unfinished"
+            cfg = fetch.ConnectConfig("example.test", 22, "reader", "", "",
+                "", "/srv/akuz", root/"downloads", "*.log", "")
+            selected = dict(id="a"*64, path="/srv/akuz/test.log",
+                name="test.log", size=len(data), device=1, inode=2)
+            before = ((1, 2, len(data), 100), "")
+            after = ((1, 2, len(data)+1, 101), "")
+            with patch.object(fetch, "_connect", return_value=FakeSSH(data)), \
+                 patch.object(fetch, "_listing", return_value=[selected]), \
+                 patch.object(fetch, "_remote_metadata", side_effect=[before, after]):
+                with self.assertRaisesRegex(fetch.FetchError, "нет завершённой строки"):
+                    fetch.fetch_selected(cfg, selected, trace_root=root)
+            self.assertEqual(list((root/"downloads").glob("*.part")), [])
+            self.assertEqual(list((root/"downloads").glob("akuz_v4_*")), [])
+
 
 if __name__ == "__main__":
     unittest.main()

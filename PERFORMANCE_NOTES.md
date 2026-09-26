@@ -1345,3 +1345,25 @@ available on Windows); remaining active-file/failure matrix,
 Python/frozen 3+ A/B, and Phase 9 architecture selection OPEN.
 This step adds documentary evidence only; no production code,
 published GitHub Release, credentials or real log contents changed.
+
+## Phase 9.0q — SSH source-mutation fail-closed matrix (2026-09-27)
+
+Step ID: P9-0Q-01; starting HEAD `97ca5b8af8f2f982fa6a2f3f97e5710ad085fd30`.
+Goal: close bounded SSH source-mutation/failure gaps without touching
+production behavior unless a defect is reproduced. Existing coverage
+already included short transfer cleanup, active incomplete-tail trim,
+spool disk-full rollback and corrupted-spool recovery.
+Added synthetic SSH tests for: inode/device rotation detected after the
+byte-bounded transfer; remote truncation below the fixed bound detected
+after transfer; active snapshot containing no completed physical line.
+All three must fail closed, remove the owned .part file and publish no
+akuz_v4_* final snapshot. Existing implementation passed unchanged.
+Targeted tests/test_fetch_performance.py: 7/7 PASS (0.207 s).
+Full Python suite: 105/105 PASS (36.363 s); git diff --check PASS.
+No production parser/fetch/cache code changed; no real log, credential,
+user download/report/cache or GitHub Release touched. This is synthetic
+fault-injection evidence, not a real active-file experiment.
+Fable independent review NOT RUN: Bazzite remains offline and no usable
+Clean APIs token is present on DBA-008D. Remaining Phase 9.0 closure
+work includes independent review plus any still-uncovered cancellation/
+publication recovery cases and architecture decision boundaries.
