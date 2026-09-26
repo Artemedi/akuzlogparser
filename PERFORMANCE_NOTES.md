@@ -1473,3 +1473,29 @@ Independent Fable review NOT RUN: Bazzite offline, Windows token absent.
 A concurrent category-isolation workstream modified other files;
 this commit must stage ONLY akuz_store.py, the inventory tests and
 these notes, preserving those unrelated uncommitted edits.
+
+## Phase 9.0v — synthetic inventory process-exit boundaries (2026-09-27)
+
+Step ID: P9-0V-01; initial HEAD `5b50f1615b6425c48a4afe54c72df38588c701af`.
+Goal: test an abrupt child-process exit before and after inventory
+atomic rename, not merely a caught Python exception.
+Added `tests/test_phase9_inventory_crash.py` with isolated child
+Python interpreters and temporary synthetic inventory roots ONLY.
+Child deliberately calls `os._exit(61)` immediately before
+`inventory.json.tmp.replace(inventory.json)` or `os._exit(62)`
+immediately after a successful replace. Parent remains alive.
+BEFORE: original inventory bytes and entries intact, abandoned
+`inventory.json.tmp` present (no exception/finally runs), then a
+fresh load/save replaces stale tmp and keeps original entries.
+AFTER: newly saved inventory intact and readable, no tmp present,
+then a fresh load/save preserves old/new entries without duplicates.
+Targeted 2/2 PASS (0.261 s), full 115/115 Python tests PASS
+(36.748 s); `git diff --check` PASS. No app/persistence code
+changes, no real SSH, raw logs, credentials or user cache touched.
+This proves tested child process-exit ordering at two rename
+boundaries only. It does NOT prove power-loss durability, `fsync`,
+crash atomicity of report-dir + inventory as a unit, or concurrent
+writers' safety with the shared tmp filename. Those gates remain OPEN.
+Fable NOT RUN: Bazzite offline, Windows Clean APIs token unavailable.
+Unrelated in-progress category-isolation changes left untouched;
+commit ONLY new inventory crash test and these notes.
