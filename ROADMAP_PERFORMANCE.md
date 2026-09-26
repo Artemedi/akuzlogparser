@@ -9,6 +9,7 @@
 **2026-09-26 Phase 9.0a:** synthetic Windows baseline + memory sampler + isolated cache matrix implemented; production/portable/A-B gate still OPEN. See PERFORMANCE_NOTES.md.
 **2026-09-26 Phase 9.0b:** isolated Phase 8 portable ZIP smoke with Windows child-process memory passed; equivalent-workload Python/EXE and real snapshot A/B remain OPEN. See PERFORMANCE_NOTES.md.
 **2026-09-26 Phase 9.0c:** SHA-verified real local .log snapshot Python control performed twice: 655,054 combined events; 263.781/268.099-s fresh and 2.352/2.348-s warm; build-only Windows Working Set OS peak captured. Normalized report/inventory match across independent fresh builds, but SQL and analytics export cross-fresh hashes differ and need a targeted explanation. Existing user cache/source untouched; full portable/A-B gate OPEN. See PERFORMANCE_NOTES.md.
+**2026-09-26 Phase 9.0d / 9.1:** exact 23/24/25 September SSH snapshots (657,738 combined events) control + Phase 9.1 derived-event refactor validated; all deterministic reports/inventory byte-equivalent. SQLite indexed mtime and export ephemeral report IDs explained; semantic export normalizer remains OPEN. No end-to-end speedup claimed, Phase 9.2/9.3 architecture OPEN. See PERFORMANCE_NOTES.md.
 **Статус каждой строки ниже:** OPEN / PROPOSED до отдельной реализации, тестирования и записи доказательств. Предыдущие фазы 6–8 COMPLETED.
 
 ## 0. Обязательное начало новой сессии: recovery и границы полномочий
@@ -75,7 +76,7 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 
 **9.0a evidence:** `scripts/bench_phase9_baseline.py`, `scripts/phase9_memory.py`, `scripts/bench_phase9_errors.py`, `tests/test_phase9_baseline.py`; Windows Python synthetic fresh/warm/combined-miss/single-miss/mixed-cache and branch profiles. Details in `PERFORMANCE_NOTES.md`. This is NOT Phase 9.0 closure: portable EXE, unchanged real-snapshot SHA, full fault/corruption cases and old/new alternating A/B remain open.
 
-## 4. Phase 9.1 — выделить контракт Derived/ProcessedEvent [OPEN]
+## 4. Phase 9.1 — выделить контракт Derived/ProcessedEvent [REAL FRESH/WARM + SYNTHETIC PASS; FULL FAILURE/CACHE GATE OPEN]
 
 1. Провести точный аудит `generate()`, `read_input()` и `_iter_combined_sources()`; записать «инвариант относительно individual/combined» или «контекст отчёта» для каждого поля. Не объявлять `event_id`, `day_offset`, `source_idx`, `pattern_first`, shard index и source line автоматически инвариантными.
 2. Ввести чистый derive-этап `raw/message -> {category, normalized_pattern, duration, error_match, replacement_count}` и отдельный writer-этап, получающий derive + контекст отчёта; это **эскиз контракта**, не обязательные имена API.

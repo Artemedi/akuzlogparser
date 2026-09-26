@@ -268,6 +268,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
              *, event_source=None, input_bytes=None) -> dict[str, Any]:
     from akuz_log_parser import classify, normalize, extract_duration
     from akuz_analytics import recognize_error
+    from akuz_derived import Derivers, derive_event
     from akuz_diagnostics import event as perf_event, phase as perf_phase
     from time import perf_counter, thread_time
     from inspect import signature
@@ -276,6 +277,9 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     supports_folded = "folded" in classify_params
     duration_supports_folded = "folded" in signature(extract_duration).parameters
     errors_supports_diagnostics = "diagnostics" in signature(recognize_error).parameters
+    derivers = Derivers(classify, normalize, extract_duration, recognize_error,
+                        supports_diagnostics, supports_folded,
+                        duration_supports_folded, errors_supports_diagnostics)
     if not source.is_file():
         raise ValueError(f"Исходный файл не найден: {source}")
     source, out = source.resolve(), out.resolve()
@@ -386,23 +390,20 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
             raise ValueError(f"Разрыв покрытия строк у события #{eid}: expected {prev_end+1}, got {ev['start_line']}")
         prev_end = ev["end_line"]
         text = ev["message"]
-        stamp = perf_counter()
-        folded = text.casefold()
-        fold_time += perf_counter() - stamp
         source_label = ev.get("source_file") or source.name
         if source_label not in source_ids:
             source_ids[source_label] = len(sources)
             sources.append(source_label)
         sid = source_ids[source_label]
-        label = ev.get("category")
-        if not label:
-            stamp = perf_counter()
-            label = (classify(text, diagnostics=stats, folded=folded)
-                     if supports_diagnostics and supports_folded
-                     else classify(text, diagnostics=stats) if supports_diagnostics
-                     else classify(text, folded=folded) if supports_folded
-                     else classify(text))
-            classify_time += perf_counter() - stamp
+        # Phase 9.1: derive context-free values, then write per-report IDs,
+        # source coordinates, category order, patterns and raw shards below.
+        derived = derive_event(ev, stats, derivers)
+        fold_time += derived.folded_s
+        classify_time += derived.classify_s
+        normalize_time += derived.normalize_s
+        duration_time += derived.duration_s
+        error_time += derived.error_s
+        label = derived.category
         if label not in CAT:
             # Future parser categories are kept, not incorrectly collapsed to "прочее".
             CAT_EXTRA.add(label)
@@ -416,33 +417,20 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         hour[(ev["day_offset"], ev["time"][:2] if ev["time"] else "??")] += 1
         if ev["request_id"]:
             request[ev["request_id"]] += 1
-        stamp = perf_counter()
-        norm = normalize(text)
-        normalize_time += perf_counter() - stamp
-        key = (comp, label, norm)
+        key = (comp, label, derived.normalized_pattern)
         pattern[key] += 1
         if key not in pattern_first:
             pattern_first[key] = eid
-        stamp = perf_counter()
-        dur = (extract_duration(text, folded=folded) if duration_supports_folded
-               else extract_duration(text))
-        duration_time += perf_counter() - stamp
-        if dur is not None:
-            millis, kind = dur
+        if derived.duration is not None:
+            millis, kind = derived.duration
             duration.append((millis, comp, kind, eid))
-        replacement_chars += ev["raw"].count("\ufffd")
-        newline = text.find("\n")
-        headline = (text if newline < 0 else text[:newline]).strip()[:1400]
+        replacement_chars += derived.replacement_chars
         # The raw JS stores the ORIGINAL raw event, not the normalized headline.
         rows.append([eid, ev["day_offset"], ev["time"], cid, label, ev["request_id"], ev["user"],
-                     headline, ev.get("original_start_line", ev["start_line"]),
+                     derived.headline, ev.get("original_start_line", ev["start_line"]),
                      ev.get("original_end_line", ev["end_line"]), n // chunk_size, n % chunk_size, sid])
-        stamp = perf_counter()
-        match = (recognize_error(ev["raw"], diagnostics=stats)
-                 if errors_supports_diagnostics else recognize_error(ev["raw"]))
-        error_time += perf_counter() - stamp
-        if match:
-            error_fingerprints[str(eid)] = match["fp"]
+        if derived.error_fp:
+            error_fingerprints[str(eid)] = derived.error_fp
         raw_shard.append(ev["raw"])
         if len(raw_shard) == chunk_size:
             flush(n // chunk_size)

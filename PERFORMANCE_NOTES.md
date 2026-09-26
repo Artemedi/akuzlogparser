@@ -523,3 +523,60 @@ No raw event text, production path, credentials or medical content is
 committed. GitHub Release unchanged. Phase 9.0 remains IN PROGRESS:
 portable full-workload comparison, fault matrix, and alternating old/new
 3+-pair A/B require a distinct subsequent evidence gate.
+
+## Phase 9.0d / 9.1 — fresh SSH control and derived-event refactor (2026-09-26)
+
+SSH benchmark harness commit: a08bc35de49fbb39e8cbad7abaa8e3a3b4602884.
+No network credentials or raw event content are stored by the benchmark.
+`ConnectConf.cfg` is read in memory; its local_dest is overridden to a
+new disposable workspace for each run. Every run lists/fetches exactly
+`20260923_server.log`, `20260924_server.log`, `20260925_server.log` via SSH.
+The Windows sqlite3 fingerprint connection is explicitly closed before
+removing the test data. All three snapshot SHA-256 values are stored only
+in ignored private diagnostics, not in Git.
+
+Original unmodified application, fresh-SSH reference (a08bc35):
+input bytes 171,378,567 + 140,361,291 + 644,567,384 = 956,307,242.
+Events: 211,117 + 221,082 + 225,539 = 657,738; combined 657,738.
+Fresh wall 387.798 s, process CPU 275.219 s; no-op warm 3.389 s.
+Combined generate.parse 104.784 s; analytics.refresh 46.604 s.
+Windows OS peak working set 1,385,324,544 bytes; OS peak pagefile
+1,639,493,632 bytes. All three sources static throughout their download,
+their SHA verified; disposable workspace removed successfully.
+
+Phase 9.1 refactor-only, `akuz_derived.py`: `DerivedEvent` calculates
+category, normalized pattern, duration, error fingerprint, replacement
+count and headline with optional numeric diagnostics; report-specific
+IDs, dates, first occurrence, per-source/line offsets and chunk location
+stay in the existing generator. Preserve older injectable callables and
+`event_source`/JSONL/CLI interfaces. No tee or sidecar is enabled.
+75 Python tests PASS, 8 actual Node UI tests PASS, classifier equivalence
+131,860 cases PASS; individual report, combined JSONL/stream and
+event_stream equivalence PASS.
+
+Phase 9.1 fresh SSH candidate on EXACT same snapshot SHAs:
+fresh wall 374.542 s, process CPU 280.688 s, warm 3.456 s;
+combined generate.parse 107.641 s; analytics.refresh 46.623 s.
+Windows OS peak working set 1,385,385,984 bytes.
+All 4 deterministic report file manifests MATCH exactly against reference,
+normalizing only scratch meta.source and provenance.generated as
+previously specified; normalized inventory and event/line/shard counters
+match. SQL table digests: errors, meta, source_dates and source_files MATCH.
+Only SQLite `indexed` differs: its stamp includes fresh catalog mtime_ns.
+533 of 534 direct JS export hashes differ across independent runs due to
+ephemeral report IDs, even though logically indexed error records match;
+a stricter export semantic normalizer remains an OPEN test-infrastructure
+improvement, not permission to ignore content mismatches.
+
+Caution: 13.256 s lower end-to-end wall time CANNOT be called a derive
+speedup: aggregate SSH transfer was faster in candidate, whereas
+combined.generate.parse was 2.857 s slower in this one pair.
+No speedup claimed for Phase 9.1; it is a refactor-only prerequisite
+for sharing derived results. Source files/user cache/reports untouched;
+new disposable workspace and new SSH transfer per significant run.
+Release v4.6.0 unchanged. Architecture for Phase 9.2/9.3 unchosen.
+
+Additional Phase 9.1 synthetic 3-repeat full cache matrix PASS:
+fresh-all, warm-no-op, combined-only-miss, single-only-miss and
+mixed-cache-distinct-source; fresh 1.100303 / 1.086495 / 1.077086 s.
+Real remote mixed-cache/fault and three-pair A/B gates remain OPEN.
