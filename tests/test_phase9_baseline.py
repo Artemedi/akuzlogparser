@@ -26,6 +26,22 @@ class Phase9BaselineTests(unittest.TestCase):
             self.assertEqual(in_flight.read_bytes(),
                              b"in-progress synthetic bytes")
 
+    def test_real_cache_runner_rejects_non_disposable_workspace(self):
+        from scripts.bench_phase9_ssh_cache import remove_known_report
+        from scripts.bench_phase9_ssh import MARKER
+        with TemporaryDirectory() as td:
+            parent = Path(td)
+            root = parent / "workspace"
+            root.mkdir()
+            sentinel = root / "user_data_synthetic.txt"
+            sentinel.write_text("keep", encoding="ascii")
+            with self.assertRaisesRegex(RuntimeError, "Not a disposable"):
+                remove_known_report(root, "combined")
+            (parent / MARKER).write_text("wrong marker", encoding="ascii")
+            with self.assertRaisesRegex(RuntimeError, "Not a disposable"):
+                remove_known_report(root, "combined")
+            self.assertEqual(sentinel.read_text(encoding="ascii"), "keep")
+
     def test_snapshot_hash_and_bad_utf8_are_synthetic_only(self):
         with TemporaryDirectory() as td:
             root = Path(td)
