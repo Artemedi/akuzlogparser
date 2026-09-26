@@ -1526,3 +1526,19 @@ publication intent/recovery protocol or explicit conservative orphan
 reconciliation before claiming whole-report crash consistency.
 Independent Fable review NOT RUN (Bazzite offline/token unavailable).
 Category-isolation workstream in same checkout remains untouched.
+
+Step ID: P9-0W-02 — bounded recovery design only, no application patch.
+Based on reproducible P9-0W-01 crash gap, prepared
+`PHASE9_PUBLICATION_RECOVERY.md` with an ownership-validated intent
+candidate and explicit fail-closed recovery state matrix. Critically,
+`_perform_build` assumes `_publish` executed `single_gen` in its
+SpoolWriter branch; merely returning a recovered report without a
+valid sidecar can corrupt combined replay. Any implementation must
+separate recovery from sidecar registration or use standard fallback.
+Unknown unindexed user directories must never be globally removed.
+Physical power-loss durability, concurrent cache writers and
+independent Fable review remain out of scope and OPEN.
+This is DOCUMENTARY DESIGN, not synthetic, real or production PASS.
+No production source, SSH credential, user files, Release or
+architecture selection altered; unrelated category-isolation work
+remains uncommitted and untouched.
