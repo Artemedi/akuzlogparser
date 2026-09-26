@@ -157,13 +157,13 @@ def python_build(root: Path, folder: Path):
     return first, {"wall_s": round(wall_s, 3), "cpu_s": round(cpu_s, 3)}
 
 
-def python_build_isolated(root: Path, folder: Path):
+def python_build_isolated(root: Path, folder: Path, *, use_derived_spool=True):
     """Run normal Python build as a child, excluding benchmark controller RAM."""
     output = root.parent / "python_worker_private.json"
     if output.exists():
         raise RuntimeError("Refusing stale Python worker result")
     env = os.environ.copy()
-    env["AKUZ_PHASE9_DERIVED_SPOOL"] = "1"
+    env["AKUZ_PHASE9_DERIVED_SPOOL"] = "1" if use_derived_spool else "0"
     env.pop("PYTHONPATH", None)
     env.pop("PYTHONHOME", None)
     proc = subprocess.Popen(

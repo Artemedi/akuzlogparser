@@ -1258,3 +1258,38 @@ Phase 9.0 remains OPEN: independent review, 3+ alternating A/B,
 source-mutation and failure-mode matrix, architectural decision gates.
 Next: obtain bounded external review when authorized key is reachable;
 then repeat controlled A/B with identical snapshots and phase windows.
+
+## Phase 9.0o — isolated alternating local no-spool/spool A/B harness (2026-09-27)
+
+Step ID: P9-0O-01; initial HEAD c0e0114f24a294b8b8a7071e81b043a9fc903309.
+Goal: reproducibly compare explicit no-spool vs derived-spool on the
+SAME exact SSH snapshot bytes without measuring network as Python speed.
+Bounded instrumentation: scripts/bench_phase9_frozen_real.py now lets
+isolated Python workers select AKUZ_PHASE9_DERIVED_SPOOL=0 or 1;
+default remains 1. New scripts/bench_phase9_local_ab.py creates ONE
+owned SSH workspace, verifies all three historical date/size/SHA
+references, runs six separate fresh/warm local builds ordered
+control/spool/spool/control/control/spool (AB/BA/AB), checks full
+signature across inventory, normalized deterministic four-report
+files, semantic SQLite, normalized analytics exports and event count.
+Collects per-trial fresh wall/CPU, process-lifetime sampled memory,
+output/cache/data disk sizes, then deletes ONLY each completed trial.
+Raw logs live only in ignored disposable workspace; final numeric
+and SHA-derived private JSON is ignored. Existing user cache, logs,
+config and GitHub Release are out of scope.
+Step checks: 6/6 targeted Windows tests PASS (9.209 s);
+full 102/102 Python tests PASS (35.766 s);
+five legacy equivalence scripts PASS (classify 131,860 cases,
+combined six events, event stream three seeds, report 160 events
+with identical raw/catalog bytes, text semantics 560 cases);
+git diff --check PASS. Synthetic full AB/BA/AB: all six independent
+Python builds PASS, 13 events per trial; after each run the trial
+directory is absent; three synthetic input files preserved until
+the owned workspace itself is removed.
+Cleanup guard rejects other trial identities; no global cleanup.
+Prior unrelated dist/phase8 launcher/child PIDs 20580/24572 were
+observed and left untouched. Fable review NOT RUN (Bazzite offline,
+no Windows CleanApi token). Synthetic timings are NOT real speedup.
+Real six-trial gate and 3+ A/B numerical result pending separate
+post-commit run. Baseline and spool share source bytes, not memory
+phase bounds: fresh CPU/wall vs full worker-lifetime memory peaks.
