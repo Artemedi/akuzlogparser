@@ -4,6 +4,7 @@ import json
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from scripts.bench_phase9_baseline import (canonical_hash, create_sources,
                                            file_manifest, run)
@@ -128,6 +129,33 @@ class Phase9BaselineTests(unittest.TestCase):
             self.assertFalse(list((root / "reports").glob("*.building")))
             self.assertFalse(list((root / "reports").glob("v4_*")))
             self.assertFalse((root / "cache" / "inventory.json").exists())
+
+    def test_inventory_save_failure_rolls_back_published_report(self):
+        from akuz_app import _publish
+        from akuz_store import load_store
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "20260925_synthetic.log"
+            source.write_text("12:00:00.000,AKUZ,r,u: synthetic\n",
+                              encoding="utf-8")
+            store = load_store(root)
+
+            def generator(raw, output, base, chunk, top):
+                output.mkdir(parents=True)
+                (output / "index.html").write_text("temporary", encoding="utf-8")
+                (output / "data").mkdir()
+                (output / "data" / "catalog.js").write_text(
+                    "window.AKUZ_DATA={}", encoding="utf-8")
+                return {"events": 1, "physical_lines": 1}
+
+            with patch("akuz_app.save_store",
+                       side_effect=OSError("synthetic inventory failure")):
+                with self.assertRaisesRegex(OSError, "inventory failure"):
+                    _publish(root, store, "synthetic-key", source, None, [],
+                             "synthetic", "single", gen_fn=generator)
+            self.assertEqual(store["reports"], {})
+            self.assertFalse(list((root / "reports").glob("*.building")))
+            self.assertFalse(list((root / "reports").glob("v4_*")))
 
     def test_error_branch_profiler_only_emits_metrics(self):
         from scripts.bench_phase9_errors import profile

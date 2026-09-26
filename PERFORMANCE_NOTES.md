@@ -1367,3 +1367,24 @@ Fable independent review NOT RUN: Bazzite remains offline and no usable
 Clean APIs token is present on DBA-008D. Remaining Phase 9.0 closure
 work includes independent review plus any still-uncovered cancellation/
 publication recovery cases and architecture decision boundaries.
+
+## Phase 9.0r — report publication rollback on inventory-save failure (2026-09-27)
+
+Step ID: P9-0R-01; starting HEAD `fa81c711929530b6bccb250e53c9cc2b60127b1a`.
+Audit found a concrete publication recovery defect in `_publish`:
+a report directory was renamed from `*.building` to its final `v4_*`
+name before `save_store`. If inventory persistence then raised, the
+final report directory and in-memory report entry survived even though
+the operation failed, allowing orphan/duplicate reports on retry.
+A reproducer first FAILED against the old behavior: after injected
+`save_store` OSError, `store["reports"]` still contained the new report.
+Bounded fix in akuz_app.py: after final rename, inventory-save failure
+removes only the just-added report entry and its exact newly published
+final directory, then re-raises. Existing `*.building` finally cleanup
+is unchanged. No parser, derived-spool algorithm or cache-key change.
+Targeted recovery test PASS (1/1, 0.089 s); full Python suite
+106/106 PASS (35.807 s); git diff --check PASS.
+No production logs/credentials/user cache/Release touched. This is
+synthetic fault injection; a process-kill between filesystem operations
+is still a separate crash-consistency question. Fable review NOT RUN:
+Bazzite remains offline and no usable Clean APIs token is on DBA-008D.

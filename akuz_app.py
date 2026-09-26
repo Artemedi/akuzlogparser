@@ -169,8 +169,14 @@ def _publish(root, store, key, raw_path, base, sources, label, kind,
             events=meta['events'], lines=meta['physical_lines'],
             created=datetime.now().isoformat(timespec='seconds'))
         store['reports'][rid] = value
-        with perf_phase(root, 'report.inventory_save'):
-            save_store(root, store)
+        try:
+            with perf_phase(root, 'report.inventory_save'):
+                save_store(root, store)
+        except Exception:
+            store['reports'].pop(rid, None)
+            if final.exists():
+                shutil.rmtree(final)
+            raise
         return dict(value, url='/reports/'+rid+'/index.html', reused=False)
     finally:
         if temp.exists():
