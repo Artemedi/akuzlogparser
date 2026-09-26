@@ -1293,3 +1293,55 @@ no Windows CleanApi token). Synthetic timings are NOT real speedup.
 Real six-trial gate and 3+ A/B numerical result pending separate
 post-commit run. Baseline and spool share source bytes, not memory
 phase bounds: fresh CPU/wall vs full worker-lifetime memory peaks.
+
+## Phase 9.0p — real alternating Python no-spool vs spool gate (2026-09-27)
+
+Step ID: P9-0P-01; clean main == origin/main == e12d3fc349a2f3f6c4f54a2c2bb861e64b7d8b98
+at experiment start. No parallel Python benchmark process observed.
+Old unrelated phase8 launcher/child were left untouched.
+One new owned workspace fetched exactly the 2026-09-23/24/25
+application logs. Reference date/size/SHA, inactive-source and
+second local SHA gates PASS. Bytes 956,307,242; event count 657,738;
+actual snapshot digests stored ONLY in ignored private JSON.
+Same read-only hardlinked snapshots fed six fresh+warm isolated Python
+builds, independent report/cache/data dirs, ordered AB/BA/AB:
+1 control: wall 269.466 s, CPU 258.625 s
+2 spool:   wall 214.784 s, CPU 202.547 s
+3 spool:   wall 212.221 s, CPU 201.734 s
+4 control: wall 269.772 s, CPU 259.047 s
+5 control: wall 269.981 s, CPU 258.422 s
+6 spool:   wall 212.613 s, CPU 202.266 s
+Control medians: wall 269.772 s, CPU 258.625 s.
+Spool medians: wall 212.613 s, CPU 202.266 s.
+Measured median difference: 57.159 s wall (21.188%),
+56.359 s CPU (21.792%), for local fresh builds ONLY.
+No SSH time attributed to CPU speed. Six separately generated
+signature SHA-256 values identical; all five controls passed EACH
+trial: inventory, four normalized deterministic report manifests,
+semantic SQL, all semantically normalized analytics exports and
+657,738 single events. Raw volatile export/SQLite bytes are NOT
+claimed equal. Warm/no-op verified inside every worker.
+No source/event payload saved; result JSON is ignored:
+diagnostics/phase9_local_ab_private.json.
+Runner exit 0 (1770.40 s total including SSH/verification),
+all six completed trial dirs and final owned workspace removed.
+Other pre-existing diagnostic dirs and live user data unchanged.
+Sampled process-lifetime median tree Working Set:
+control 1,329,221,632 B; spool 1,405,624,320 B
+(+76,402,688 B). Median Private Bytes:
+control 1,633,280,000 B; spool 1,699,037,184 B
+(+65,757,184 B). Spool memory cost is NOT free.
+Per-trial monitor unreadable memory/CPU samples: 0.
+All output reports 2,275,278,553 bytes; analytics data
+59,456,085 bytes. Cache directory control 32,656,199 B,
+spool 32,656,193 B: 6-byte size difference NOT a content
+waiver; semantic SQLite hashes passed every trial.
+Memory peaks span worker startup, fresh, signature and warm
+and are NOT same-window fresh-only wall/CPU measurements.
+The comparison applies only to these exact SHA-controlled
+2026-09-23/24/25 log snapshots and host/workload conditions.
+Independent Fable review NOT RUN (Bazzite offline, no token
+available on Windows); remaining active-file/failure matrix,
+Python/frozen 3+ A/B, and Phase 9 architecture selection OPEN.
+This step adds documentary evidence only; no production code,
+published GitHub Release, credentials or real log contents changed.
