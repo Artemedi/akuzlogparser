@@ -467,3 +467,59 @@ snapshot workload, and not a result for a newly rebuilt 9.0 EXE. The
 production report code has not changed since this diagnostic Phase 8 build;
 the documented Phase 9.0a/b scripts are not packaged into that older EXE.
 No published Release, installed reports/cache, secrets or user .log touched.
+
+## Phase 9.0c — real local snapshot control, DBA-008D (2026-09-26)
+
+Parent HEAD: f5c77a92ce468dd0e588b6ecaa69284a6ab88e10.
+This was an isolated Python 3.11.9 test of three existing, SHA-verified,
+read-only AKUZ .log snapshots; it was NOT a portable or SSH measurement.
+Source bytes: 644,034,993 + 140,361,291 + 171,378,567 = 955,774,851.
+Exact input SHA-256 values are saved only in ignored local
+`diagnostics/phase9_real_control_private.json` (not committed).
+The large snapshot differs from the Phase 8 reference (644,567,384 bytes,
+225,539 events): no direct before/after speedup claim is supported.
+
+Two independent fresh builds from the same verified snapshots (no
+production-code changes): wall 268.099 / 263.781 s, CPU 257.141 /
+253.609 s. Corresponding warm/no-op builds: wall 2.348 / 2.352 s.
+Second fresh build: three single reports with 221,082 / 222,855 /
+211,117 events, combined 655,054 events / 889,531 physical lines,
+656 shards. Individual reports together contain 655,054 events.
+All four report.generate wall times: 22.662 / 60.015 / 23.499 /
+108.604 s (the first three correspond to 140,361,291 / 644,034,993 /
+171,378,567 bytes). Combined generate.parse 104.569 s; its parts:
+source_next 13.829, classify 12.319, normalize 15.297,
+errors 21.506, duration 14.457, fold 6.674,
+shard_write 14.018, other 6.470 s. Analytics.refresh 46.529 s.
+Whole perform_build_current 263.780 s according to internal trace.
+Output disk space in the disposable workspace: reports 2,273,015,590,
+cache 32,668,666, copied downloads 955,774,851 and data 59,423,535 bytes.
+
+Memory correction: the original external process-tree sampler measured
+post-build hashing and SQLite verification as well as actual building;
+its 1.29-GiB sampled Working Set must NOT be called the build peak.
+A separate, in-worker 20-ms sampler strictly around perform_build_current
+recorded 5,769 samples, sampled Working Set peak 1,199,079,424 bytes,
+sampled PrivateUsage peak 1,190,248,448 bytes, and Windows OS
+PeakWorkingSetSize 1,360,367,616 bytes (about 1,297.3 MiB).
+OS PeakPagefileUsage was 1,624,977,408 bytes; it is NOT sampled RSS.
+Warm-only Windows OS PeakWorkingSetSize was 36,605,952 bytes
+(about 34.9 MiB). The OS peak can exceed the sampled peak because
+short spikes occur between polls.
+
+PASS within each fresh->warm pair: strict deterministic report-file hashes
+(with ONLY the disposable combined meta.source normalized), stable
+provenance identity after excluding generated clock, normalized inventory,
+SQLite logical table hashes and analytics export hashes. Both independent
+fresh runs matched in normalized report and inventory digests. SQLite
+and exported analytics hashes DIFFERED across independent fresh runs;
+the precise cause remains OPEN (report IDs / transient source names
+are possible but not yet established). Do not claim cross-fresh
+byte-equivalence for analytics until isolated and tested.
+
+Original snapshot SHA-256 values matched before and after; inputs never
+written, and the isolated temporary reports/cache/downloads were removed.
+No raw event text, production path, credentials or medical content is
+committed. GitHub Release unchanged. Phase 9.0 remains IN PROGRESS:
+portable full-workload comparison, fault matrix, and alternating old/new
+3+-pair A/B require a distinct subsequent evidence gate.
