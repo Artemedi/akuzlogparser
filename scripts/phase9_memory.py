@@ -18,6 +18,10 @@ if sys.platform == "win32":
     _kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
     _kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     _kernel.CloseHandle.restype = wintypes.BOOL
+    _kernel.GetProcessTimes.argtypes = [wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME)]
+    _kernel.GetProcessTimes.restype = wintypes.BOOL
 
     class _Counters(ctypes.Structure):
         _fields_ = [("cb", wintypes.DWORD), ("faults", wintypes.DWORD),
@@ -55,9 +59,18 @@ def sample(pid: int):
         counters.cb = ctypes.sizeof(counters)
         if not _psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
             return None
+        created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
+        cpu_s = None
+        if _kernel.GetProcessTimes(handle, ctypes.byref(created),
+                                   ctypes.byref(exited), ctypes.byref(kernel),
+                                   ctypes.byref(user)):
+            ticks = (kernel.dwHighDateTime << 32 | kernel.dwLowDateTime)
+            ticks += (user.dwHighDateTime << 32 | user.dwLowDateTime)
+            cpu_s = ticks / 10_000_000  # FILETIME has 100 ns ticks.
         return dict(working_set_bytes=counters.ws, private_bytes=counters.private,
                     peak_working_set_bytes=counters.peak_ws,
-                    peak_pagefile_bytes=counters.peak_pagefile)
+                    peak_pagefile_bytes=counters.peak_pagefile,
+                    cpu_time_s=cpu_s)
     finally:
         _kernel.CloseHandle(handle)
 

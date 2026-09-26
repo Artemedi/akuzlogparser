@@ -1037,3 +1037,89 @@ memory numbers, frozen CPU parity, 3+ alternating A/B or full Phase 9.0
 closure can be claimed. Before a new strict real frozen benchmark,
 rebuild the LOCAL diagnostic ZIP from the accepted new HEAD; leave
 published Release unchanged.
+
+## Phase 9.0l — CPU sampling and real Python/frozen parity (2026-09-26)
+
+Step ID: P9-0L-01; initial HEAD: `9ae3e44e383bcefd105644af7cc3160b3373bf7d`.
+During this session a separate commit `691f8c133c23769c7a44ba588cd54199f64ae31c`
+landed on main/origin and accepted the preceding isolated-memory workstream.
+This CPU extension is based on that new checkpoint; no reset/rebase.
+Recovery: local main == origin/main; preserved the pre-existing dirty
+`scripts/bench_phase9_frozen_real.py` and untracked
+`tests/test_phase9_frozen_memory.py`. No reset or global cleanup.
+Goal: comparable process-tree measurement for both Python and frozen;
+no production parser/cache changes, no claim of improved performance.
+Files: `scripts/bench_phase9_frozen_real.py`, `scripts/phase9_memory.py`,
+`tests/test_phase9_frozen_memory.py` and these notes.
+Python now runs as a separate worker; controller is excluded. Frozen and
+Python monitors both sample their target process trees every 30 ms from
+process launch through fresh build, signature and warm-cache validation.
+Captured: sampled simultaneous tree Working Set and Private Bytes peaks,
+separate per-PID OS PeakWorkingSetSize/PeakPagefileUsage; Windows
+GetProcessTimes kernel+user cumulative CPU per observed process.
+`sampled_tree_lifetime_cpu_s` sums the last observed cumulative CPU for
+each PID; it is a lower bound if processes end between samples, not
+fresh-build-only CPU. Python `cpu_s` remains fresh-build-only; frozen
+fresh-build-only CPU is NOT yet measured. Never compare these intervals.
+Metrics limitation: Windows Working Set != Linux RSS, sampled tree
+peaks != sum of per-process OS high-water marks, and PyInstaller startup
+and worker lifecycle differ even though the monitoring boundaries agree.
+Incomplete/unreadable samples are counted. No 3+ alternating A/B yet.
+Tests: targeted Python 2/2 PASS (1.210 s); full Python 94/94 PASS
+(26.401 s); five legacy equivalence scripts PASS (classify 131,860,
+report 160 events with identical raw/catalog bytes, combined 6,
+event-stream 3 seeds, text 560 cases); Node 8/8 PASS;
+`git diff --check` PASS.
+Standalone synthetic 3-source fresh+warm parity: signature equality PASS,
+13 single events; Python wall 0.266 s, sampled WS 36,823,040 B,
+private 25,456,640 B, lifecycle CPU lower bound 0.4375 s (24 polls,
+1 PID). Frozen wall 0.321 s, WS 39,067,648 B,
+private 20,434,944 B, lifecycle CPU lower bound 0.53125 s
+(26 polls, 2 PIDs). Both had 0 unreadable memory/CPU samples.
+Exactly one owned synthetic workspace removed; existing benchmark
+workspaces, live ConnectConf, downloads, reports, cache and Release
+were untouched. No raw production payload was sent externally.
+Fable independent review: NOT RUN. Bazzite is offline; DBA-008D has
+neither token in relevant environment nor local CleanApi.env. Do not
+represent this step as externally reviewed or Phase 9.0 closed.
+
+Step ID: P9-0L-02 — independent fresh real SSH/portable diagnostic.
+Diagnostic ZIP was rebuilt locally from `691f8c133c23769c7a44ba588cd54199f64ae31c`;
+ZIP SHA-256 `e41d54a1f763ef141c3128fbd97c222033c9feffaac0587ea2fe8a277f0ecba0`.
+The previous ignored private JSON was separately backed up under
+`diagnostics/phase9_frozen_real_9_0j_backup_private.json` before the
+new fixed-name JSON was replaced. No Release upload or update.
+One NEW isolated SSH fetch: exact 2026-09-23/24/25 application .log
+snapshots, 3 reference date/bytes/SHA and inactive-source gates PASS,
+956,307,242 bytes total. Individual SHA values remain ONLY in ignored
+`diagnostics/phase9_frozen_real_private.json`; no raw data saved to JSON.
+Runner returned exit 0 in 597.03 s including SSH/processing/verification:
+`REAL_SNAPSHOT_SHA_GATE_PASS`, `PYTHON_FULL_BUILD_PASS`,
+`FROZEN_FULL_BUILD_PASS`, `REAL_FROZEN_PARITY_PASS`,
+`WORKSPACE_CLEANED True`. No user downloads/cache/report state changed.
+Python fresh wall 212.571 s, `process_time` fresh CPU 201.859 s;
+frozen fresh wall 200.939 s (NO frozen fresh CPU field).
+All five content checks PASS: inventory, four deterministic normalized
+report manifests, semantic SQLite, semantic analytics exports and
+657,738 individual events. Warm/no-op PASS for both branches.
+Like-for-like lifecycle sampler (30 ms, EXCLUDING controller):
+- Python: sampled simultaneous tree Working Set 1,387,380,736 B;
+  sampled simultaneous tree Private Bytes 1,697,271,808 B;
+  observed cumulative lifetime CPU lower bound 222.484375 s;
+  5,282 samples, 1 PID, 0 unreadable memory/CPU samples;
+  max individual OS peak Working Set 1,431,224,320 B.
+- Frozen: sampled simultaneous tree Working Set 1,455,763,456 B;
+  sampled simultaneous tree Private Bytes 1,747,968,000 B;
+  observed cumulative lifetime CPU lower bound 200.5 s;
+  4,657 samples, 2 PIDs, 0 unreadable memory/CPU samples;
+  max individual OS peak Working Set 1,480,757,248 B.
+These process-lifetime values span startup, fresh, signature and warm,
+NOT merely the bracketed fresh wall interval. OS per-PID peaks are NOT
+summed; no RSS equivalence asserted. Sampling can miss short-lived PIDs.
+There is only ONE real Python/frozen pair; do not claim A/B speedup.
+Existing alternate baseline/spool 3+ A/B and failure-mode matrix OPEN.
+Fable review was not executed (Bazzite offline, Windows key unavailable);
+its absence is an independent-review gate, not synthetic/real PASS.
+Next: source-bounded independent review of CPU/monitoring change;
+then measure frozen fresh-build CPU on identical phase boundaries,
+perform alternated 3+ parity/performance trials, close remaining gates.

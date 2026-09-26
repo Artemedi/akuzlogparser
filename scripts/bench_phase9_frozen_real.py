@@ -79,6 +79,7 @@ def monitor_pid(pid, stop, peak):
                                             sum(x["working_set_bytes"] for x in good))
             peak["private_bytes"] = max(peak["private_bytes"],
                                         sum(x["private_bytes"] for x in good))
+            peak["unreadable_samples"] += len(ids) - len(good)
             for observed_pid, row in zip(ids, rows):
                 if row:
                     for field, metric in (
@@ -88,12 +89,24 @@ def monitor_pid(pid, stop, peak):
                         bucket = peak[field]
                         bucket[observed_pid] = max(
                             bucket.get(observed_pid, 0), row[metric])
+                    if row.get("cpu_time_s") is None:
+                        peak["cpu_unreadable_samples"] += 1
+                    else:
+                        bucket = peak["cpu_time_s_per_pid"]
+                        bucket[observed_pid] = max(
+                            bucket.get(observed_pid, 0), row["cpu_time_s"])
+                        # Sum cumulative per-process CPU; never sum per-PID
+                        # memory high-water marks into a fake tree peak.
+                        peak["sampled_tree_lifetime_cpu_s"] = round(
+                            sum(bucket.values()), 6)
         except (OSError, ValueError, ProcessLookupError):
             continue
 def monitor(start_pid):
     stop = threading.Event()
     stats = {"samples": 0, "working_set_bytes": 0, "private_bytes": 0,
              "scope": "isolated_process_tree_lifetime",
+             "unreadable_samples": 0, "cpu_unreadable_samples": 0,
+             "sampled_tree_lifetime_cpu_s": 0.0, "cpu_time_s_per_pid": {},
              "os_peak_ws_per_pid": {}, "os_peak_pagefile_per_pid": {}}
     thread = threading.Thread(target=monitor_pid, args=(start_pid, stop, stats),
                               daemon=True)
