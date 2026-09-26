@@ -809,3 +809,43 @@ Python/frozen memory and CPU measurement scopes explicit, then run the
 full SHA-gated 23/24/25 September portable parity test in a separate
 disposable workspace. Do not declare Phase 9.0 or the portable gate complete
 from this review alone.
+
+## Phase 9.0h — bounded frozen HTTP status retry correction (2026-09-26)
+
+Recovered `main == origin/main` at `bc6996ab0950d2721d88169e0aea8c591fa14871`.
+Prior untracked `scripts/bench_phase9_frozen_real.py` had SHA-256
+`58a579ccdf75c8f87f3a9f83be277c85c4194ea802de9af1d375eeed458956b4`.
+Preserved exact bytes under ignored
+`diagnostics/phase9_review_work/bench_phase9_frozen_real.before.py`
+and verified backup SHA before a bounded in-place change. No other active
+benchmark process was observed when the file was inspected.
+
+Change: `wait_for()` now retries temporary `OSError/URLError` regardless
+of startup or build-completion mode, while HTTPError is re-raised without
+retrying. Existing application-level `status.error` still raises and HTTP 202
+admission/idle-only completion protocol is unchanged; in particular it does
+NOT wait to observe a possibly already-finished `busy=True` state.
+This is a benchmark harness reliability fix, not a parser or cache change.
+
+Evidence: four synthetic tests in
+`tests/test_phase9_frozen_status.py` passed, covering transient completion
+poll, transient startup, non-retry of HTTP 403 and application worker failure.
+Full `python -B -m unittest discover -s tests -q`: 88 PASS (25.339 s).
+`git diff --check`: PASS. Tests ran without SSH or real production logs.
+The old direct mock reproduction showed busy=None 2 attempts/success and
+busy=False 1 attempt/URLError; new dedicated tests assert the corrected path.
+
+Independent model review attempt of the small patch via Clean APIs returned
+HTTP 502, so there is NO completed Fable review or approval for this workstream.
+Do not misreport the previous independent broad Phase 9.0g review as review of
+this specific patch. The patch/test source only was prepared for the request;
+no raw log, ConnectConf.cfg, cache, medical data or API credential was
+included in the model prompt. The temporary request payload was deleted.
+
+Scope of acceptance: syntax and targeted/full Python regressions only.
+The real frozen 23/24/25 September parity gate, like-for-like Python vs EXE
+memory/CPU, failure matrix and 3+ alternated A/B remain OPEN.
+The locally present diagnostic ZIP has BUILD_INFO SHA
+`84da1d1e980a5f1d2311f590656d9ede26dbaba9`; it must be rebuilt
+separately from an accepted implementation HEAD before running strict
+frozen-parity main() after this commit. GitHub Release unchanged.
