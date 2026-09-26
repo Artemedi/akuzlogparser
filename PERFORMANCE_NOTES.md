@@ -1212,3 +1212,49 @@ P9-0M-02, but its fresh-SSH real gate remains OPEN. Do not retroactively
 attribute these figures to 166631c or change its BUILD_INFO provenance.
 Because another session is actively writing this same checkout, no
 parallel third live benchmark was started on top of its workstream.
+
+## Phase 9.0n — first fresh real SSH Python/frozen CPU parity (2026-09-27)
+
+Step ID: P9-0N-01; starting HEAD `166631c7733ff2f8b0760a05dee70d5ecd15ddc1`.
+Diagnostic PyInstaller build exit 0; ZIP `BUILD_INFO.json` Git SHA
+matches HEAD. ZIP SHA-256
+`977c81f1a927ea182ad272aac8109d6db2db0f25724ada4579cbcd9d5f2d1322`.
+Portable isolated smoke PASS, 161 polls and 0 unreadable child samples.
+Prior private result copied to ignored
+`diagnostics/phase9_frozen_real_166631c_previous_private.json`.
+Published GitHub Release unchanged; live config and user cache untouched.
+New isolated SSH fetch of 2026-09-23/24/25 application .log snapshots:
+date/bytes/reference SHA, inactive source, repeat local SHA PASS;
+171,378,567 + 140,361,291 + 644,567,384 = 956,307,242 B.
+Actual snapshot digests remain only in ignored private diagnostic.
+Full runner exit 0, 594.19 s total including transfer and validation.
+Python fresh 212.672 s wall, 201.719 s process_time CPU;
+frozen fresh 202.188 s wall, 198.328125 s OS tree CPU.
+Python and frozen warm/no-op PASS; all five signature checks PASS:
+inventory, normalized deterministic files of four reports,
+semantic SQLite, semantically normalized analytics exports and
+657,738 individual events. Raw analytics UUIDs/indexed mtime are NOT
+claimed byte-identical. Disposable workspace cleanup PASS and private
+result JSON confirms `raw_payload_saved=false`.
+Like-for-like isolated process-tree lifetime, 30-ms sampler:
+Python 5,284 samples, peak WS 1,431,126,016 B,
+peak Private 1,697,251,328 B, 1 observed PID;
+frozen 4,681 samples, peak WS 1,485,733,888 B,
+peak Private 1,744,941,056 B, 2 observed PIDs.
+Both had 0 unreadable memory and CPU samples.
+Lifecycle cumulative observed CPU: Python 222.34375 s,
+frozen 201.375 s; NOT fresh CPU and NOT simultaneous high-water.
+Python fresh process_time brackets direct build; frozen OS CPU
+brackets HTTP POST/status completion and may include a small amount
+of HTTP overhead. Both memory peaks span worker lifetime, not fresh
+phase only. No RSS/Working Set equivalence outside Windows claimed.
+This is ONE real Python/frozen pair, not a stable speedup estimate or
+alternating 3+ A/B. Intermittent descendants may evade two CPU phase
+checkpoints; the PID creation-tick guard proves identity only for
+processes observed at both endpoints. No independent Fable review
+was executed: Bazzite offline and usable Windows token unavailable.
+No parser, cache or analytics code modified in this documentary step.
+Phase 9.0 remains OPEN: independent review, 3+ alternating A/B,
+source-mutation and failure-mode matrix, architectural decision gates.
+Next: obtain bounded external review when authorized key is reachable;
+then repeat controlled A/B with identical snapshots and phase windows.
