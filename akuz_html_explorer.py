@@ -275,6 +275,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     supports_diagnostics = "diagnostics" in classify_params
     supports_folded = "folded" in classify_params
     duration_supports_folded = "folded" in signature(extract_duration).parameters
+    errors_supports_diagnostics = "diagnostics" in signature(recognize_error).parameters
     if not source.is_file():
         raise ValueError(f"Исходный файл не найден: {source}")
     source, out = source.resolve(), out.resolve()
@@ -356,6 +357,14 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                        shard_write_s=round(shard_time, 3),
                        duration_s=round(duration_time, 3),
                        fold_s=round(fold_time, 3),
+                       error_recognize_calls=stats["error_recognize_calls"],
+                       error_probe_chars=stats["error_probe_chars"],
+                       error_truncated_events=stats["error_truncated_events"],
+                       error_ascii_probe_events=stats["error_ascii_probe_events"],
+                       error_no_match_events=stats["error_no_match_events"],
+                       error_exception_events=stats["error_exception_events"],
+                       error_serial_events=stats["error_serial_events"],
+                       error_firstline_events=stats["error_firstline_events"],
                        classify_calls=stats["classify_calls"],
                        classify_regex_fallback_events=stats["classify_regex_fallback_events"],
                        classify_literal_path_events=stats["classify_calls"]-stats["classify_regex_fallback_events"])
@@ -429,7 +438,8 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                      headline, ev.get("original_start_line", ev["start_line"]),
                      ev.get("original_end_line", ev["end_line"]), n // chunk_size, n % chunk_size, sid])
         stamp = perf_counter()
-        match = recognize_error(ev["raw"])
+        match = (recognize_error(ev["raw"], diagnostics=stats)
+                 if errors_supports_diagnostics else recognize_error(ev["raw"]))
         error_time += perf_counter() - stamp
         if match:
             error_fingerprints[str(eid)] = match["fp"]
@@ -468,6 +478,14 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                duration_s=round(duration_time, 3), fold_s=round(fold_time, 3),
                other_s=round(other_total, 3),
                thread_cpu_s=round(thread_cpu, 3),
+               error_recognize_calls=stats["error_recognize_calls"],
+               error_probe_chars=stats["error_probe_chars"],
+               error_truncated_events=stats["error_truncated_events"],
+               error_ascii_probe_events=stats["error_ascii_probe_events"],
+               error_no_match_events=stats["error_no_match_events"],
+               error_exception_events=stats["error_exception_events"],
+               error_serial_events=stats["error_serial_events"],
+               error_firstline_events=stats["error_firstline_events"],
                classify_calls=stats["classify_calls"],
                classify_regex_fallback_events=stats["classify_regex_fallback_events"],
                classify_literal_path_events=stats["classify_calls"]-stats["classify_regex_fallback_events"])

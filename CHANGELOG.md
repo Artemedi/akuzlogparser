@@ -1,5 +1,16 @@
 # История изменений AKUZ Log Explorer
 
+## Post-v4.6.0 ? Phase 8 Error Probe (main, before next release)
+
+- Numeric-only counters for recognize_error paths: call count, scanned
+  prefix chars, 24k truncation, ASCII, exception, serialization, first-line
+  generic error, and unrecognized messages. No raw text is logged.
+- Public API and HTML/JS files unchanged; Phase 8 is instrumentation,
+  NOT a demonstrated speed improvement.
+- Paired Windows synthetic benchmarks show approximately 1-2% cost.
+- Two exploratory micro-optimizations (ASCII replace, JS translate)
+  are not integrated: no reproducible benefit.
+
 ## После v4.6.0 — Phase 7 Shared Fold (в main, до нового релиза)
 
 - Один `casefold(message)` на событие в `generate()` вместо

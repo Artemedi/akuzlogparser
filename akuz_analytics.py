@@ -28,9 +28,16 @@ def normalize(message):
                            (HEX,"{HEX}"),(NUMBER,"{N}")):
         text=rx.sub(replacement,text)
     return WS.sub(" ",text).strip().casefold()[:200] or "(без описания)"
-def recognize_error(raw):
+def recognize_error(raw, *, diagnostics=None):
     """A fingerprint groups matching exception type, normalized message and top frame."""
     text=raw[:24000]
+    if diagnostics is not None:
+        diagnostics["error_recognize_calls"] += 1
+        diagnostics["error_probe_chars"] += len(text)
+        if len(raw) > len(text):
+            diagnostics["error_truncated_events"] += 1
+        if text.isascii():
+            diagnostics["error_ascii_probe_events"] += 1
     # Most AKUZ entries are not exceptions. Avoid searching the same long
     # prefix twice when mandatory literal fragments cannot be present.
     probe=text.casefold().replace("ı","i").replace("i\u0307","i")
@@ -42,14 +49,22 @@ def recognize_error(raw):
         first_probe=probe if newline<0 and len(raw)<=24000 else first.casefold().replace("ı","i").replace("i\u0307","i")
         if not any(token in first_probe for token in
                    ("exception","failed","failure","error","time","ошибк","тайм")) or not ERROR.search(first):
+            if diagnostics is not None:
+                diagnostics["error_no_match_events"] += 1
             return None
     if match:
+        if diagnostics is not None:
+            diagnostics["error_exception_events"] += 1
         exception=match.group(1)
         message=text[match.end():].split("\n",1)[0].strip(": -\t\r ")
     elif serial:
+        if diagnostics is not None:
+            diagnostics["error_serial_events"] += 1
         exception="Serialization error (text)"
         message=text[serial.start():].split("\n",1)[0]
     else:
+        if diagnostics is not None:
+            diagnostics["error_firstline_events"] += 1
         exception="AKUZ error (text)"
         message=text.split("\n",1)[0].split(": ",1)[-1]
     frame=FRAME.search(text)
