@@ -114,6 +114,29 @@ def monitor(start_pid):
     return stop, thread, stats
 
 
+def tree_cpu_checkpoint(start_pid):
+    """Read CPU for each live PID at a fresh-build phase boundary."""
+    rows = {pid: sample(pid) for pid in sorted(tree_pids(start_pid))}
+    if not rows or any(row is None or row.get("cpu_time_s") is None
+                       or row.get("creation_time_ticks") is None
+                       for row in rows.values()):
+        raise RuntimeError("Fresh-build process CPU checkpoint incomplete")
+    return {pid: (row["creation_time_ticks"], row["cpu_time_s"])
+            for pid, row in rows.items()}
+
+
+def cpu_checkpoint_delta(before, after):
+    """CPU delta; reject exited/recycled PIDs and backward counters."""
+    if not before or not after or set(before) - set(after):
+        raise RuntimeError("Fresh-build process tree changed incompletely")
+    if any(after[pid][0] != before[pid][0] for pid in before):
+        raise RuntimeError("Fresh-build process PID was recycled")
+    if any(after[pid][1] < before.get(pid, (None, 0))[1] for pid in after):
+        raise RuntimeError("Fresh-build CPU counters moved backwards")
+    return round(sum(after[pid][1] - before.get(pid, (None, 0))[1]
+                     for pid in after), 6)
+
+
 def python_build(root: Path, folder: Path):
     from akuz_app import State, perform_list, perform_build_current
     state = State()
@@ -225,16 +248,21 @@ def frozen_build(root: Path, folder: Path, archive: Path):
                     for r in sorted(status["listing"], key=lambda x: x["name"])]
         if len(selected) != len(DAYS):
             raise AssertionError("Frozen local listing is not exactly three")
+        cpu_before = tree_cpu_checkpoint(proc.pid)
         start = perf_counter()
         state = post(opener, base, "/api/build", {"selections": selected})
         elapsed = perf_counter() - start
+        cpu_after = tree_cpu_checkpoint(proc.pid)
+        fresh_cpu = cpu_checkpoint_delta(cpu_before, cpu_after)
         if state["result"]["reused"] or state["result"]["analytics_warning"]:
             raise AssertionError("Frozen fresh build failed")
         first = signature(app)
         state = post(opener, base, "/api/build", {"selections": selected})
         if not state["result"]["reused"] or signature(app) != first:
             raise AssertionError("Frozen warm cache changed")
-        return first, {"wall_s": round(elapsed, 3), "memory": mem}
+        return first, {"wall_s": round(elapsed, 3), "cpu_s": fresh_cpu,
+                       "cpu_scope": "observed_fresh_process_tree_getprocesstimes",
+                       "memory": mem}
     finally:
         stop.set()
         thread.join()

@@ -1123,3 +1123,45 @@ its absence is an independent-review gate, not synthetic/real PASS.
 Next: source-bounded independent review of CPU/monitoring change;
 then measure frozen fresh-build CPU on identical phase boundaries,
 perform alternated 3+ parity/performance trials, close remaining gates.
+
+## Phase 9.0m — fresh-build frozen process-tree CPU gate (2026-09-26)
+
+Step ID: P9-0M-01; pre-change HEAD `4af59728d256556bae500b3d2bcb951859c7a26e`.
+Goal: bracket frozen CPU on the same fresh-build interval as its
+wall clock; preserve existing Python worker process_time, lifecycle
+CPU/memory monitoring, output signatures and cache validation.
+Bounded change: `scripts/bench_phase9_frozen_real.py` samples
+GetProcessTimes for each live frozen launcher/child PID immediately
+before `/api/build` POST and after successful status completion.
+`cpu_s` is sum of process-specific differences including newly born
+PIDs. Missing/recycled PIDs, unreadable or backward-moving counters
+fail the metric instead of producing a misleading CPU claim.
+`cpu_scope=observed_fresh_process_tree_getprocesstimes`; timing
+includes status/HTTP boundary overhead. CPU is observed Windows OS
+kernel+user duration, not wall or sampled lifecycle CPU.
+Test additions in `tests/test_phase9_frozen_memory.py` verify CPU
+delta, newly observed PID, missing PID, regression and unreadable CPU.
+Targeted 4/4 PASS (1.185 s), full Python 96/96 PASS (26.676 s),
+`git diff --check` PASS. Tiny synthetic frozen fresh+warm smoke:
+13 events, fresh wall 0.307 s, fresh CPU 0.171875 s,
+owned workspace cleaned. Real gate and independent Fable review
+remain separate; no application/parser/analytics/cache changes.
+
+Step ID: P9-0M-02; bounded critical review of P9-0M-01 before commit.
+The initial CPU delta guarded missing PIDs and backward counters, but
+wrongly claimed recycled PID rejection: a new process with the same PID
+and greater CPU time could be silently accepted. Corrected Windows
+GetProcessTimes sample to include integer creation FILETIME ticks;
+fresh checkpoints now pair creation ticks and CPU duration per PID,
+and reject reused PID identities even when CPU increases. A process
+born and exited entirely between checkpoints remains unobservable;
+this is an OS-sampling limitation, not exact process-tree CPU capture.
+Changes: scripts/phase9_memory.py, scripts/bench_phase9_frozen_real.py,
+tests/test_phase9_frozen_memory.py; instrumentation only.
+Targeted Windows tests 4/4 PASS (1.188 s); full Python 96/96 PASS
+(27.523 s); git diff --check PASS. Isolated tiny synthetic frozen
+fresh/warm smoke 13 events, 0.320 s wall, 0.171875 s fresh CPU,
+30 monitor samples; owned workspace cleaned and verified absent.
+Independent Fable review NOT RUN: Bazzite offline and no usable token
+on DBA-008D as recorded in P9-0L-01. No real SSH rerun or 3+ A/B
+is claimed for this identity-guard correction. Commit/push pending.

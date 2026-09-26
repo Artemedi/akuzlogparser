@@ -67,10 +67,12 @@ def sample(pid: int):
             ticks = (kernel.dwHighDateTime << 32 | kernel.dwLowDateTime)
             ticks += (user.dwHighDateTime << 32 | user.dwLowDateTime)
             cpu_s = ticks / 10_000_000  # FILETIME has 100 ns ticks.
+        created_ticks = (created.dwHighDateTime << 32) | created.dwLowDateTime
         return dict(working_set_bytes=counters.ws, private_bytes=counters.private,
                     peak_working_set_bytes=counters.peak_ws,
                     peak_pagefile_bytes=counters.peak_pagefile,
-                    cpu_time_s=cpu_s)
+                    cpu_time_s=cpu_s,
+                    creation_time_ticks=created_ticks if cpu_s is not None else None)
     finally:
         _kernel.CloseHandle(handle)
 

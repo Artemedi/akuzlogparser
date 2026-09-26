@@ -48,6 +48,40 @@ class FrozenMemoryTests(unittest.TestCase):
         self.assertEqual(stats["sampled_tree_lifetime_cpu_s"], 2.0)
         self.assertEqual(stats["cpu_time_s_per_pid"], {11: 1.25, 22: .75})
 
+    def test_fresh_cpu_checkpoint_delta_and_pid_guards(self):
+        self.assertAlmostEqual(bench.cpu_checkpoint_delta(
+            {11: (101, 1.25), 22: (102, .75)},
+            {11: (101, 2.25), 22: (102, 1.25)}), 1.5)
+        self.assertAlmostEqual(bench.cpu_checkpoint_delta(
+            {11: (101, 1.25)},
+            {11: (101, 2.25), 22: (102, .5)}), 1.5)
+        with self.assertRaises(RuntimeError):
+            bench.cpu_checkpoint_delta(
+                {11: (101, 1.25), 22: (102, .75)}, {11: (101, 2.25)})
+        with self.assertRaises(RuntimeError):
+            bench.cpu_checkpoint_delta(
+                {11: (101, 1.25)}, {11: (101, 1.0)})
+        # A reused PID may have more CPU than its predecessor.
+        with self.assertRaisesRegex(RuntimeError, "recycled"):
+            bench.cpu_checkpoint_delta(
+                {11: (101, 1.25)}, {11: (103, 2.25)})
+
+    def test_fresh_cpu_checkpoint_rejects_missing_cpu_or_identity(self):
+        with patch.object(bench, "tree_pids", return_value={11, 22}), \
+             patch.object(bench, "sample", side_effect=lambda pid:
+                 {"cpu_time_s": .5 if pid == 11 else None,
+                  "creation_time_ticks": 101 + pid}):
+            with self.assertRaises(RuntimeError):
+                bench.tree_cpu_checkpoint(11)
+        with patch.object(bench, "tree_pids", return_value={11}), \
+             patch.object(bench, "sample", return_value={"cpu_time_s": .5}):
+            with self.assertRaises(RuntimeError):
+                bench.tree_cpu_checkpoint(11)
+        with patch.object(bench, "tree_pids", return_value={11}), \
+             patch.object(bench, "sample", return_value={
+                 "cpu_time_s": .5, "creation_time_ticks": 101}):
+            self.assertEqual(bench.tree_cpu_checkpoint(11), {11: (101, .5)})
+
     @unittest.skipUnless(sys.platform == "win32", "Windows child-process memory")
     def test_isolated_python_worker_excludes_controller_pid(self):
         bench.DIAG.mkdir(exist_ok=True)
