@@ -10,6 +10,22 @@ from scripts.bench_phase9_baseline import (canonical_hash, create_sources,
 
 
 class Phase9BaselineTests(unittest.TestCase):
+    def test_ssh_runner_must_not_clean_other_active_workspaces(self):
+        from unittest.mock import patch
+        from scripts import bench_phase9_ssh
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            active = root / "phase9_ssh_other_process"
+            active.mkdir()
+            (active / bench_phase9_ssh.MARKER).write_text(
+                "disposable\n", encoding="ascii")
+            in_flight = active / "20260925_server.log.part"
+            in_flight.write_bytes(b"in-progress synthetic bytes")
+            with patch.object(bench_phase9_ssh, "DIAG", root):
+                bench_phase9_ssh.scrub_stale_temp()
+            self.assertEqual(in_flight.read_bytes(),
+                             b"in-progress synthetic bytes")
+
     def test_snapshot_hash_and_bad_utf8_are_synthetic_only(self):
         with TemporaryDirectory() as td:
             root = Path(td)

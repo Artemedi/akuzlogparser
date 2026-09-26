@@ -35,10 +35,13 @@ RESULT_SPOOL = DIAG / "phase9_ssh_spool_private.json"
 
 
 def scrub_stale_temp():
+    """Only prepare diagnostics; do not guess if another benchmark is active.
+
+    TemporaryDirectory deletes this invocation's OWN workspace on exit.
+    A marker from another run is not proof of abandonment: on Windows a
+    partially deleted active download can corrupt both the test and its cache.
+    """
     DIAG.mkdir(exist_ok=True)
-    for p in DIAG.glob("phase9_ssh_*"):
-        if p.is_dir() and (p / MARKER).read_text(encoding="ascii") == "disposable\n" if (p / MARKER).is_file() else False:
-            shutil.rmtree(p)
 
 
 def build_once(workspace: Path, use_derived_spool=False):

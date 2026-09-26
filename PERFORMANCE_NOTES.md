@@ -679,3 +679,17 @@ Gate remaining OPEN: frozen Windows portable EXE full-workload parity;
 mixed-cache and failure-mode matrix; Phase 9.2 in-flight tee comparison.
 Do not interpret this analytics normalizer as permission to ignore
 unexplained semantic changes.
+
+## Phase 9 test-harness concurrency safety (2026-09-26)
+
+Recovered main at 8ca38ae (origin/main equal), pre-existing untracked
+`scripts/bench_phase9_ssh_cache.py` retained. During a second cache-matrix
+invocation, the old global `scrub_stale_temp` tried to remove the disposable
+workspace of an ALREADY RUNNING separate benchmark and failed on an open
+20260925 `.part` file (WinError 32). This means that interrupted concurrent
+run cannot be accepted as clean evidence; other files may have been removed
+before Windows refused the deletion. No production downloads/reports/cache
+were targeted. Replaced proactive cross-run deletion with per-invocation
+`TemporaryDirectory` cleanup only; synthetic guard preserves an active
+marker and in-progress part file. This is safety, not a speed optimization.
+Never infer abandoned state merely from a disposable marker.
