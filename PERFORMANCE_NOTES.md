@@ -1447,3 +1447,29 @@ Published Release/user cache/config remained untouched.
 This closes the 3+ alternating Python/frozen runtime parity gate for
 these exact snapshots; it is not a general benchmark across machines.
 Fable independent review remains BLOCKED by unavailable Bazzite/token.
+
+## Phase 9.0u — inventory temporary-file fault recovery (2026-09-27)
+
+Step ID: P9-0U-01; initial HEAD `db1908db626f193ebe4343b867aa77f5dde2cff4`.
+Fault injection demonstrated that failed `Path.replace()` in
+`akuz_store.save_store()` leaves `cache/inventory.json.tmp` behind.
+Two new tests FAILED before fix on this stale temp assertion.
+Bounded fix: remove only `inventory.json.tmp` after caught write/
+replace errors; preserve the original exception if unlink also fails.
+Never remove the existing `inventory.json` or user's other cache files.
+Three synthetic guards PASS after fix: failed replace preserves
+original inventory bytes and removes temp; partial JSON write
+removes temp; failed `_publish` persistence rolls back new report,
+then retry publishes one report with no duplicate/orphan.
+Targeted 3/3 PASS (0.075 s), full 113/113 Python tests PASS
+(36.072 s), five legacy equivalence scripts PASS (classify 131,860,
+raw/catalog 160 events, combined 6 events, event stream 3 seeds,
+text semantics 560 cases), `git diff --check` PASS.
+No production parser/spool/cache format change; no real SSH transfer,
+production payload, credential, user report/download or Release touched.
+This covers catchable write/rename errors, NOT sudden process kill or
+power-loss durability; shared fixed-name tmp concurrency unchanged.
+Independent Fable review NOT RUN: Bazzite offline, Windows token absent.
+A concurrent category-isolation workstream modified other files;
+this commit must stage ONLY akuz_store.py, the inventory tests and
+these notes, preserving those unrelated uncommitted edits.

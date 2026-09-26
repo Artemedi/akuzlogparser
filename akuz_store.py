@@ -40,8 +40,17 @@ def save_store(root: Path, data):
     folder.mkdir(parents=True, exist_ok=True)
     path = folder/'inventory.json'
     tmp = folder/'inventory.json.tmp'
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
-    tmp.replace(path)
+    try:
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+        tmp.replace(path)
+    except Exception:
+        # A failed write/replace must not leave a stale partial inventory.
+        # Preserve the original persistence error if cleanup also fails.
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def sha256(path: Path):
