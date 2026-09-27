@@ -177,7 +177,11 @@ def _publish(root, store, key, raw_path, base, sources, label, kind,
         value = dict(id=rid, key=key, label=label, kind=kind, sources=sources,
             events=meta['events'], lines=meta['physical_lines'],
             created=datetime.now().isoformat(timespec='seconds'))
-        intent = write_intent(root, value, temp/'provenance.json')
+        # Do not trust hashes from an injected/custom generator.
+        producer_hashes = meta.pop('_output_hashes', None)
+        trusted = gen_fn is generate or getattr(gen_fn, '_akuz_builtin_generator', False)
+        intent = write_intent(root, value, temp/'provenance.json',
+                              output_hashes=producer_hashes if trusted else None)
         temp.rename(final)
         store['reports'][rid] = value
         try:
@@ -436,6 +440,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                     if sink.count != meta['events']:
                         raise ValueError('Derived spool event count mismatch')
                     return meta
+                single_gen._akuz_builtin_generator = True
                 report = _publish(root, store, content_key, path,
                                   date.fromisoformat(chosen) if chosen else None,
                                   source_meta, label, 'single', single_gen)
@@ -483,6 +488,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                                         input_bytes=source_bytes,
                                         derived_hook=(lambda ev: ev.pop('_phase9_derived', None))
                                         if spools else None)
+                    stream_gen._akuz_builtin_generator = True
                     combined = _publish(root, store, multi_key, scratch, first,
                                         sources, label, 'combined', stream_gen,
                                         input_bytes=source_bytes)

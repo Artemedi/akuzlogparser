@@ -42,7 +42,8 @@ def _file_sizes(folder: Path) -> dict[str, int]:
     return result
 
 
-def write_intent(root: Path, value: dict, provenance: Path) -> Path:
+def write_intent(root: Path, value: dict, provenance: Path,
+                 output_hashes: dict | None = None) -> Path:
     """Publish one exact, checksummed report intent before directory rename."""
     rid = value['id']
     marker = intent_path(root, rid)
@@ -55,18 +56,40 @@ def write_intent(root: Path, value: dict, provenance: Path) -> Path:
         raise FileExistsError('Publication intent already exists')
     stage = root / 'reports' / (rid + '.building')
     sizes = _file_sizes(stage)
+    # Built-in generator can supply SHA of the actual bytes accepted by
+    # its writer. Injected generators use the legacy full-read fallback.
+    if output_hashes is not None:
+        wanted = set(sizes) - {'provenance.json'}
+        if not isinstance(output_hashes, dict) or set(output_hashes) != wanted:
+            raise ValueError('Producer report hash manifest path mismatch')
+        for name, result in output_hashes.items():
+            if (not isinstance(result, (tuple, list)) or len(result) != 2
+                    or not isinstance(result[0], str)
+                    or not re.fullmatch(r'[0-9a-f]{64}', result[0])
+                    or type(result[1]) is not int or result[1] != sizes[name]):
+                raise ValueError('Producer report hash manifest size/digest mismatch')
+        read_bytes = sizes['provenance.json']
+    else:
+        read_bytes = sum(sizes.values())
     with perf_phase(root, 'report.integrity_hash',
-                    input_bytes=sum(sizes.values()), files=len(sizes)):
-        required_hashes = {
-            name: sha256(stage / name)
-            for name in ('provenance.json', 'index.html', 'data/catalog.js')
-        }
-        # Recovery needs full content integrity, including same-size raw damage.
-        # Full hashes are stored but NOT re-read on every ordinary warm hit.
-        all_hashes = dict(required_hashes)
-        for name in sizes:
-            if name not in all_hashes:
-                all_hashes[name] = sha256(stage / name)
+                    input_bytes=read_bytes, output_bytes=sum(sizes.values()),
+                    producer_files=len(output_hashes or ()), files=len(sizes)):
+        if output_hashes is None:
+            required_hashes = {
+                name: sha256(stage / name)
+                for name in ('provenance.json', 'index.html', 'data/catalog.js')
+            }
+            all_hashes = dict(required_hashes)
+            for name in sizes:
+                if name not in all_hashes:
+                    all_hashes[name] = sha256(stage / name)
+        else:
+            all_hashes = {name: value[0] for name, value in output_hashes.items()}
+            all_hashes['provenance.json'] = sha256(provenance)
+            required_hashes = {
+                name: all_hashes[name]
+                for name in ('provenance.json', 'index.html', 'data/catalog.js')
+            }
     value['integrity'] = dict(files=sizes,
                               required_sha256=required_hashes,
                               all_sha256=all_hashes)

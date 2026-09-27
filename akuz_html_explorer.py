@@ -268,6 +268,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
              *, event_source=None, input_bytes=None,
              derived_sink=None, derived_hook=None) -> dict[str, Any]:
     from akuz_log_parser import classify, normalize, extract_duration
+    from akuz_report_writer import write_report_text
     from akuz_analytics import recognize_error
     from akuz_derived import Derivers, derive_event
     from akuz_diagnostics import event as perf_event, phase as perf_phase
@@ -318,6 +319,13 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     components: list[str] = []
     rows: list[list[Any]] = []
     raw_shard: list[str] = []
+    # Digest actual serialized bytes while they are written, not on a
+    # second read of every shard during publication.
+    output_hashes: dict[str, tuple[str, int]] = {}
+
+    def emit(dest: Path, text: str) -> None:
+        output_hashes[dest.relative_to(out).as_posix()] = write_report_text(dest, text)
+
     error_fingerprints: dict[str,str] = {}
     prev_end = 0
     replacement_chars = 0
@@ -329,7 +337,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         nonlocal shard_time
         stamp = perf_counter()
         dest = data / f"raw_{part:05d}.js"
-        dest.write_text("window.AKUZ_RAW=" + js_json(raw_shard) + ";\n", encoding="utf-8")
+        emit(dest, "window.AKUZ_RAW=" + js_json(raw_shard) + ";\n")
         shard_time += perf_counter() - stamp
 
     events_iter = iter(read_input(source, base, stats, defer_classify=True)
@@ -509,7 +517,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                    category_counts=[[catids[k],v] for k,v in category.most_common()],
                    patterns=patterns, durations=dur, requests=request.most_common(15))
     with perf_phase(perf_root, 'generate.catalog', events=len(rows)):
-        (data / "catalog.js").write_text("window.AKUZ_DATA="+js_json(catalog)+";\n", encoding="utf-8")
+        emit(data / "catalog.js", "window.AKUZ_DATA="+js_json(catalog)+";\n")
     # One authoritative UI source for the initial page and every generated report.
     # The embedded v2 strings above remain as historical fallback, not a second v4 UI.
     ui = Path(__file__).resolve().parent
@@ -520,12 +528,13 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                        ("index.js", (Path(__file__).with_name("index.js")).read_text(encoding="utf-8")),
                        ("event.js", (Path(__file__).with_name("event.js")).read_text(encoding="utf-8")),
                        ("app_controls.js", (Path(__file__).with_name("app_controls.js")).read_text(encoding="utf-8"))):
-        (out / name).write_text(text, encoding="utf-8")
+        emit(out / name, text)
     from akuz_runtime import DOCUMENTS
     for name in DOCUMENTS:
-        (out/name).write_text((ui/name).read_text(encoding="utf-8"), encoding="utf-8")
+        emit(out/name, (ui/name).read_text(encoding="utf-8"))
     perf_event(perf_root, 'generate.assets', 'done', elapsed_s=round(perf_counter()-started, 3),
                events=len(rows))
+    meta['_output_hashes'] = output_hashes
     return meta
 
 

@@ -109,3 +109,7 @@ review was completed for the inline-hash proposal. Previous Fable
 reviews of actual `d0132fd` and `1cea8b1` code do not authorize this
 new design. Test and record any eventual candidate against an exact
 SHA and re-run a new independent review when API connectivity allows.
+
+## Bounded implementation candidate 9.0z-07
+
+Producer-integrated writer and publication manifest validation now have an implementation candidate in Bazzite (see PERFORMANCE_NOTES.md), NOT yet Windows accepted. On failure or custom-generator injection, the ordinary full-read code path remains in service. The earlier two Clean APIs design consultations returned HTTP 502, so no independent design review is claimed; conduct a fresh review of ACTUAL code after a committed snapshot and the Windows gates. No published Release change.
