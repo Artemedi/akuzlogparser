@@ -1,6 +1,6 @@
 # Phase 9 — Same-root multiprocess inventory isolation gate
 
-Status: **IMPLEMENTED CANDIDATE / LINUX SYNTHETIC PASS / WINDOWS GATE OPEN** (2026-09-27). The historical same-root loss is preserved below as evidence. Current candidate adds an OS-backed crash-released lock, whole-operation transactions for app mutations, and optimistic inventory revision conflicts. Distinct from single-process report-ID collision fix `1cea8b1` and physical power-loss durability.
+Status: **BOUNDED CROSS-PLATFORM IMPLEMENTATION TESTED** (2026-09-27). Historical lost-update reproduction below applies to pre-6d5b60a code. Integrated 8cb7985 includes OS-backed crash-released locks, whole-operation app transactions, revision-before-rename conflicts, single app-root server ownership and static NTFS junction guards. Exact Windows/Linux 162-case suites passed (2/6 skips), portable smoke passed; final exact-SHA 8cb real content gate recorded separately. This does NOT establish physical power-loss durability or safety from old non-cooperating binaries.
 
 ## Reproduction on Bazzite (synthetic only)
 
@@ -19,10 +19,13 @@ Driver output: `MULTIWRITER_LOST_UPDATE_REPRODUCED`;
 The SAME public script independently reproduced this exact synthetic
 result on DBA-008D / Windows NTFS, 2026-09-27, with its own temporary
 workspace, after the unrelated real SHA A/B completed. This is a
-confirmed cross-platform current defect, NOT a corrected behavior.
+confirmed historical cross-platform defect of the pre-6d5b60a code;
+the current cooperating-writer lock/revision tests are documented below.
 
-`akuz_store.save_store` writes one fixed temp pathname; there is
-no inter-process lock around `load_store`, mutations and `save_store`.
+On the **pre-6d5b60a code**, `akuz_store.save_store` wrote one fixed
+temp pathname without an inter-process transaction spanning
+`load_store`, mutations and `save_store`. The integrated 8cb7985
+code adds the transaction and stale-revision protection below.
 There is also an independent lost-update problem EVEN WITH UNIQUE
 TEMP NAMES: two valid store snapshots each omit the other's new
 entries; serialized last-write-wins JSON replaces one with the other.

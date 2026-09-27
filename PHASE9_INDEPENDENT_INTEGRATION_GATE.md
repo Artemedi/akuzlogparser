@@ -77,3 +77,58 @@ Linux full 159 total, 154 PASS, 5 SKIP, 0 FAIL/ERROR (6.052 s).
 No production module changed by this test-only normalization.
 Authoritative final Windows SHA and real Python/frozen gate for the
 test-normalized commit remain separate.
+
+## Exact final `ee699af` independent Windows + Linux gates
+
+The candidate after c701162 and 4f2445c (junction checks) received
+a test-only WinError fixture normalization in ee699af; full
+Windows suite at exact
+`ee699afa283f3ccf4aaf6d83ee268b7b1258884c`: 159 tests,
+157 PASS, 2 permission-based symlink SKIP, 53.722 s, exit 0,
+`git diff --check` PASS. Exact Linux suite: 159 tests,
+154 PASS, 5 platform SKIP, 6.118 s, exit 0, diff-check PASS.
+Windows junction case PASSED; no cross-platform fake-WinError ERROR
+remains. Integration chain is additive from `d47710a`, not a squash.
+Portable diagnostic ZIP contains `BUILD_INFO.commit=ee699af` and
+smoke PASS. ZIP SHA-256
+`53fb7669c424c5f2419b6bb31116ff5bd9e2f24c9fa83b1085f2f2de43bf2254`.
+On one SHA-gated real 23/24/25 September snapshot (956,307,242 B),
+Python fresh wall/CPU 215.271/206.078 s, frozen
+203.118/201.421875 s; all inventory, reports, SQLite, analytics
+exports and single event checks PASS. Both real runtime samplers have
+zero unreadable CPU/memory samples. The separate portable smoke had
+one unreadable child-memory sample, explicitly recorded.
+Original user log/cache/report directories and GitHub Release remain
+untouched. A fresh SHA-gated real dataset run for all concurrency
+fault boundaries is NOT claimed: synthetic process-exit/lock/clear
+and real single-writer byte parity are separate evidence classes.
+
+## Exact 8cb7985 — Fable follow-up + cross-platform regression
+
+Fable's useful review on ee699af was MODIFY; two isolated changes
+are in commit `8cb7985`: preserve genuine non-contention OS errno,
+and `normcase()` registry keys on Windows. Negative EBADF/EACCES tests,
+reacquisition and Windows alternate-case identity added. The Fable
+review itself was on ee699af, not on 8cb; see
+PHASE9_FABLE_LOCK_FINAL_REVIEW.md for the attributed disposition.
+
+8cb Linux 162 tests OK (6 expected skips), Windows 162 tests OK
+(2 ordinary symlink privilege skips). PyInstaller ZIP BUILD_INFO
+commit 8cb7985; diagnostic portable smoke PASS (0 unreadable samples).
+No GitHub Release update or upload of real .log files. The final
+SHA-gated real Python/frozen parity remains an independent gate.
+
+## Completed exact-SHA 8cb7985 real Python/frozen gate
+
+All three real SSH snapshot dates 2026-09-23/24/25 were gated by
+their saved hashes and sizes: 956,307,242 bytes total. On exact
+`8cb7985c97a4c9d12cda11673f69d0b35d26aaec` the Python and
+frozen runs agreed on all five normalized comparisons (inventory,
+reports, SQLite, analytics exports, single events). Python fresh
+wall/CPU 214.679/205.516 s; frozen 203.114/201.03125 s; both
+memory and CPU samplers zero unreadable observations. Raw payload
+not persisted, owned workspace cleaned. Numeric private evidence
+SHA-256 `5a8977e034da46e674ae03d6cb5fc42274f83bf40b5a42cb73bffca5b6411ddf`.
+This closes the formerly pending exact-SHA content gate; it does NOT
+prove physical power-loss durability, adversarial path swap safety or
+compatibility with old apps ignoring advisory file locks.

@@ -2118,3 +2118,98 @@ independently present in 955e9f3 (`lock_error.winerror=5`);
 Linux full then 159 total, 154 PASS / 5 SKIP, zero fail/error,
 6.052 s. App runtime and report output unaffected by this test-only
 change. Windows final SHA and SSH parity still pending; no Release.
+
+## Phase 9.0z-16 — independently verified final integration SHA ee699af
+
+The isolated integration branch progressed from `68305e7` via
+`c701162` (preexisting-symlink and in-process startup tests),
+`4f2445c` (Windows NTFS junction/reparse guard for BOTH locks), and
+`ee699afa283f3ccf4aaf6d83ee268b7b1258884c` (platform-neutral
+fake-WinError test fixture only). No generator/parser/output change
+is attributed to the final test-fixture commit. Both machine main
+branches had origin `d47710a` as baseline during this gate; this
+is a separate complete fast-forward chain, not a forced overwrite.
+
+Exact `ee699af` Windows full suite independently REPEATED on clean
+DBA-008D detached worktree: 159 tests in 53.722 s, OK (skipped=2),
+`git diff --check` PASS. Bazzite same-SHA Linux discovery:
+159 tests in 6.118 s, OK (skipped=5), `git diff --check` PASS.
+Linux ResourceWarning for an intentionally rejected synthetic
+HTTP 403 was observed but does not make a test failure disappear.
+Portable ZIP `BUILD_INFO` SHA ee699af; ZIP SHA-256
+`53fb7669c424c5f2419b6bb31116ff5bd9e2f24c9fa83b1085f2f2de43bf2254`,
+EXE SHA-256
+`6ce5d734a27c7194ae751a00638832870a33055b3b40426687de28cac8535f6c`.
+Independent portable smoke PASS: 4.549 s, 140 sampler iterations,
+112 child samples, 1 unreadable child memory sample (NOT zero),
+53 MB sampled child WS; no raw payload persisted.
+
+Same SHA-gated real SSH 2026-09-23/24/25 source snapshots:
+171,378,567 + 140,361,291 + 644,567,384 = 956,307,242 B.
+Exact `ee699af` fresh Python wall 215.271 s, CPU 206.078 s,
+5,356 samples, sampled WS 1,279,934,464 B, private
+1,347,207,168 B. Frozen wall 203.118 s, CPU 201.421875 s,
+4,716 samples, sampled WS 1,243,746,304 B, private
+1,290,649,600 B. Both 0 unreadable memory and CPU samples.
+Python/frozen normalized inventory/reports/SQLite/exports and
+single_events all PASS, owned benchmark workspace cleaned.
+One run per runtime is a parity gate, NOT a new causal performance A/B.
+The private result SHA-256 is
+`03c826eb539d726accc4e9a79c67012c854efafc894ed263e8e283b5b957a1b9`;
+private ZIP artifact remains local only. Source-content logs,
+SSH credentials and filled `ConnectConf.cfg` were NOT committed.
+The earlier `6d5b60a` exact-SHA real Python/frozen gate also PASS
+(214.519 / 205.368 s wall), but is NOT substituted for final
+`ee699af` source/portable assertions. Published GitHub Release
+unchanged; old clients, hostile concurrent path swaps, fsync/power
+loss, and unknown staging/intent retention remain explicit limits.
+
+## Phase 9.0z-17 — final lock-error discriminator and Windows alias
+
+Independent Fable bounded review on exact `ee699af` (read-only
+Clean APIs HTTP 200, finish_reason=stop) returned MODIFY with two
+concrete lock-path/error concerns. Raw response and grounded triage:
+`PHASE9_FABLE_LOCK_FINAL_RAW_REVIEW.md` and
+`PHASE9_FABLE_LOCK_FINAL_REVIEW.md`. An earlier broader attempt
+ended finish_reason=length with ZERO text and is not counted as
+substantive review. The valid request contained only tracked lock
+code/tests, no SSH configuration, server logs or filled credentials.
+
+`8cb7985c97a4c9d12cda11673f69d0b35d26aaec` addresses both:
+`exclusive_instance` maps only EACCES/EAGAIN/EDEADLK to InstanceBusy;
+other OSError (e.g. EBADF) is propagated. `_root_lock` registry key
+uses os.path.normcase on the resolved path so Windows aliases differ
+only by letter case share one in-process RLock. New regressions for
+EBADF vs busy EACCES, recovery after failure, and actual Windows
+alternate-case root identity. No parser/generator/report format edit.
+Bazzite exact `8cb7985` focused 20 tests OK (2 OS skips), full
+162 tests OK (6 platform skips), 6.197 s; `git diff --check` PASS.
+DBA-008D exact clean detached 8cb worktree focused 20 OK
+(2 permission-based symlink SKIPs); full 162 tests OK (2 SKIPs),
+53.932 s, diff-check PASS. Distinguish suite SKIPs from FAIL.
+Portable diagnostic ZIP built at exactly 8cb: SHA-256
+`39324b2f4fc3da3cc5fc52234090a92e8f52115c0788f6ef364e70f6f7a79912`;
+EXE SHA-256
+`0608a8ef54eb02342f6397db396fbcf6921ae8634b613d7c773ef077d30a939d`.
+Portable smoke PASS, wall 4.569 s; 143 memory samples,
+113 child samples, 0 unreadable; user Release untouched.
+Windows source SHA-gated 23/24/25 real Python/frozen content gate
+is separate from these synthetic+portable tests and must report its
+exact completed SHA before claiming final content parity.
+
+P9-0Z-18 — exact `8cb7985` real source and Windows/frozen verification:
+Independent inspection of private `phase9_frozen_real_private.json` on
+DBA-008D clean detached `phase9-final-lock-8cb7985` confirmed
+`git_sha=8cb7985c97a4c9d12cda11673f69d0b35d26aaec`. Three exact
+source snapshots 20260923/24/25: 171,378,567 / 140,361,291 /
+644,567,384 bytes, sum 956,307,242. Five checks PASS:
+`inventory`, `reports`, `sql`, `exports`, `single_events`; raw payload
+NOT saved; disposable benchmark workspace CLEANED. Python fresh
+wall/CPU 214.679/205.516 s, sampled WS/private 1,344,192,512 /
+1,347,641,344 B. Frozen fresh wall/CPU 203.114/201.03125 s,
+sampled WS/private 1,279,447,040 / 1,295,015,936 B. Both have
+zero unreadable memory and CPU samples. Evidence SHA-256:
+`5a8977e034da46e674ae03d6cb5fc42274f83bf40b5a42cb73bffca5b6411ddf`.
+All measurements apply to this exact SHA only; this one Python/frozen
+pair confirms parity, not causal performance improvement. User cache,
+original log files and published GitHub Release unchanged.
