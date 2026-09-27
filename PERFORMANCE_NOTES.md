@@ -1858,3 +1858,25 @@ APPROVE narrow single-process collision fix; existing multi-process
 check/reservation TOCTOU remains OPEN. Original model response and
 source-vs-review triage: PHASE9_FABLE_Z3_RAW_REVIEW.md and
 PHASE9_FABLE_Z3_REVIEW.md. No raw user logs/config/API key sent.
+
+## Phase 9.0z-04 — deterministic OPEN same-root inventory race
+
+No application code changed. On clean Bazzite main after 1cea8b1,
+`python3 -B scripts/probe_phase9_inventory_race.py` reproduced the
+single shared `inventory.json.tmp` collision using TWO actual Python
+processes and an explicit pause before A's replace. B publishes
+`initial` + `B`; A then raises FileNotFoundError and its `A` entry
+is lost. Output: MULTIWRITER_LOST_UPDATE_REPRODUCED,
+A_write_failed=True, persisted_A=False, persisted_B=True,
+initial_preserved=True. Repeat on Bazzite PASS as a **defect repro**,
+NOT a multiwriter-safety acceptance pass. All workspace contents
+synthetic and removed by TemporaryDirectory; existing cache untouched.
+
+A separate stale-snapshot problem would persist if only temporary
+filenames became unique. See `PHASE9_INVENTORY_CONCURRENCY.md` for
+actual `load_store` -> mutate -> `save_store` call sites and an
+OS-crash-released, whole-transaction same-root locking proposal.
+`state.lock` and analytics LOCK apply to one process only. No lock
+or fsync code introduced, and neither multiprocess consistency nor
+power-cut durability is claimed. Windows/NTFS synthetic reproduction,
+lock lifecycle, process-kill, cache-clear and source-date gates OPEN.
