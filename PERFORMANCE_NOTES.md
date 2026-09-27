@@ -2003,3 +2003,33 @@ suite 25/25 PASS plus report/combined byte-equivalence PASS. Full Linux
 discovery: 142 total, 137 PASS, 4 SKIP, one known pre-existing
 Windows-specific fake-WinError cleanup ERROR; authoritative combined
 full-suite gate must therefore run on Windows.
+
+## Phase 9.0z-09 — category reconciliation + final combined Windows gate
+
+The user's pre-existing Windows working tree contained only the
+report-local category-isolation change in `akuz_html_explorer.py` plus
+`tests/test_phase9_category_isolation.py`. It was NOT overwritten.
+The exact same change was independently reproduced on Bazzite on top
+of producer-hash/docs SHA `bff5806`, producing commit
+`7e1a6c2954f995ed3d1b18519b0e911b8508bcef`.
+Focused Bazzite producer/category/crash/recovery tests 25/25 PASS;
+legacy report bytes 160 events/4 shards IDENTICAL and combined
+equivalence PASS. Linux full discovery retained the already documented
+single Windows-fake-WinError cleanup ERROR; no new category failure.
+
+A clean detached DBA-008D worktree at final docs/code
+`8ee4f9d810742bd470c23c0e10fc16246abb3b15` then ran
+`python -B -m unittest discover -s tests -q`: **142/142 PASS in
+49.724 s**. `check_report_equivalence.py` PASS with byte-identical
+catalog/raw output; `check_combined_equivalence.py` PASS;
+`git diff --check` PASS and clean worktree.
+
+Before reconciling the original dirty Windows checkout, its local
+category-only patch was saved privately and applied to a clean
+`bff5806` worktree. The resulting `akuz_html_explorer.py` SHA-256
+was `6c15ebf25569ffd3717088da24936cf477ef4d756c7adae54fdacee5e0b38157`,
+exactly equal to the accepted `8ee4f9d` file. The untracked category
+test also matched the accepted file byte-for-byte. This proves the
+incoming commit contains the preserved local work before clearing the
+old dirty status. Private patch stays ignored until synchronization is
+verified; no user cache/report/log or public Release touched.
