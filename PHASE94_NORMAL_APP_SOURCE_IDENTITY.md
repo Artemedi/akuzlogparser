@@ -87,6 +87,10 @@ measurement.
 The fifth scenario was added as commit `f8a5cbd` on top of the
 four-case PASS `2c1aa09`. It targets a normal app exception
 (derived replay mismatch) rather than a forced process kill or
-power loss. A separate exact-SHA Windows Actions #36356901468
-is the acceptance gate for this incremental test; never infer
-PASS merely from the test definition.
+power loss. Exact-SHA DBA-008D
+[Windows Actions #36356901468](https://github.com/Artemedi/akuzlogparser/actions/runs/36356901468)
+completed SUCCESS on `f8a5cbd293b83cfa9d65836698f24d99134241e2`:
+194 Python tests, 2 platform skips, 97.558 s, Node
+browser controls PASS, diff-check PASS. A handled replay
+exception with fresh interpreter recovery is NOT a hard
+process kill, power-loss or production candidate acceptance.
