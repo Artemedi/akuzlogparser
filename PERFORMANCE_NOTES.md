@@ -1840,3 +1840,21 @@ Bazzite focused crash/inventory/recovery/indexed suite: 25/25 PASS;
 and category test are untouched, and no real logs or config sent
 outside owner machines. A single-process name reservation check
 cannot prove two-process atomic allocation or inventory lost-update.
+
+P9-0Z-03 Windows final gate and independent review:
+`1cea8b1c472bb9555ef9fed3b02d123a5b3897cc` fast-forwarded
+from verified local Git bundle and pushed to origin/main; bundle
+SHA-256 `16f0ff6fd867b47015a7e1cc57dcf2f0992f6e9e8282da827885f4ce9ce124f7`.
+On DBA-008D, NEW clean detached worktree of this exact SHA ran full
+`python -B -m unittest discover -s tests -q`: 137/137 PASS in
+54.644 s, `git diff --check` PASS. Owned worktree and transfer
+bundle removed after gate. Unrelated main-checkout category work
+(`akuz_html_explorer.py`, `tests/test_phase9_category_isolation.py`)
+remained uncommitted and untouched. No release or real .log upload.
+Independent read-only Claude Fable 5.1 review via user's Bazzite
+Clean APIs on actual clean 1cea8b1, five exact line-numbered tracked
+code/test files (24,691 prompt chars), HTTP 200 and finish_reason=stop:
+APPROVE narrow single-process collision fix; existing multi-process
+check/reservation TOCTOU remains OPEN. Original model response and
+source-vs-review triage: PHASE9_FABLE_Z3_RAW_REVIEW.md and
+PHASE9_FABLE_Z3_REVIEW.md. No raw user logs/config/API key sent.

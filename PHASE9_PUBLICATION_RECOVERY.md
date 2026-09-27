@@ -10,8 +10,11 @@ is implemented in Phase 9.0z-01; same-size raw recovery in the
 separate Phase 9.0z-02 `d0132fd`. Both fixes passed their real gates.
 On d013, full report SHA adds a material extra read (2.275 GB /
 21.023 s on Python). Real 3+ paired A/B and an inline-hash
-alternative remain OPEN. Other outstanding review fixes,
-concurrent-writer and power-loss gates remain OPEN.
+alternative remain OPEN. Orphan intent report-ID collisions were
+separately fixed at 1cea8b1 (Phase 9.0z-03) with a clean Windows
+137/137 gate; this is not an atomic multiprocess reservation.
+Other outstanding review fixes, concurrent-writer and power-loss
+gates remain OPEN.
 Phase 9.2/9.3 architectural approval is separate.
 Evidence: `PERFORMANCE_NOTES.md` P9-0R-01, P9-0U-01, P9-0V-01,
 P9-0W-01 and P9-0X-01/02; synthetic regressions
