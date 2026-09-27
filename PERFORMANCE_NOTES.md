@@ -2264,3 +2264,32 @@ Earlier exact 8cb/b724 runtime's SHA-gated Python/frozen real
 source parity (23/24/25 Sept, 956,307,242 bytes) remains applicable
 to these unchanged runtime bytes; do NOT misattribute it as a
 new real run specifically of the tests-only SHA.
+
+## Phase 9.2 In-Flight Tee — synthetic feasibility, NOT Phase 9.2 closure
+
+Separate branch from accepted 9.1 checkpoint `5b692a8`; experimental
+commit `f7bbc640aeefbe66b44251ca7f11760d2d9f0ae6` changes ONLY
+`scripts/probe_phase9_tee.py` and its synthetic regression tests.
+No normal app route or raw user cache was modified. In an owned
+TemporaryDirectory create_sources produced 3 distinct .log files,
+one UTF-8 BOM, mixed LF/CRLF and a corrupt UTF-8 byte. Source
+counts 12/12/13 = 37 source events.
+
+Prototype sends a detached per-report event dict and immutable derived
+values to combined writer in bounded queue (1 and 16 slots), using
+only one `read_input/event_stream()` per fresh source. An actual
+`derive_event` spy counted 37 calls total; combined `derived_hook`
+consumed each value, so no second classify/normalize/duration/error
+pass for fresh fan-out. All 3 individual and combined report file
+manifests byte-equal to existing `generate` + `_iter_combined_sources`
+reference in both queue settings. At combined event 5, an injected
+failure cancels producer backpressure without deadlock; test ends,
+never indexed a report and retained original synthetic files.
+
+Bazzite exact f7bbc64 full suite: 166 tests OK (6 OS SKIP,
+6.913 s), `git diff --check` PASS. Windows clean detached exact
+f7bbc64 full suite: 166 tests OK (2 symlink privilege SKIP,
+74.068 s), diff-check PASS. The experiment is NOT wired into
+`akuz_app._publish`, so no claim about real app cache/recovery,
+source rotation, memory, local SSH/frozen real performance or safe
+production publication. See PHASE9_TEE_PROTOTYPE.md.

@@ -104,7 +104,7 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 
 **Gate Phase 9.1 (2026-09-27):** refactor-only, прежние HTML/JS/catalog/analytics byte-identical; `derive_event` excludes report context. Synthetic four-cache-transition and combined-replay-failure tests in `tests/test_phase9_final_contract_gate.py`: Linux 164 tests OK (6 OS skips), Windows exact 1748ae0 164 tests OK (2 OS skips). Real SSH Python/frozen parity belongs to unchanged runtime 8cb/b724 (not newly run at tests-only SHA). See PERFORMANCE_NOTES.md Phase 9.1 contract-completion gate. This does NOT approve persistent sidecar or In-Flight Tee.
 
-## 5. Phase 9.2 — прототип A, In-Flight Tee [OPEN, НЕ УТВЕРЖДЁН]
+## 5. Phase 9.2 — прототип A, In-Flight Tee [ISOLATED SYNTHETIC PROOF; FULL GATE OPEN]
 
 1. Только в изолированной ветке/прототипе: один `event_stream()` и derive на свежий источник → individual writer и combined writer.
 2. Сначала `resolve` всех источников: идентичность, дедупликация, даты, порядок combined, попадания/промахи кэша и ключи снимков; writer combined открывать/публиковать атомарно лишь по доказанным правилам.
@@ -113,7 +113,9 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 5. Замерить дополнительный raw_shard и второй каталог, пиковый RSS, GC, `shard_write_s` при чередовании записи двух директорий.
 6. Обязательные сценарии fresh-all, mixed-cache, combined-only-miss, single-only-miss, no-op, failure halfway; DIAG spy: derive вызывается ровно один раз **только в случае, когда действительно есть два активных потребителя свежего события**.
 
-**Gate:** побайтовая идентичность и выгодный свежий прогон без неприемлемого пика RSS. A — кандидат, не предрешённая архитектура.
+**Prototype evidence (2026-09-27):** f7bbc64, synthetic one-pass derive 37/37, 3 single + combined byte parity, bounded queue 1/16 and controlled cancellation PASS. Linux full 166 OK (6 SKIP), Windows exact f7bbc64 166 OK (2 SKIP). See PHASE9_TEE_PROTOTYPE.md and PERFORMANCE_NOTES.md Phase 9.2.
+
+**Full gate OPEN:** app cache/recovery modes, SHA-gated real A/B, peak RSS, production publication and owner choice. A is a candidate, not a chosen architecture.
 
 ## 6. Phase 9.3 — прототип B-lite, Processed Sidecar + event_stream [OPEN, НЕ УТВЕРЖДЁН]
 
