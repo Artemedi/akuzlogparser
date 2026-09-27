@@ -2410,3 +2410,14 @@ owned staging folders after both success and failures. New tests
 7.077 s, git diff --check PASS. Exact Windows full suite still
 required for source-file encoding, OS rename/cleanup and symlink
 behavior. No published Release or production code path changed.
+
+Phase 9.3 fallback cross-platform gate: Windows DBA-008D clean detached
+exact `021ebcad90990075362be46708ebfd9938efbb62`, full
+`python -B -m unittest discover -s tests -q`: 178 cases, OK
+(2 OS symlink skips), 85.621 s; `git diff --check` PASS.
+Linux same code: 178 cases OK (6 OS skips). Neither platform
+runs any user SSH logs in these new tests. Prototype module is not
+imported by the default app route; portable/real production SHA-gate
+belongs to unchanged runtime 8cb/b724, NOT to a newly introduced
+production B-lite feature. B-lite lifecycle/privacy/performance
+approval remains OPEN.

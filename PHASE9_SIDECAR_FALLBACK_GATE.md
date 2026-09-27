@@ -40,7 +40,10 @@ full `python3 -B -m unittest discover -s tests -q`:
 178 tests, OK (6 Linux platform skips), 7.077 s.
 The ResourceWarning on synthetic HTTP 403 and argparse expected
 startup error messages are not test failures. `git diff --check`
-PASS. Windows exact-SHA full suite and portable gate still pending.
+PASS. Windows DBA-008D on CLEAN detached exact `021ebca`: full
+178 tests, OK (2 OS privilege skips), 85.621 s, diff-check PASS.
+No standalone portable archive or real-log performance gate was
+run for this experiment: production runtime files were unchanged.
 No SSH, real logs, inventory, persistent cache or GitHub Release
 was touched. Sidecars still include potentially sensitive normalized
 patterns and logical host/path; this is not authorization to retain
