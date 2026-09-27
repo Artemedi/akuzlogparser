@@ -117,7 +117,7 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 
 **Full gate OPEN:** app cache/recovery modes, SHA-gated real A/B, peak RSS, production publication and owner choice. A is a candidate, not a chosen architecture.
 
-## 6. Phase 9.3 — прототип B-lite, Processed Sidecar + event_stream [OPEN, НЕ УТВЕРЖДЁН]
+## 6. Phase 9.3 — прототип B-lite, Processed Sidecar + event_stream [ISOLATED SYNTHETIC PROOF; FULL GATE OPEN]
 
 1. Sidecar хранит только производные характеристики и привязку к ordinal/event identity; исходный `raw` и `message` НЕ сохранять повторно. Для combined использовать существующий `event_stream()` плюс синхронное чтение sidecar; сохранить 12–13 s повторного чтения/склейки ради меньшего риска.
 2. Явно версионировать контракт **всех** функций derive: классификатор, нормализатор, длительности, распознаватель/FP, парсер. Заголовок: версия, SHA снимка, host/path identity, count, размер/контрольная сумма, порядок, версия формата, целостность блоков.
@@ -125,6 +125,8 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 4. Писать sidecar потоково во временный файл, полностью валидировать и атомарно публиковать вместе с корректной идентичностью снимка; не добавлять лишний долговременный raw, не писать чувствительные тексты в логи.
 5. При старом индивидуальном отчёте без sidecar: гарантировать стандартный fallback, не требовать регенерации готового individual. При повреждении в середине combined безопасно откатить временный combined и пересобрать стандартным способом; не смешивать полусайдкар и полупарсер без доказанного restart-протокола.
 6. Проверить invalidation, source alias/identical bytes different host/path, schema upgrade, partial cache, злонамеренные/повреждённые записи, version mismatch, отмену и disk-full, RSS и storage amplification.
+
+**Prototype evidence (2026-09-27):** isolated source-bound versioned JSONL derived sidecar proof; 3000/3000/3001 synthetic events, single→combined byte parity, version/source/hash/partial-writer/corruption gates PASS. Experimental AKZS binary envelope hardened with per-frame 8 MiB and capped zlib output after reproducing a 2 MB expansion from a 2005-byte malicious frame. Bazzite 6 focused PASS; Windows full suite/real storage/RSS/net-gain and production cache fallback remain separate OPEN gates. See PHASE9_SIDECAR_PROTOTYPE.md and PERFORMANCE_NOTES.md Phase 9.3. This is NOT a persistent app cache or approved format.
 
 **Gate:** побайтовая идентичность, корректный mixed-cache и net gain с учётом записи + чтения sidecar, приемлемый размер/пиковая RAM. Если нет — B-lite не включать в production.
 

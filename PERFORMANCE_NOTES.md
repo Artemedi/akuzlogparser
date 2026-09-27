@@ -2350,3 +2350,35 @@ real dataset is NOT licensed; separate Windows process-tree WS/
 Private 3+ same-SHA real A/B and full cache/recovery gates OPEN.
 The six-trial numeric JSON stays private/ignored. Default application
 flow and GitHub Release unchanged.
+
+## Phase 9.3 independent B-lite stand-alone proof (2026-09-27)
+
+A prior separate `phase9-sidecar-prototype` branch contained UNTRACKED
+experimental writer/reader/tests. Rather than editing its owner
+worktree or staging incomplete changes, exact SHA-256-identical
+source/test copies were placed in a separate worktree based on main
+`9decf9d`. Original worktree/files remain untouched. Tests cover
+source SHA/size/host/path/date/code-revision, count and coordinates,
+same-size content corruption, partial writer, schema change,
+trailing records and combined byte equality; 5/5 PASS before
+bounded binary envelope correction.
+
+Independent synthetic malformed binary frame: 2005 compressed bytes
+advertised 1 uncompressed byte but expanded to 2,000,000; prior
+`zlib.decompress` allocated peak ~7,589,199 traced bytes BEFORE
+rejecting claimed size. The independent copy now limits each
+experimental AKZS frame to 8 MiB, uses `decompressobj(...,
+size+1)` with EOF/unused/unconsumed checks, rejects oversized
+encode/decode, and tests a 2MB bomb, forged oversize and trailing
+bytes. Bazzite focused 6/6 PASS; NO permanent binary block index.
+
+Synthetic source fixtures 3000/3000/3001 events, report-byte parity
+PASS for all three singles with/without JSONL sidecar. JSONL body
+275586/275586/275649 B vs binary envelope 22663/22663/22708 B;
+these are compressible synthetic rows, NOT real-dataset estimates.
+Short single-pass generation wall control 0.13471/0.11905/0.11653 s,
+with-sidecar 0.14129/0.14998/0.14614 s, not an A/B improvement
+claim (no repetition/cache or matched preload). Owned workspace
+cleaned and private numeric results retain no raw payload.
+See PHASE9_SIDECAR_PROTOTYPE.md. Normal app/report/inventory,
+published Release and actual SSH logs remain untouched.
