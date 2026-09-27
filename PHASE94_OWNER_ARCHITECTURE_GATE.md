@@ -59,10 +59,28 @@ The three-mode comparison establishes bounded measurements of
 **isolated fresh-all** on this workload, not a production choice.
 Full source-specific min/median/max and caveats:
 `PHASE94_REAL_FRESH_ALL.md`.
-Distinct normal-app cache and failure/restart gates are NOT met.
+The EXISTING ephemeral-spool normal-app local source identity and warm Python-process restart tests are now PASS (separate synthetic gate); Tee/B-lite normal-app integration, authentic remote source binding and interrupted publication remain OPEN.
 The previously OPEN real standalone comparison requirement below
 has now been executed; its **process-tree memory, transient peak
 disk, cancellation and application-level components remain OPEN**.
+
+## Normal-app baseline local identity gate (existing ephemeral spool)
+
+This is NOT an experimental Tee or persistent B-lite app integration.
+Synthetic `perform_build_current` local-source tests now assert
+same bytes/different path, rename, changed content with equal size
+AND changed mtime, cross-mode report+SQL+JS parity, and warm
+cache reuse across a genuinely new Python interpreter. DBA-008D
+[Actions #36356713339](https://github.com/Artemedi/akuzlogparser/actions/runs/36356713339):
+193 Python tests PASS, 2 platform skips, Node controls and diff-check
+PASS on exact `2c1aa09`. Existing full local fresh/warm/combined-
+only/single-only/mixed-cache and replay-failure tests remain applicable.
+See `PHASE94_NORMAL_APP_SOURCE_IDENTITY.md`.
+
+Still unproved: in-place same-size mutation with *unchanged*
+mtime/inode, SSH host/path lifecycle, interrupted transactional
+publication of an integrated candidate, B-lite sensitive metadata
+retention approval, and full real-source application-level parity.
 
 ## Acceptance gates before an architecture change
 
