@@ -2676,3 +2676,36 @@ the measured trial. See PHASE94_REAL_FRESH_ALL.md and
 PHASE94_OWNER_ARCHITECTURE_GATE.md. Production app
 cache/SQLite/exports/retention, interrupted publication
 and portable Release remain NOT approved.
+
+## Phase 9.4 normal-app local identity and true restart (2026-09-28)
+
+No production runtime change. New synthetic-only regression
+tests/test_phase94_normal_app_source_identity.py invokes the
+real perform_build_current local-source path: distinct paths
+with equal bytes do not silently alias; rename triggers one
+single+combined rebuild; same-size changed bytes WITH changed
+mtime_ns triggers one single+combined rebuild. Historical indexed
+reports remain available; no global deletion. Baseline
+no-spool and ephemeral spool report + semantic SQLite/JS exports
+match, with clean temporary spool lifecycle. A new interpreter
+process reopens the same local cache: three singles+combined
+IDs and SQLite/exports remain identical, no duplicate reports
+or persistent derived spool. These cases extend rather than
+duplicate the existing all-four-cache-transition test in
+test_phase9_final_contract_gate.py.
+
+Exact Windows SHA c62ca53: 192 Python tests PASS, 2 skips,
+92.528 s, Node controls PASS, diff PASS
+(Actions #36356580390).
+Exact Windows SHA 2c1aa09: 193 Python tests PASS, 2 skips,
+93.640 s, Node controls PASS, diff PASS
+(Actions #36356713339).
+See PHASE94_NORMAL_APP_SOURCE_IDENTITY.md.
+
+OPEN: same-size+same-mtime+same-inode in-place change is
+NOT detected by a stat-only identity without additional
+content verification, and is NOT covered by the changed-mtime
+test. Actual SSH host/path identity, real medical-log data
+privacy approval, failure/restart of experimental Tee/B-lite,
+SQLite/exports on integrated candidates and true interrupted
+publication remain separate gates. Release untouched.
