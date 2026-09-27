@@ -60,3 +60,19 @@ or change the GitHub Release. Pending later gates:
 interrupted publication, authentic remote identity, normal-app
 integration of a selected candidate and full-size memory/disk
 measurement.
+
+## Verified Windows CI checkpoints
+
+- Source identity three-test commit `c62ca532a9f62d8bab90e4e4ca264c6b7b83837f`:
+  [DBA-008D run 36356580390](https://github.com/Artemedi/akuzlogparser/actions/runs/36356580390)
+  SUCCESS, 192 Python tests / 2 platform skips, 92.528 s,
+  Node browser controls and diff hygiene PASS.
+- Real new-interpreter restart test commit
+  `2c1aa09b4188b6fee674a8cf206ce01df5478946`:
+  [DBA-008D run 36356713339](https://github.com/Artemedi/akuzlogparser/actions/runs/36356713339)
+  SUCCESS, 193 Python tests / 2 skips, 93.640 s,
+  Node controls and diff hygiene PASS.
+- Both runs used immutable `GITHUB_SHA` checkout and synthetic
+  test fixtures. The documentation-only commit following them
+  was not separately performance-benchmarked. No raw real logs,
+  private evidence or runtime architecture were changed.
