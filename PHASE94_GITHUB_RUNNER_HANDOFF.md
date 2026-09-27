@@ -24,6 +24,21 @@ or a way to mutate the original developer checkout automatically.
   Its evidence still belongs to exact experiment code SHA
   `a65007bb66196a9c24c6579151b4d557355cb45e`.
 
+- [Read-only local SHA I/O probe workflow](https://github.com/Artemedi/akuzlogparser/actions/workflows/akuz-phase94-local-sha-cost.yml):
+  a **single** full SHA read on each of the 3 already frozen
+  E:-volume AKUZ snapshots on DBA-008D. Only date/byte/CPU/
+  wall numeric metrics and PASS/FAIL leave the runner.
+  [Run #36357886696](https://github.com/Artemedi/akuzlogparser/actions/runs/36357886696)
+  SUCCESS; 955,774,851 total bytes, 2.16740 s sum wall
+  and 2.12500 s CPU. No GitHub artifact, original-file
+  copy, clinical event contents or source SHA output.
+- Opt-in normal local-source strict SHA implementation was
+  separately checked on exact `968b498`
+  ([198 Python PASS](https://github.com/Artemedi/akuzlogparser/actions/runs/36357691962));
+  subsequent default-fast-path regression exact `d331853`
+  ([199 Python PASS](https://github.com/Artemedi/akuzlogparser/actions/runs/36358007205)).
+  Both also passed Node controls and diff-check. No Release.
+
 **Do not describe a queued or in-progress workflow as passing**:
 inspect the final workflow conclusion, job steps and, when necessary,
 decoded job logs on GitHub. A green smoke is not a full regression pass.
@@ -49,10 +64,16 @@ the original logs to GitHub or C: to bypass this requirement.
 ## Boundaries
 
 - GitHub release remains unchanged without owner permission.
-- B-lite retention authorization and normal app cache / analytics /
-  SQLite / export acceptance remain OPEN.
-- No API keys, `CleanApi.env`, `ConnectConf.cfg`, clinical data,
-  event-level samples or raw `.log` are Actions inputs or artifacts.
+- B-lite retention authorization and normal-app **candidate Tee/B-lite**
+  cache / analytics / SQLite / export acceptance remain OPEN.
+  Existing ephemeral-spool baseline cache/SQL/export synthetic
+  regressions pass; do not conflate these two statements.
+- No API keys, `CleanApi.env`, `ConnectConf.cfg`, clinical
+  event-level samples or raw `.log` are published in Actions
+  logs/artifacts or transferred to GitHub. Unlike the purely
+  synthetic regression workflow, the explicit opt-in local SHA
+  cost workflow DOES read three frozen clinical log snapshots
+  locally on DBA-008D (read-only) and emits numeric data only.
 - The manually started runner's persistence as a Windows service has
   NOT been demonstrated. Do not reconfigure or restart the runner
   from a job running on itself; service installation requires a
