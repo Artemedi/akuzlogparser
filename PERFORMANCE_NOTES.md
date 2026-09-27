@@ -2490,3 +2490,29 @@ Both `git diff --check` PASS. The Windows sampler had >=82,
 unreadable memory readings; Private Bytes remain sampled lower
 bounds. All nine synthetic builds byte-equivalent within each OS.
 The Windows Python has no psutil; this benchmark adds NONE.
+
+## Phase 9.4 combined-only-miss synthetic cache-value proof
+
+Created new clean owned `phase94-combined-only` branch from
+`dd71037`, no changes to the default app, user cache or Release.
+Benchmark `scripts/bench_phase94_combined_only.py` builds 3 single
+reports into each owned trial workspace BEFORE starting a separate
+combined-only child process, checks all single/report/source SHA
+before/after the timed step, and then deletes the entire owned trial
+root. Exact same 3000/3000/3001 synthetic events, 3 independent
+process runs per mode in ABC/CAB/BCA schedule. It measures old
+single without sidecar fallback separately rather than silently
+claiming all cached singles have derived metadata.
+
+Bazzite 9/9 byte-parity PASS, no original source changes, all single
+files unchanged and all ephemeral sidecars removed: median single
+setup wall ordinary/B-lite/old-no-sidecar .34418/.42324/.35025 s;
+combined-only wall .37031/.22878/.37629 s; CPU
+.36762/.22627/.37335 s; child maxRSS 40364/41416/39596 KiB;
+B-lite disk overhead 827976 bytes (synthetic). Missing sidecar
+specifically takes fresh-derived fallback with intact singles.
+The full 956 MB real snapshot + actual app cache/SQL publication
+and medically sensitive retention gates REMAIN OPEN; this synthetic
+benchmark is NOT the production architecture decision. Numeric
+and hash data only in ignored private JSON. Complete protocol:
+PHASE9_COMBINED_ONLY_SYNTHETIC.md.
