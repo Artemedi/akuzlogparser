@@ -67,9 +67,13 @@ def save_store(root: Path, data):
         try:
             tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2),
                            encoding='utf-8')
+            # Prepare the exact on-disk revision BEFORE the irreversible rename.
+            # A failed post-rename readback would otherwise make _publish
+            # delete a report directory already referenced by inventory.json.
+            revision = hashlib.sha256(tmp.read_bytes()).hexdigest()
             tmp.replace(path)
             if hasattr(data, '_inventory_revision'):
-                data._inventory_revision = _disk_revision(path)
+                data._inventory_revision = revision
         except Exception:
             # A failed write/replace must not leave a stale partial inventory.
             # Preserve the original persistence error if cleanup also fails.
