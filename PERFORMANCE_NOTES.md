@@ -2730,3 +2730,51 @@ Node browser controls PASS, git diff --check PASS.
 No runtime change, SSH, real log upload, persistent B-lite,
 GitHub Release or literal crash/power-loss test. See
 PHASE94_NORMAL_APP_SOURCE_IDENTITY.md.
+
+## Phase 9.4 optional full SHA validation of original local sources (2026-09-28)
+
+Identified precise limitation: a warm cached_report can reuse a
+valid prior HTML report WITHOUT hashing the ORIGINAL local .log.
+cached_download hashes the indexed COPY when accessed; that
+does not prove the original source is unchanged under a same-
+size, same-mtime, same-inode rewrite.
+
+A narrowly scoped opt-in runtime check now exists:
+`AKUZ_VERIFY_LOCAL_SOURCE_SHA=1` on the local-source
+normal-app path, default off. It verifies the full original
+against its indexed source SHA (report proof or existing
+download), fails closed on changed stat during SHA or full
+digest mismatch, preserves all historical reports/inputs
+and does not reindex stale identities automatically.
+Disabled mode incurs no extra source read. Does not affect
+SSH/SMB or enable B-lite retention.
+
+Windows DBA-008D exact 968b498:
+[Actions #36357691962](https://github.com/Artemedi/akuzlogparser/actions/runs/36357691962)
+198 Python tests PASS, 2 OS skips, 101.562 s,
+Node browser controls + git diff --check PASS. The four
+new tests cover same size+mtime+inode rewritten content,
+valid strict warm reuse, preserved reports after clearing
+downloads and malformed flag fail-closed.
+Implementation SHA 968b498 includes akuz_local.py,
+akuz_app.py and the synthetic tests. See
+PHASE94_NORMAL_APP_SOURCE_IDENTITY.md and README_START_HERE.md.
+
+One read-only SHA-only cost probe:
+[Actions #36357886696](https://github.com/Artemedi/akuzlogparser/actions/runs/36357886696)
+on the frozen same-SHA 23/24/25 Sep snapshots:
+171,378,567 B 0.38700 wall / 0.37500 CPU s;
+140,361,291 B 0.31489 / 0.31250 s;
+644,034,993 B 1.46551 / 1.43750 s.
+Total 955,774,851 B one full sequential read each:
+2.16740 wall, 2.12500 CPU seconds. One observation,
+not warm-app benchmark, not cold I/O benchmark; full
+verification adds one O(file bytes) source pass per
+selected cached origin. No payload/digest uploaded.
+
+OPEN: concurrent rewrite after hash (TOCTOU), original
+active log versus historically truncated snapshot,
+default fast-mode stat-spoof vulnerability, chosen
+integrated Tee/B-lite app-cache failure matrix,
+SSH origin authenticity and portable release acceptance.
+Release unchanged.
