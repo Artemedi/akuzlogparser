@@ -47,9 +47,10 @@ SSH snapshot is separate. Private A/B JSON stays ignored.
 
 **Completed on exact `d0132fd`:** Windows full 135/135 suite, clean
 worktree exact-SHA real SSH Python/frozen inventory/report/SQLite/
-analytics parity and measured full-file hash stage. See the final
-real-stage results below. **Still OPEN:** 3+ paired A/B on real logs,
-same-root multiprocess inventory safety, path race, abandoned spool/
+analytics parity and measured full-file hash stage. The later
+SIX-trial real A/B is now COMPLETE and reported below. **Still OPEN:**
+generator-fed SHA experiment, same-root multiprocess inventory safety,
+path race, abandoned spool/
 intent handling, and actual power-loss durability. GitHub Release
 remains unchanged.
 
@@ -86,3 +87,18 @@ fixed-clock/token regression tests reproduced pre-fix `FileExistsError`
 and passed with the fix. Previously abandoned intent artifacts remain
 untouched. This is NOT an atomic multi-process reservation protocol;
 missing lock/transaction and TOCTOU risks remain OPEN.
+
+### Six-trial real A/B supersedes one-pair timing conjectures
+
+Control `75d8226` vs candidate `d0132fd`, three separately isolated
+fresh/warm local builds per version on exactly one SHA-verified real
+2026-09-23/24/25 SSH snapshot. Fixed AB/BA/AB order; all 5 normalized
+signature fields equal across all 6; 657,738 events; zero unreadable
+CPU/memory samples. Median control wall/CPU 214.026/203.500 s;
+candidate 226.400/207.969 s: observed +12.374 s wall (+5.782%)
+and +4.469 s CPU (+2.196%). Candidate's standalone full-file
+SHA stage median 20.955 s for 2.275 GB / 1,394 output files.
+This is an observed bounded correctness/performance tradeoff, not
+new data about physical power-loss or multiprocess inventory safety.
+No Release update; user category-isolation workstream untouched.
+See PERFORMANCE_NOTES.md Phase 9.0z-05 for all six runs and scopes.

@@ -18,6 +18,10 @@ consumed by B. Reopened index contained `initial` + `B`, NOT `A`.
 Driver output: `MULTIWRITER_LOST_UPDATE_REPRODUCED`;
 `A_write_failed=True`, `persisted_A=False`, `persisted_B=True`,
 `initial_preserved=True`. Test inputs and workspace were disposable.
+The SAME public script independently reproduced this exact synthetic
+result on DBA-008D / Windows NTFS, 2026-09-27, with its own temporary
+workspace, after the unrelated real SHA A/B completed. This is a
+confirmed cross-platform current defect, NOT a corrected behavior.
 
 `akuz_store.save_store` writes one fixed temp pathname; there is
 no inter-process lock around `load_store`, mutations and `save_store`.
