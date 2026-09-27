@@ -5,6 +5,7 @@ SQLite/JS analytics; no SSH, user .log, credentials or persistent sidecars.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -12,9 +13,13 @@ import sys
 from pathlib import Path
 from shutil import copyfile
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 import unittest
 
 from akuz_store import load_store, sha256
+from akuz_fetch import FetchError
+from akuz_local import load_local_config
+from akuz_store import clear_cache
 from scripts.bench_phase9_baseline import create_sources, inventory_manifest
 from scripts.phase9_semantic import semantic_exports, semantic_sql
 from tests.test_phase9_spool import build
@@ -201,6 +206,104 @@ print('RECOVERY_JSON=' + json.dumps(dict(
             self.assertEqual(value["lingering_spools"], 0)
             self.assertEqual(signatures(root), expected)
             self.assertTrue(build(root, sources, True)[0]["reused"])
+
+    def test_strict_local_origin_sha_detects_same_stat_rewrite(self):
+        """Full SHA detects an in-place change invisible to the fast stat ID."""
+        with TemporaryDirectory(prefix="akuz_phase94_stat_spoof_") as td:
+            home = Path(td)
+            sources = home / "sources"
+            create_sources(sources, 5, 96)
+            root = home / "spool"
+            first, _ = build(root, sources, True)
+            previous = signatures(root)
+            original_ids = [x["id"] for x in first["reports"]]
+            combined_id = first["combined"]["id"]
+            file = sources / "20260924_A.log"
+            before = file.stat()
+            old = file.read_bytes()
+            replacement = old.replace(b"synthetic event",
+                                      b"synthetix event", 1)
+            self.assertEqual(len(replacement), len(old))
+            file.write_bytes(replacement)
+            os.utime(file, ns=(before.st_atime_ns, before.st_mtime_ns))
+            after = file.stat()
+            self.assertEqual(
+                (after.st_dev, after.st_ino, after.st_size,
+                 after.st_mtime_ns),
+                (before.st_dev, before.st_ino, before.st_size,
+                 before.st_mtime_ns))
+            self.assertNotEqual(sha256(file), hashlib.sha256(old).hexdigest())
+            with patch.dict(os.environ, {"AKUZ_VERIFY_LOCAL_SOURCE_SHA": "1"}):
+                with self.assertRaisesRegex(
+                        FetchError, "Содержимое локального журнала отличается"):
+                    build(root, sources, True)
+            self.assertEqual(signatures(root), previous)
+            self.assertEqual(
+                [x["id"] for x in first["reports"]], original_ids)
+            self.assertIn(combined_id, load_store(root)["reports"])
+            self.assertTrue(no_ephemeral_spools(root))
+            self.assertEqual(file.read_bytes(), replacement)
+
+    def test_strict_local_sha_clean_warm_reuses_without_new_report(self):
+        with TemporaryDirectory(prefix="akuz_phase94_strict_warm_") as td:
+            home = Path(td)
+            sources = home / "sources"
+            create_sources(sources, 5, 96)
+            root = home / "spool"
+            first, _ = build(root, sources, True)
+            baseline = signatures(root)
+            from akuz_local import verify_local_source_sha
+            with patch.dict(os.environ, {"AKUZ_VERIFY_LOCAL_SOURCE_SHA": "on"}):
+                with patch("akuz_app.verify_local_source_sha",
+                           wraps=verify_local_source_sha) as checked:
+                    result, _ = build(root, sources, True)
+                self.assertEqual(checked.call_count, 3)
+            self.assertTrue(result["reused"])
+            self.assertEqual([row["id"] for row in result["reports"]],
+                             [row["id"] for row in first["reports"]])
+            self.assertEqual(result["combined"]["id"],
+                             first["combined"]["id"])
+            self.assertEqual(signatures(root), baseline)
+            self.assertTrue(no_ephemeral_spools(root))
+
+    def test_strict_local_sha_uses_report_proof_after_downloads_clear(self):
+        with TemporaryDirectory(prefix="akuz_phase94_strict_no_download_") as td:
+            home = Path(td)
+            sources = home / "sources"
+            create_sources(sources, 5, 96)
+            root = home / "spool"
+            first, _ = build(root, sources, True)
+            previous_ids = {x["id"] for x in first["reports"]}
+            cfg = load_local_config(str(sources), root)
+            cleared = clear_cache(root, cfg, load_store(root), False)
+            self.assertEqual(cleared["downloads_removed"], 3)
+            self.assertEqual(len(load_store(root)["reports"]), 4)
+            source = sources / "20260924_A.log"
+            stat = source.stat()
+            old = source.read_bytes()
+            source.write_bytes(old.replace(b"synthetic event",
+                                          b"synthetix event", 1))
+            os.utime(source, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            with patch.dict(os.environ, {"AKUZ_VERIFY_LOCAL_SOURCE_SHA": "true"}):
+                with self.assertRaisesRegex(
+                        FetchError, "Содержимое локального журнала отличается"):
+                    build(root, sources, True)
+            self.assertEqual(load_store(root)["downloads"], {})
+            self.assertTrue(previous_ids.issubset(set(load_store(root)["reports"])))
+            self.assertTrue(no_ephemeral_spools(root))
+
+    def test_strict_local_sha_invalid_mode_fails_closed(self):
+        with TemporaryDirectory(prefix="akuz_phase94_strict_env_") as td:
+            home = Path(td)
+            sources = home / "sources"
+            create_sources(sources, 5, 96)
+            root = home / "spool"
+            with patch.dict(os.environ, {"AKUZ_VERIFY_LOCAL_SOURCE_SHA": "typo"}):
+                with self.assertRaisesRegex(
+                        FetchError, "Неверное значение AKUZ_VERIFY_LOCAL_SOURCE_SHA"):
+                    build(root, sources, True)
+            self.assertFalse(list((root / "reports").glob("v4_*")))
+            self.assertTrue(no_ephemeral_spools(root))
 
     def test_same_size_changed_contents_with_new_mtime_invalidates_report(self):
         with TemporaryDirectory(prefix="akuz_phase94_same_size_") as td:
