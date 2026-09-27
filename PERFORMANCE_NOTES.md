@@ -2753,9 +2753,9 @@ Windows DBA-008D exact 968b498:
 [Actions #36357691962](https://github.com/Artemedi/akuzlogparser/actions/runs/36357691962)
 198 Python tests PASS, 2 OS skips, 101.562 s,
 Node browser controls + git diff --check PASS. The four
-new tests cover same size+mtime+inode rewritten content,
-valid strict warm reuse, preserved reports after clearing
-downloads and malformed flag fail-closed.
+initial new tests cover same size+mtime+inode rewritten
+content, valid strict warm reuse, preserved reports after
+clearing downloads and malformed flag fail-closed.
 Implementation SHA 968b498 includes akuz_local.py,
 akuz_app.py and the synthetic tests. See
 PHASE94_NORMAL_APP_SOURCE_IDENTITY.md and README_START_HERE.md.
@@ -2778,3 +2778,13 @@ default fast-mode stat-spoof vulnerability, chosen
 integrated Tee/B-lite app-cache failure matrix,
 SSH origin authenticity and portable release acceptance.
 Release unchanged.
+
+Additional default-off guard on exact `d331853`:
+[DBA-008D Actions #36358007205](https://github.com/Artemedi/akuzlogparser/actions/runs/36358007205)
+SUCCESS, 199 Python tests (2 skips, 103.067 s),
+Node controls and diff-check PASS. New test asserts
+`AKUZ_VERIFY_LOCAL_SOURCE_SHA=0` never invokes
+strict original-source hash on warm reuse, while
+report IDs, SQL/JS semantics and spool cleanup remain
+identical. The default mode is NOT upgraded to strict
+verification by this work.
