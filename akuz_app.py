@@ -19,7 +19,7 @@ import webbrowser
 
 from akuz_fetch import FetchError, fetch_selected, list_remote, load_config
 from akuz_windows import fetch_windows, list_windows, load_windows_config
-from akuz_local import fetch_local, list_local, load_local_config
+from akuz_local import fetch_local, list_local, load_local_config, verify_local_source_sha
 from akuz_html_explorer import generate
 from akuz_log_parser import event_stream
 from akuz_publication import (intent_path, recover_report, retire_indexed_intent,
@@ -351,6 +351,14 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             except ValueError as exc:
                 raise FetchError('Дата первой записи должна быть YYYY-MM-DD') from exc
         dates[selected['id']] = value
+    # Full SHA verification of original local .log is deliberately opt-in:
+    # hashing each warm source can cost gigabytes of extra disk reads.
+    local_sha_flag = os.environ.get('AKUZ_VERIFY_LOCAL_SOURCE_SHA', '0').strip().lower()
+    if source == 'local' and local_sha_flag not in (
+            '0', 'false', 'no', 'off', '', '1', 'true', 'yes', 'on'):
+        raise FetchError('Неверное значение AKUZ_VERIFY_LOCAL_SOURCE_SHA')
+    verify_local_origin = (source == 'local' and
+                           local_sha_flag in ('1', 'true', 'yes', 'on'))
     reports = []
     files = []
     spools = {}
@@ -389,6 +397,22 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         # A remote file identity + operator-chosen date gives idempotent report reuse.
         remote_key = key_for('single-remote', cfg.host, cfg.port, cfg.username, fid, chosen)
         prior = cached_report(store, remote_key, root)
+        if verify_local_origin:
+            # Bind the ORIGINAL path to the SHA of its own indexed snapshot.
+            # A previously published report can outlive a cleared download.
+            expected_source_sha = next((
+                entry.get('sha256') for entry in prior.get('sources', [])
+                if entry.get('host') == cfg.host
+                and entry.get('remote_path') == remote['path']
+            ), None) if prior else None
+            if expected_source_sha is None:
+                indexed = store['downloads'].get(fid)
+                if (indexed and indexed.get('host') == cfg.host
+                        and indexed.get('remote') == remote['path']):
+                    expected_source_sha = indexed.get('sha256')
+            if expected_source_sha is not None:
+                state.set_stage('Проверяю полный SHA исходного локального журнала…')
+                verify_local_source_sha(remote, expected_source_sha)
         if prior:
             reports.append(dict(prior, url='/reports/'+prior['id']+'/index.html', reused=True))
             singles_reused += 1
