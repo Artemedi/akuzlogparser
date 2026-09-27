@@ -2325,3 +2325,28 @@ Next gates: full Linux/Windows suite, stable synthetic/real 3+ A/B
 with process-tree WS/Private, root-level inventory/cache/fault matrix,
 and independent reviewer of eventual application integration. Tee
 remains OFF for default execution; Phase 9.4 choice OPEN.
+
+Phase 9.2 bounded Tee exact-30a955b cross-platform and synthetic A/B:
+On Windows DBA-008D clean detached exact SHA
+`30a955b049b1bbfc057cde95bc450aca492974f2`, full
+`python -B -m unittest discover -s tests -q`: 167 tests,
+OK (2 OS privilege skips), 75.419 s, git diff --check PASS.
+On Bazzite exact SHA full 167 tests OK (6 OS skips), 7.124 s.
+The private, isolated `diagnostics/private_phase92_synth_ab.py` driver
+creates ONE synthetic fixed set of three sources, 3000/3000/3001
+events, mixed BOM, CRLF, invalid UTF-8, chunk_size=1000, and
+compares 3 fresh control vs 3 fresh tee builds in AB/BA/AB order,
+one independent process/workspace per build. All six report file
+manifests BYTE-EQUAL and source SHA untouched. Each mode no app
+inventory/cache; raw payload not retained by metrics; workspace
+cleaned. Control wall 0.7083/0.7271/0.7281 s, CPU
+0.6993/0.7178/0.7175 s, Linux process maxRSS
+38280/38312/38424 KiB. Tee wall 0.5556/0.5743/0.5568 s,
+CPU 0.5513/0.5716/0.5590 s, maxRSS 41412/41424/41652 KiB.
+Medians control wall/CPU/RSS 0.7271/0.7175 s/38312 KiB,
+tee 0.5568/0.5590 s/41424 KiB. Observed smaller synthetic
+wall and CPU but HIGHER RSS by ~3 MiB. Inference to the 956MB
+real dataset is NOT licensed; separate Windows process-tree WS/
+Private 3+ same-SHA real A/B and full cache/recovery gates OPEN.
+The six-trial numeric JSON stays private/ignored. Default application
+flow and GitHub Release unchanged.
