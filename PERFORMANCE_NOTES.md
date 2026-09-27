@@ -2538,3 +2538,22 @@ DBA-008D Windows 178 tests OK (2 platform skips, 80.485 s),
 `git diff --check` PASS both. Linux/Windows nine-run combined-only
 source/report byte-parity PASS per host; zero unreadable Windows
 memory readings. Experimental benchmark only; default app untouched.
+
+
+## Phase 9.4 disposable local-real benchmark harness (2026-09-27)
+
+On clean main parent 78639cb, prototype-only script extended with
+Windows `--real-sources LOCAL_DOWNLOAD_DIR [--smoke]` to hardlink
+the exact three local 23/24/25 Sep .log snapshots into its own
+TemporaryDirectory, validate original/link SHA before/after each
+trial, remove each trial report before creating the next, and
+retain ONLY numeric, date/byte/SHA and report-manifest digests
+under ignored diagnostics. Never copy logs to GitHub or touch
+normal app/cache/report/SSH configuration. Synthetic smoke
+control/B-lite/missing-sidecar PASS after correcting the initial
+synthetic-fixture naming assumption (fixtures use _A/_B/_C.log):
+0.39326/0.40722/0.44551 s wall; ONE per mode, NOT inferential A/B.
+Linux full test discovery 181 OK (6 skips; 7.454s),
+git diff --check PASS. Windows real smoke/full tests OPEN; source
+25 Sep size differs from old baseline, so old real timing is not
+a same-input comparator. No architecture choice or Release change.

@@ -99,3 +99,39 @@ Windows DBA-008D CLEAN detached exact `0722b48` worktree: full
 2 platform SKIP**, 80.485 s, diff-check PASS.
 These suites are on the tracked benchmark experiment; no standalone
 Python/frozen real-load or new Release gate was implied.
+
+
+## Phase 9.4 next gate: disposable local-real combined-only benchmark (2026-09-27)
+
+An OFF-by-default CLI mode was added to
+`scripts/bench_phase94_combined_only.py`:
+`--real-sources LOCAL_DOWNLOAD_DIR [--smoke]`. It is limited to
+Windows and the three uniquely named 2026-09-23/24/25 AKUZ
+`*_server.log` local snapshots. It never fetches SSH, reads credentials,
+writes the original .log, modifies normal application inventory/cache,
+or enables persistent B-lite. Inputs are NTFS hardlinked under the
+benchmark's own disposable root (same-volume required, no copy fallback).
+The path and event payload are excluded from private results; date,
+size and SHA are retained locally. An original-to-link same-file and SHA
+gate runs before and after EACH trial. If sources change, the run fails.
+
+Three independent child-process combined-only measurements PER mode
+are required by the full run. `--smoke` performs only ONE per mode;
+it must NOT be presented as a replicated A/B gate. Per-trial report
+folders are deleted after normalized deterministic manifest and
+unchanged-single checks; this bounds scratch disk usage for real logs.
+Only the benchmark-owned temporary parent is removed; user downloads,
+reports, caches and ConnectConf.cfg are never cleanup targets.
+
+The manifest explicitly normalizes the known volatile
+`provenance.generated` timestamp and disposable catalog source name;
+it proves byte identity of all other reported deterministic files,
+NOT literal whole-directory byte identity. App inventory/SQLite/exports,
+report-intent integration, authentic host/path schema and persistent
+clinical-data privacy authorization remain OUT OF SCOPE.
+
+Linux initial 3-mode synthetic smoke: PASS; 181 unit tests OK,
+6 OS skips; diff-check PASS. The new real-source hardlink/duplicate/
+missing-date unit tests are included. Windows real smoke / repeated
+real runs and Windows full regression are PENDING at this checkpoint.
+The earlier 9-trial synthetic data above are not new real results.
