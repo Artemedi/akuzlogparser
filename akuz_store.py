@@ -7,6 +7,22 @@ import re
 from pathlib import Path
 import shutil
 
+from akuz_store_lock import InventoryConflictError, inventory_transaction
+
+
+class InventoryStore(dict):
+    """Inventory mapping carrying the exact on-disk revision it was loaded from."""
+    def __init__(self, *args, revision=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._inventory_revision = revision
+
+
+def _disk_revision(path: Path):
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return None
+
 
 def date_from_log_name(name):
     """AKUZ naming contract: YYYYMMDD_*.log contains the first event's date."""
@@ -28,11 +44,13 @@ def source_date(info):
 def load_store(root: Path):
     path = root/'cache'/'inventory.json'
     if not path.exists():
-        return {'version':4, 'downloads':{}, 'reports':{}}
-    data = json.loads(path.read_text(encoding='utf-8'))
+        return InventoryStore({'version':4, 'downloads':{}, 'reports':{}},
+                              revision=None)
+    raw = path.read_bytes()
+    data = json.loads(raw.decode('utf-8'))
     if data.get('version') != 4:
         raise ValueError('Неизвестная версия cache/inventory.json')
-    return data
+    return InventoryStore(data, revision=hashlib.sha256(raw).hexdigest())
 
 
 def save_store(root: Path, data):
@@ -40,17 +58,26 @@ def save_store(root: Path, data):
     folder.mkdir(parents=True, exist_ok=True)
     path = folder/'inventory.json'
     tmp = folder/'inventory.json.tmp'
-    try:
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
-        tmp.replace(path)
-    except Exception:
-        # A failed write/replace must not leave a stale partial inventory.
-        # Preserve the original persistence error if cleanup also fails.
+    with inventory_transaction(root):
+        expected = getattr(data, '_inventory_revision', None)
+        current = _disk_revision(path)
+        if hasattr(data, '_inventory_revision') and expected != current:
+            raise InventoryConflictError(
+                'Индекс изменён другой копией AKUZ Log Explorer; повторите операцию')
         try:
-            tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                           encoding='utf-8')
+            tmp.replace(path)
+            if hasattr(data, '_inventory_revision'):
+                data._inventory_revision = _disk_revision(path)
+        except Exception:
+            # A failed write/replace must not leave a stale partial inventory.
+            # Preserve the original persistence error if cleanup also fails.
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
 
 
 def sha256(path: Path):

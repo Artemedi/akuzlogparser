@@ -27,6 +27,7 @@ from akuz_publication import (intent_path, recover_report, retire_indexed_intent
 from akuz_derived_spool import SpoolWriter, replay, verified_next, verify_exhausted
 from akuz_store import (cached_download, cached_report, clear_cache, key_for,
                          load_store, report_summary, save_store, date_from_log_name, sha256)
+from akuz_store_lock import inventory_transaction
 
 from akuz_runtime import DOCUMENTS, app_root, prepare_runtime
 from akuz_version import __version__
@@ -277,6 +278,15 @@ def _combine_sources(selected, scratch: Path, base: date):
 
 
 def perform_build(root: Path, state: State, selections,
+                  fetch_fn=fetch_selected, gen_fn=generate, refresh_remote=False,
+                  use_derived_spool=None):
+    with inventory_transaction(root):
+        return _perform_build_transaction_body(
+            root, state, selections, fetch_fn, gen_fn, refresh_remote,
+            use_derived_spool)
+
+
+def _perform_build_transaction_body(root: Path, state: State, selections,
                   fetch_fn=fetch_selected, gen_fn=generate, refresh_remote=False,
                   use_derived_spool=None):
     if use_derived_spool is None:
@@ -555,6 +565,11 @@ def perform_latest(root, state, source='linux', local_path=''):
 
 
 def perform_clear(root, state, include_reports):
+    with inventory_transaction(root):
+        return _perform_clear_transaction_body(root, state, include_reports)
+
+
+def _perform_clear_transaction_body(root, state, include_reports):
     from types import SimpleNamespace
     configs = [SimpleNamespace(local_dest=(root/'downloads').resolve())]
     for source in ('linux', 'windows'):

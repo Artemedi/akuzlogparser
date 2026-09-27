@@ -5,6 +5,7 @@ from datetime import date,timedelta
 import hashlib,json,re,sqlite3,threading
 from pathlib import Path
 from akuz_store import load_store, source_date
+from akuz_store_lock import inventory_transaction
 LOCK=threading.RLock()
 VERSION=5
 REPORT_ID=re.compile(r"^v4_[A-Za-z0-9_-]{1,74}$")
@@ -416,7 +417,7 @@ def update_source_date(root,identity,first_date):
                 raise ValueError
         except ValueError as exc:
             raise ValueError("Дата первой записи должна быть YYYY-MM-DD") from exc
-    with LOCK:
+    with LOCK, inventory_transaction(Path(root)):
         store=load_store(Path(root))
         changed=0
         for rid,meta in store["reports"].items():

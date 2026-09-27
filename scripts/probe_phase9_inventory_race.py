@@ -1,15 +1,18 @@
-"""Synthetic same-root two-writer inventory race probe.
+"""Synthetic same-root two-writer inventory acceptance probe.
 
-Reproduces the CURRENT bug, not a multiwriter-safety acceptance test.
-No live app data, external network, SSH configuration or real logs.
+Historically this reproduced a fixed inventory.json.tmp collision and lost
+update. Current expected result: writer B fails fast while A owns the lock,
+then reloads and succeeds after A commits. No live app data or real logs.
 """
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import subprocess
 import sys
 from time import monotonic, sleep
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from akuz_store import load_store, save_store
+from akuz_store_lock import InventoryBusyError
 
 CHILD = r"""
 import sys
@@ -39,35 +42,45 @@ with TemporaryDirectory(prefix='akuz_phase9_multiwriter_') as td:
     old = load_store(root)
     old['downloads']['initial'] = {'marker': 'original'}
     save_store(root, old)
-    child = subprocess.Popen([sys.executable, '-B', '-c', CHILD, str(root)],
-                             cwd=Path(__file__).resolve().parents[1],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             text=True)
+    child = subprocess.Popen(
+        [sys.executable, '-B', '-c', CHILD, str(root)],
+        cwd=Path(__file__).resolve().parents[1],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         deadline=monotonic()+20
         while not (root/'ready').exists() and monotonic()<deadline:
             if child.poll() is not None:
-                raise RuntimeError('Child exited before temporary write')
+                raise RuntimeError('Child exited before controlled boundary')
             sleep(.01)
         if not (root/'ready').exists():
-            raise TimeoutError('Did not reach the controlled race boundary')
-        other=load_store(root)
-        other['downloads']['B'] = {'marker':'B'}
-        save_store(root,other)
-        (root/'resume').write_text('go',encoding='ascii')
-        _,stderr=child.communicate(timeout=20)
-        seen=load_store(root)['downloads']
-        correct=(set(seen)=={'initial','A','B'} and child.returncode==0)
-        if correct:
-            print('MULTIWRITER_RACE_NOT_REPRODUCED',seen.keys())
+            raise TimeoutError('Did not reach controlled race boundary')
+
+        stale = load_store(root)
+        stale['downloads']['B'] = {'marker':'B'}
+        try:
+            save_store(root, stale)
+        except InventoryBusyError:
+            busy = True
         else:
-            assert seen=={'initial':{'marker':'original'},
-                          'B':{'marker':'B'}},seen
-            assert child.returncode!=0 and 'FileNotFoundError' in stderr
-            assert not (root/'cache'/'inventory.json.tmp').exists()
-            print('MULTIWRITER_LOST_UPDATE_REPRODUCED',
-                  'A_write_failed=True', 'persisted_A=False',
-                  'persisted_B=True', 'initial_preserved=True')
+            busy = False
+        if not busy:
+            raise AssertionError('Second writer did not fail fast while lock held')
+
+        (root/'resume').write_text('go', encoding='ascii')
+        out, err = child.communicate(timeout=20)
+        if child.returncode:
+            raise RuntimeError(f'First writer failed: {out} {err}')
+
+        retry = load_store(root)
+        retry['downloads']['B'] = {'marker':'B'}
+        save_store(root, retry)
+        seen = load_store(root)['downloads']
+        assert set(seen) == {'initial','A','B'}, seen
+        assert not (root/'cache'/'inventory.json.tmp').exists()
+        print('MULTIWRITER_LOCK_PASS',
+              'second_writer_busy=True',
+              'persisted_A=True', 'persisted_B=True',
+              'initial_preserved=True')
     finally:
         if child.poll() is None:
             child.kill()

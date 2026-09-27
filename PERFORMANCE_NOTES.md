@@ -2033,3 +2033,39 @@ test also matched the accepted file byte-for-byte. This proves the
 incoming commit contains the preserved local work before clearing the
 old dirty status. Private patch stays ignored until synchronization is
 verified; no user cache/report/log or public Release touched.
+
+## Phase 9.0z-10 — same-root inventory transaction candidate
+
+Starting synchronized main/origin `d47710aa1b8147041e0216328665f26b94cdaf8b`.
+Implemented cross-process crash-released inventory ownership in new
+`akuz_store_lock.py`. Normal app mutations acquire the same-root
+transaction before reading mutable inventory and retain it through
+build/report publication, cache clear, or source-date correction.
+Nested `save_store` calls reuse the lock. Linux backend is
+`fcntl.flock(LOCK_EX|LOCK_NB)`; Windows backend is one-byte
+`msvcrt.locking(LK_NBLCK)`. Busy owners fail fast with explicit
+`InventoryBusyError`.
+
+Added optimistic inventory revision protection: `load_store` records
+SHA-256 of the exact committed `inventory.json` bytes; `save_store`
+under lock compares current revision and raises
+`InventoryConflictError` for stale snapshots, so unique tmp names are
+not relied upon to solve last-writer-wins. Atomic tmp->inventory replace
+and cleanup remain unchanged; revision advances only after successful
+replace.
+
+Synthetic Linux evidence: 28/28 focused multi-process/inventory/crash/
+report tests PASS. Tests cover another process busy, `os._exit(73)`
+lock release, stale-snapshot fail-closed + reload retry, and real
+mutating entrypoints perform_build/perform_clear/update_source_date
+failing fast while another process owns the root. Updated public
+`scripts/probe_phase9_inventory_race.py` now returns
+`MULTIWRITER_LOCK_PASS second_writer_busy=True persisted_A=True
+persisted_B=True initial_preserved=True`.
+
+Full Linux discovery after candidate: 145 tests, 140 PASS, 4 SKIP,
+1 ERROR: unchanged `test_retry_after_partial_cleanup_removed_marker`
+fake Windows WinError behavior on Linux, previously documented before
+this workstream. Windows full suite, Windows process probe, packaged
+frozen build, real content parity and independent review remain gates
+before acceptance. No Release change.

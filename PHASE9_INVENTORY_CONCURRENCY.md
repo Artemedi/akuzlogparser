@@ -1,8 +1,6 @@
 # Phase 9 — Same-root multiprocess inventory isolation gate
 
-Status: **REPRODUCED OPEN / DESIGN ONLY** (2026-09-27). No application
-locking code approved or implemented. Distinct from single-process
-report-ID collision fix `1cea8b1` and physical power-loss durability.
+Status: **IMPLEMENTED CANDIDATE / LINUX SYNTHETIC PASS / WINDOWS GATE OPEN** (2026-09-27). The historical same-root loss is preserved below as evidence. Current candidate adds an OS-backed crash-released lock, whole-operation transactions for app mutations, and optimistic inventory revision conflicts. Distinct from single-process report-ID collision fix `1cea8b1` and physical power-loss durability.
 
 ## Reproduction on Bazzite (synthetic only)
 
@@ -89,3 +87,40 @@ The app's `state.lock` and `akuz_analytics.LOCK` are process-local.
 - Real SSH 23/24/25 exact-SHA report, SQLite, export parity,
   memory/CPU/wall overhead after implementation. No Release without
   owner confirmation.
+
+## Implemented candidate after historical reproduction
+
+- `akuz_store_lock.inventory_transaction(root)` uses one stable
+  app-root-local lock file. Linux uses nonblocking `fcntl.flock`;
+  Windows uses nonblocking one-byte `msvcrt.locking`. The lock file
+  may persist, but the OS lock itself is released when a process exits.
+  A second cooperating process/thread fails fast with a user-visible
+  busy error rather than waiting through a minutes-long build.
+- The lock is process-local reentrant for nested `save_store` calls
+  inside one build/clear/source-date transaction.
+- `perform_build`, `perform_clear` and
+  `akuz_analytics.update_source_date` now hold the transaction from
+  inventory read through all associated mutations/saves. This closes
+  the stale-snapshot window for normal app entrypoints.
+- `load_store` returns an `InventoryStore` carrying SHA-256 of the
+  exact committed inventory bytes. `save_store` rechecks that
+  revision while holding the OS lock; stale writers raise
+  `InventoryConflictError` instead of silently overwriting a newer
+  inventory. After a successful atomic replace the in-memory revision
+  is advanced.
+- Direct/plain dict saves remain compatible for legacy tests/tools but
+  do not gain optimistic revision checking. Old application versions
+  that ignore the OS lock remain outside the guarantee; this is
+  documented, not silently merged.
+- The original fixed `inventory.json.tmp` pathname remains safe among
+  cooperating current writers because only one can enter save at once.
+  Crash cleanup/atomic replace semantics and prior tests are retained.
+
+Linux candidate evidence before Windows authority gate:
+focused inventory/crash/report group 28/28 PASS; public synthetic
+probe now emits `MULTIWRITER_LOCK_PASS` with initial/A/B all
+persisted; child `os._exit(73)` releases the OS lock and next writer
+succeeds; a stale sequential snapshot raises explicit conflict then
+succeeds after reload. Full Linux discovery: 145 total, 140 PASS,
+4 SKIP and the same pre-existing Windows-specific fake-WinError
+cleanup ERROR already present before this candidate. No new failure.
