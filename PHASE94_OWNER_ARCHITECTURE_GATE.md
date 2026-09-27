@@ -96,7 +96,7 @@ reports or provide remote SSH/SMB source attestations.
 [Windows #36357691962](https://github.com/Artemedi/akuzlogparser/actions/runs/36357691962)
 exact 968b498: 198 Python tests PASS (2 skips),
 Node browser controls and diff-check PASS.
-An [isolated read-only SHA pass #36357886696](https://github.com/Artemedi/akuzlogparser/actions/runs/36357886696)
+Separate default-fast-path regression: [Windows #36358007205](https://github.com/Artemedi/akuzlogparser/actions/runs/36358007205), exact d331853, 199 Python PASS (2 skips), browser/diff PASS, proves disabled strict SHA is not called on unchanged warm original.\n\nAn [isolated read-only SHA pass #36357886696](https://github.com/Artemedi/akuzlogparser/actions/runs/36357886696)
 over the 955,774,851-B frozen local inputs took 2.16740
 seconds wall / 2.12500 seconds CPU in a SINGLE run.
 Full source verification adds one complete read per opted-in
