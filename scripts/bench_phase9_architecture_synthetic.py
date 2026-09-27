@@ -102,7 +102,8 @@ def trial(mode: str, sources: Path, home: Path):
     elif mode == 'tee':
         result = tee_generate(files,targets,combined,scratch,
                               queue_size=16,chunk_size=1000)
-        if result['event_count'] != 9001 or len(result['parser_calls']) != 3:
+        if (result['event_count'] != sum(m['events'] for m in result['individual'])
+                or len(result['parser_calls']) != len(files)):
             raise AssertionError('Tee source or event counts changed')
     elif mode == 'b_lite':
         folders={}

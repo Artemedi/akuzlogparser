@@ -2631,3 +2631,18 @@ Bazzite 186 OK, 6 skips, 7.449 s; Windows DBA-008D
 Real nine-trial code SHA remains 4743f9a, not 9ec38a9.
 This experiment is NOT normal app-cache/analytics, sidecar
 retention/privacy acceptance, production switch or Release gate.
+
+## Phase 9.4 real fresh-all harness preparation (2026-09-28)
+
+Experiment-only Windows fresh-all control/Tee/B-lite benchmark;
+same exact-day per-run SHA-guarded hardlinks, per-trial owned
+cleanup, three-single+combined deterministic file manifest parity,
+child-lifetime OS WS and sampled Private. Balanced 3x3 and
+separate 1x3 smoke. Tee count assertion now compares actual
+single report meta events rather than hard-coded 9001.
+Bazzite focused new tests 3/3 PASS; full 189 tests OK
+(6 skips), diff-check PASS. Synthetic quick mode 3/3 parity;
+initial ad hoc direct trial harness forgot to mkdir its owned home,
+then corrected and rerun PASS. Windows exact-SHA regression,
+real smoke and nine-trial gate OPEN. No application/Release change.
+See PHASE94_REAL_FRESH_ALL.md.
