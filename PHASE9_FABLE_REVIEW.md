@@ -82,3 +82,16 @@ was fast-forwarded onto DBA-008D and pushed, complete Windows
 the two open integrity problems remain reproducible. `git diff --check`
 PASS; `main` and `origin/main` matched. Separate uncommitted
 category-isolation source/test were not staged, committed or altered.
+
+## Follow-up 9.0z-01 — accepted Fable issue #3
+
+Indexed-report reuse now persists hashes of the three required
+identity files at report publication and checks them for all ordinary
+cache hits, preserving newer valid replacements. Newly found invalid
+rows are persistently quarantined without deleting their report
+folders, are marked in library output and excluded from analytics.
+Source metadata from pre-manifest historical reports remains
+structurally checked but cannot be retroactively hash-proven.
+The former catalog-review expectedFailure was promoted to a real
+assertion; raw same-size recovery expectedFailure stays OPEN until
+its separate workstream passes SHA-gated real performance tests.

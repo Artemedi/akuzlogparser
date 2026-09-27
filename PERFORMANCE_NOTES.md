@@ -1687,3 +1687,38 @@ not acceptance of corrupt indexed catalog or same-size raw damage.
 Unrelated concurrent uncommitted category isolation files remain
 untouched; release unmodified. The test count reflects this checkout;
 the prior accepted real SSH Python/frozen gate remains at be38fa1.
+
+## Phase 9.0z-01 — indexed-cache integrity and persistent quarantine
+
+Authoritative starting checkpoint `007947209919011e10a178d54a0ba825e3eb8eb9`.
+This workstream addresses independent Fable finding #3. A new report
+stores expected SHA-256 of `index.html`, `data/catalog.js` and
+`provenance.json` and an all-file size manifest in its OWN inventory
+entry. `cached_report` checks all three hashes and known output sizes
+on warm reuse, including remote aliases and combined; legacy inventory
+entries have no trustworthy baseline hashes and receive structural
+required-file checks only, never invented hashes. Search considers
+newest valid matching row, so a quarantined old entry cannot shadow
+an actual replacement. Failed integrity verification writes the
+`invalidated=integrity` flag atomically before regeneration; if this
+save fails, the in-memory flag is rolled back and regeneration stops.
+Damaged original report directory is NOT deleted, moved or altered;
+report library labels it as damaged while analytics and source-date
+changes exclude the quarantined row. Replacement receives its own
+report ID and its ordinary remote alias; subsequent warm reuse should
+return it, not regenerate again.
+New synthetic tests cover catalog hash corruption, missing raw shard,
+quarantine-save failure preserving old inventory, real-generator
+3-source + derived-spool + analytics refresh + repeated warm reuse.
+Former review test `test_indexed_report_reuse_rejects_corrupt_catalog`
+now passes normally; same-size raw corruption on interrupted report
+remains expectedFailure until the second, separate workstream.
+Bazzite focused inventory/recovery/spool/analytics group:
+46 tests, 45 PASS and 1 expectedFailure (2.930 s).
+`git diff --check` PASS. No user real logs, credentials or Release
+access used for synthetic checks. Real SSH Python/frozen and full
+Windows-suite gate MUST be repeated against this exact patch SHA.
+Important bounded limit: new warm cache validates required hashes
+and all file SIZES; same-size raw damage on a previously indexed
+report is not exhaustively detected on each warm visit, to avoid an
+unmeasured full data-shard hash scan on every page interaction.

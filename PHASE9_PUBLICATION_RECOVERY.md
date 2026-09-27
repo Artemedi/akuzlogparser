@@ -4,7 +4,9 @@ Status: **BOUNDED IMPLEMENTATION / SYNTHETIC + FIRST REAL GATE PASS**
 (2026-09-27). New-SHA real SSH Python/frozen parity and diagnostic
 portable smoke passed at be38fa1; independent Fable 5.1 review
 completed with MODIFY/NEEDS-EVIDENCE and documented confirmed limits
-(`PHASE9_FABLE_REVIEW.md`). 3+ new-SHA A/B, accepted review fixes,
+(`PHASE9_FABLE_REVIEW.md`). Indexed-cache catalog integrity repair
+is implemented in Phase 9.0z-01; same-size raw recovery remains OPEN.
+3+ new-SHA A/B, remaining accepted review fixes,
 concurrent-writer and power-loss gates remain OPEN. Phase 9.2/9.3
 architectural approval is separate.
 Evidence: `PERFORMANCE_NOTES.md` P9-0R-01, P9-0U-01, P9-0V-01,

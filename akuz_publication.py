@@ -53,10 +53,18 @@ def write_intent(root: Path, value: dict, provenance: Path) -> Path:
     if marker.exists() or draft.exists():
         raise FileExistsError('Publication intent already exists')
     stage = root / 'reports' / (rid + '.building')
-    record = dict(version=1, value=value, files=_file_sizes(stage),
-                  provenance_sha256=sha256(provenance),
-                  index_sha256=sha256(stage / 'index.html'),
-                  catalog_sha256=sha256(stage / 'data' / 'catalog.js'))
+    sizes = _file_sizes(stage)
+    required_hashes = {
+        name: sha256(stage / name)
+        for name in ('provenance.json', 'index.html', 'data/catalog.js')
+    }
+    # Persist critical expected bytes for ordinary indexed/warm reuse too.
+    # Legacy inventory rows lack this field; do not invent historical hashes.
+    value['integrity'] = dict(files=sizes, required_sha256=required_hashes)
+    record = dict(version=1, value=value, files=sizes,
+                  provenance_sha256=required_hashes['provenance.json'],
+                  index_sha256=required_hashes['index.html'],
+                  catalog_sha256=required_hashes['data/catalog.js'])
     try:
         with draft.open('x', encoding='utf-8') as stream:
             json.dump(record, stream, ensure_ascii=False, indent=2)

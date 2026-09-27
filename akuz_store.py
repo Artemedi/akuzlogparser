@@ -76,15 +76,61 @@ def cached_download(store, fid):
     return None
 
 
+def report_intact(entry: dict, root: Path) -> bool:
+    """Check indexed report identity; old rows cannot gain invented hashes."""
+    rid = entry.get('id', '')
+    if (not isinstance(rid, str) or
+            not re.fullmatch(r'v4_[0-9]{8}_[0-9]{6}_[0-9a-f]{8}', rid)):
+        return False
+    folder = root/'reports'/rid
+    if folder.is_symlink() or not folder.is_dir():
+        return False
+    required = ('index.html', 'data/catalog.js', 'provenance.json')
+    manifest = entry.get('integrity')
+    try:
+        for name in required:
+            file = folder/name
+            if file.is_symlink() or not file.is_file():
+                return False
+            file.resolve().relative_to(folder.resolve())
+            if manifest is not None and sha256(file) != manifest['required_sha256'][name]:
+                return False
+        if manifest is not None:
+            # Stat is cheap on warm reuse. Same-size raw corruption remains
+            # undetectable for indexed reports until raw hashes are verified.
+            for name, size in manifest['files'].items():
+                file = folder/name
+                if file.is_symlink() or not file.is_file() or file.stat().st_size != size:
+                    return False
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return False
+    return True
+
+
 def cached_report(store, key: str, root: Path):
-    result = next((v for v in store['reports'].values() if v['key'] == key or key in v.get('aliases', [])), None)
-    if result and (root/'reports'/result['id']/'index.html').is_file():
-        return result
+    # Old damaged rows must not shadow newer valid replacements.
+    for result in reversed(list(store['reports'].values())):
+        if (result.get('invalidated') or
+                (result.get('key') != key and key not in result.get('aliases', []))):
+            continue
+        if report_intact(result, root):
+            return result
+        result['invalidated'] = 'integrity'
+        try:
+            save_store(root, store)
+        except Exception:
+            result.pop('invalidated', None)
+            raise
     return None
 
 
 def report_summary(data, root: Path):
-    return sorted((dict(v, url='/reports/'+v['id']+'/index.html')
+    # Preserve access to quarantined report bytes for diagnosis, visibly
+    # mark them rather than silently delete or hide an operator's report.
+    return sorted((dict(v,
+                   label=('⚠ Повреждён · ' + str(v.get('label', ''))
+                          if v.get('invalidated') else v.get('label', '')),
+                   url='/reports/'+v['id']+'/index.html')
                    for v in data['reports'].values()
                    if (root/'reports'/v['id']/'index.html').is_file()),
                   key=lambda r:r['created'], reverse=True)

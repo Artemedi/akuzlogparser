@@ -121,7 +121,7 @@ def connect(root):
 def reports(root):
     found=[]
     for rid,meta in load_store(root)["reports"].items():
-        if not REPORT_ID.fullmatch(rid):
+        if meta.get('invalidated') or not REPORT_ID.fullmatch(rid):
             continue
         catalog=root/"reports"/rid/"data"/"catalog.js"
         if catalog.is_file():
@@ -382,7 +382,7 @@ def source_inventory(root):
     """Only source metadata from registered AKUZ reports; no remote access."""
     result={}
     for rid,meta in load_store(Path(root))["reports"].items():
-        if not REPORT_ID.fullmatch(rid):
+        if meta.get('invalidated') or not REPORT_ID.fullmatch(rid):
             continue
         if not (Path(root)/"reports"/rid/"data"/"catalog.js").is_file():
             continue
@@ -420,7 +420,7 @@ def update_source_date(root,identity,first_date):
         store=load_store(Path(root))
         changed=0
         for rid,meta in store["reports"].items():
-            if not REPORT_ID.fullmatch(rid):
+            if meta.get('invalidated') or not REPORT_ID.fullmatch(rid):
                 continue
             if not (Path(root)/"reports"/rid/"data"/"catalog.js").is_file():
                 continue

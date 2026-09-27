@@ -13,7 +13,6 @@ from tests import test_phase9_report_crash as report_crash_fixture
 
 
 class ReviewedOpenLimits(unittest.TestCase):
-    @unittest.expectedFailure
     def test_indexed_report_reuse_rejects_corrupt_catalog(self):
         with TemporaryDirectory(prefix='akuz_review_indexed_') as td:
             root = Path(td)
