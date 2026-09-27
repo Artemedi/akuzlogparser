@@ -9,3 +9,19 @@ Reviewer status on ee699af: **MODIFY** for two small lock-specific errors. This 
 3. Concurrent hostile replacement of the checked cache/lock path remains a **hypothetical, explicitly excluded TOCTOU case**. Static symlink + NTFS junction checks were already included at ee699af; no unsupported guarantee is inferred.
 
 Synthetic post-fix Linux 20 focused tests OK (2 expected platform skips), full Linux 162 OK (6 skips). The prior Fable MODIFY cannot be represented as Fable approving unreviewed 8cb7985; full exact-SHA Windows/runtime checks are separate evidence.
+
+## Final bounded review after the two fixes
+
+An independent read-only Fable 5.1 follow-up examined clean SHA
+`642a083458e8d447c39ed908c8a9e37e24db0a51`, a documentation-only
+descendant of the runtime/test fix `8cb7985`. HTTP 200,
+`finish_reason=stop`; original response is preserved verbatim in
+`PHASE9_FABLE_LOCK_APPROVAL_RAW_REVIEW.md`.
+
+The reviewer returned **APPROVE for the two narrowly identified lock
+fixes**: non-contention OS errors propagate rather than becoming
+`InstanceBusy`, and Windows case aliases share the inventory mutex.
+The reviewer explicitly did not assess physical power-cut durability,
+concurrent adversarial path swaps or old binaries ignoring the locks.
+Do not turn this bounded approval into a verdict on the GitHub Release
+or on the separately scoped Phase 9.2/9.3 architecture.

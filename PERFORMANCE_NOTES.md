@@ -2213,3 +2213,24 @@ zero unreadable memory and CPU samples. Evidence SHA-256:
 All measurements apply to this exact SHA only; this one Python/frozen
 pair confirms parity, not causal performance improvement. User cache,
 original log files and published GitHub Release unchanged.
+
+P9-0Z-19 — final read-only lock-code review and verified integration:
+The accepted integrated chain (6d5b60a, 38679a0, 68305e7,
+c701162, 4f2445c, ee699af, 8cb7985) plus documentation was
+fast-forwarded from verified Git bundle SHA-256
+`9b9518e924d075586b8b98c13e0184ec21cce65c01fbb1753ad7e6f89cd0bfed`
+on DBA-008D to `642a083458e8d447c39ed908c8a9e37e24db0a51`,
+then pushed without force: Windows main == origin/main == 642a083.
+The original `d47710a` was a verified ancestor. A follow-up Fable
+5.1 review on this clean docs-only descendant returned HTTP 200,
+`finish_reason=stop`, bounded APPROVE for corrected OS-error mapping
+and Windows inventory mutex alias normalization (NOT approval of
+power-cut durability or the Release). Original response:
+`PHASE9_FABLE_LOCK_APPROVAL_RAW_REVIEW.md`.
+
+Latest evidence for actual runtime/test commit `8cb7985`:
+Windows full 162 tests OK (2 SKIP), Linux full 162 tests OK (6 SKIP),
+portable smoke PASS, and real 23/24/25 source-SHA-gated Python/frozen
+five-dimension parity PASS with zero unreadable real telemetry.
+No additional parser/report changes were made by docs commits.
+The published GitHub Release remains unchanged.

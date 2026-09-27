@@ -132,3 +132,22 @@ SHA-256 `5a8977e034da46e674ae03d6cb5fc42274f83bf40b5a42cb73bffca5b6411ddf`.
 This closes the formerly pending exact-SHA content gate; it does NOT
 prove physical power-loss durability, adversarial path swap safety or
 compatibility with old apps ignoring advisory file locks.
+
+## Main integration and final narrow review
+
+Checked that former `d47710a` origin/main and locally completed
+inventory candidate `6d5b60a` are ancestors of the tested integration.
+Git bundle verified against source SHA-256
+`9b9518e924d075586b8b98c13e0184ec21cce65c01fbb1753ad7e6f89cd0bfed`.
+DBA-008D performed a fast-forward and pushed `642a083` to main;
+remote SHA readback matched exactly. No forced update of repository
+history. Docs-only follow-up Fable review of `642a083` gave bounded
+APPROVE on the two earlier lock-specific concerns; original and
+triage are in `PHASE9_FABLE_LOCK_APPROVAL_RAW_REVIEW.md` and
+`PHASE9_FABLE_LOCK_FINAL_REVIEW.md`.
+
+This project checkpoint passes the bounded tested Phase 9.0
+application concurrency and output-content gates. Do not label
+physical power-loss / fsync, hostile TOCTOU or old unsupported
+applications as safe. Phase 9.2/9.3 remain separate architectural
+workstreams. The GitHub Release was not published or modified.
