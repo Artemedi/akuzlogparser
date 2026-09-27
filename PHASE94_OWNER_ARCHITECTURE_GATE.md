@@ -13,8 +13,8 @@ Three candidate workflows are not interchangeable:
 | Workflow | What is proved | What remains unproved |
 |---|---|---|
 | Current ephemeral derived spool | Earlier full real app exact-SHA Windows content/performance gates, combined re-derivation reduction and cache correctness at tested code | Not a general fix for all CPU/SSD cost |
-| A: bounded in-flight Tee | Nine-trial per-platform SMALL synthetic fresh-all report-byte parity and speed observations, bounded queue and cancellation prototype | Normal app publication transaction, mixed-cache when single already exists, real-source full-size memory/cancellation and same-SHA real fresh-all A/B |
-| B-lite sidecar | Nine-trial per-platform SMALL synthetic fresh-all and combined-only; three-per-mode real combined-only isolated replay and fallback; source hash/identity and separate corruption fallback tests | Approved sensitive-data retention, real app inventory/SQLite/exports, real host/path lifecycle, eviction, clean restart, interrupted publication and same-SHA real fresh-all comparison |
+| A: bounded in-flight Tee | SMALL synthetic report-byte parity and bounded queue/cancellation prototype; now also real same-source-SHA standalone fresh-all 3/3 normalized report parity with OS child memory readings | Normal app publication transaction, mixed-cache, real-source cancellation/interruption, actual host/path and app-cache replay |
+| B-lite sidecar | SMALL synthetic fresh-all/combined-only; real combined-only and real same-source-SHA standalone fresh-all 3/3 normalized report parity, SHA/identity and corruption fallback synthetic tests | Approved sensitive-data retention, normal app inventory/SQLite/exports, real host/path lifecycle, eviction, restart and interrupted publication |
 
 Standalone real combined-only **4743f9a** on local AKUZ log snapshots
 23/24/25 September, 955,774,851 input bytes, 3 child processes per
@@ -38,6 +38,31 @@ real host/path identity or process restart is in these measurements.
 The local benchmark uses deliberately SYNTHETIC host/path identity
 even when its input event payload is a real AKUZ log snapshot.
 Its published source SHA belongs to private local evidence, not Git.
+
+## Fresh-all result: same frozen real sources (now PASS as an experiment)
+
+Exact benchmark executable SHA `a65007b`, DBA-008D,
+955,774,851 bytes / 23–25 Sep, three independent Windows
+processes per mode. Read-only local JSON audit through
+[GitHub Actions #36356020771](https://github.com/Artemedi/akuzlogparser/actions/runs/36356020771):
+9/9 deterministic three-single+combined normalized parity,
+source SHA equality versus the earlier combined-only trial,
+valid child memory samples and owned cleanup PASS.
+
+| Route | Fresh-all median wall, s | Median CPU, s |
+|---|---:|---:|
+| Ordinary | 222.744 | 222.391 |
+| Bounded Tee | 148.767 | 148.062 |
+| B-lite | 170.760 | 170.562 |
+
+The three-mode comparison establishes bounded measurements of
+**isolated fresh-all** on this workload, not a production choice.
+Full source-specific min/median/max and caveats:
+`PHASE94_REAL_FRESH_ALL.md`.
+Distinct normal-app cache and failure/restart gates are NOT met.
+The previously OPEN real standalone comparison requirement below
+has now been executed; its **process-tree memory, transient peak
+disk, cancellation and application-level components remain OPEN**.
 
 ## Acceptance gates before an architecture change
 
