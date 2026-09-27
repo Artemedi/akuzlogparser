@@ -82,6 +82,29 @@ mtime/inode, SSH host/path lifecycle, interrupted transactional
 publication of an integrated candidate, B-lite sensitive metadata
 retention approval, and full real-source application-level parity.
 
+## Additional local original-source SHA gate (opt-in only)
+
+The default warm report path does not read the original
+local source and cannot guarantee unchanged contents
+under same-size, same-mtime, same-inode in-place edits.
+A separate **disabled-by-default** original SHA check for
+the normal local-source app path now fails closed before
+cache reuse: `AKUZ_VERIFY_LOCAL_SOURCE_SHA=1`. This
+does not alter the identity schema, rewrite historic
+reports or provide remote SSH/SMB source attestations.
+
+[Windows #36357691962](https://github.com/Artemedi/akuzlogparser/actions/runs/36357691962)
+exact 968b498: 198 Python tests PASS (2 skips),
+Node browser controls and diff-check PASS.
+An [isolated read-only SHA pass #36357886696](https://github.com/Artemedi/akuzlogparser/actions/runs/36357886696)
+over the 955,774,851-B frozen local inputs took 2.16740
+seconds wall / 2.12500 seconds CPU in a SINGLE run.
+Full source verification adds one complete read per opted-in
+warm cached source; not a normal-app throughput benchmark.
+Live-file change after verification remains possible;
+do not portray the opt-in as an atomic filesystem snapshot.
+Documentation: `PHASE94_NORMAL_APP_SOURCE_IDENTITY.md`.
+
 ## Acceptance gates before an architecture change
 
 1. Real full-size fresh-all A/Tee/B-lite on the same frozen source
