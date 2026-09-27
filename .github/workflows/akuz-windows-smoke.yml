@@ -1,0 +1,62 @@
+name: AKUZ Windows runner smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  environment:
+    name: Check DBA-008D environment
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out exact repository revision (no persistent Git credentials)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify checkout and operating system
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host "Runner: $env:RUNNER_NAME"
+          Write-Host "Computer: $env:COMPUTERNAME"
+          Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
+          Write-Host "Checked-out revision: $(git rev-parse --short HEAD)"
+          git status --short
+          git --version
+          if (-not (Test-Path 'ROADMAP_PERFORMANCE.md')) {
+            throw 'AKUZ repository checkout is missing ROADMAP_PERFORMANCE.md'
+          }
+          Write-Host 'Repository checkout: PASS'
+
+      - name: Discover installed development tools
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('py', 'python', 'git', 'node')) {
+            $command = Get-Command $name -ErrorAction SilentlyContinue
+            if ($null -eq $command) {
+              Write-Host "$name : not found in runner PATH"
+            } else {
+              Write-Host "$name : $($command.Source)"
+            }
+          }
+          $py = Get-Command py -ErrorAction SilentlyContinue
+          if ($null -ne $py) {
+            py -3 --version
+          } else {
+            $python = Get-Command python -ErrorAction SilentlyContinue
+            if ($null -ne $python) {
+              python --version
+            }
+          }
+          $os = Get-CimInstance Win32_OperatingSystem
+          $cpu = Get-CimInstance Win32_Processor
+          Write-Host "Operating system: $($os.Caption)"
+          Write-Host "Logical processors: $(($cpu | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum)"
+          Write-Host "Physical memory GiB: $([math]::Round($os.TotalVisibleMemorySize / 1MB, 2))"
+          Write-Host 'Environment discovery: PASS'
