@@ -244,6 +244,28 @@ print('RECOVERY_JSON=' + json.dumps(dict(
             self.assertTrue(no_ephemeral_spools(root))
             self.assertEqual(file.read_bytes(), replacement)
 
+    def test_default_local_warm_does_not_hash_original_again(self):
+        """Strict source digest is never silently enabled on the fast path."""
+        with TemporaryDirectory(prefix="akuz_phase94_default_sha_") as td:
+            home = Path(td)
+            sources = home / "sources"
+            create_sources(sources, 5, 96)
+            root = home / "spool"
+            first, _ = build(root, sources, True)
+            before = signatures(root)
+            with patch.dict(os.environ, {"AKUZ_VERIFY_LOCAL_SOURCE_SHA": "0"}):
+                with patch("akuz_app.verify_local_source_sha",
+                           side_effect=AssertionError(
+                               "unexpected original-source SHA")) as checked:
+                    warm, _ = build(root, sources, True)
+                checked.assert_not_called()
+            self.assertTrue(warm["reused"])
+            self.assertEqual([r["id"] for r in warm["reports"]],
+                             [r["id"] for r in first["reports"]])
+            self.assertEqual(warm["combined"]["id"], first["combined"]["id"])
+            self.assertEqual(before, signatures(root))
+            self.assertTrue(no_ephemeral_spools(root))
+
     def test_strict_local_sha_clean_warm_reuses_without_new_report(self):
         with TemporaryDirectory(prefix="akuz_phase94_strict_warm_") as td:
             home = Path(td)
