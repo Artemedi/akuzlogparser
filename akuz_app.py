@@ -30,6 +30,7 @@ from akuz_store import (cached_download, cached_report, clear_cache, key_for,
 from akuz_store_lock import inventory_transaction
 
 from akuz_runtime import DOCUMENTS, app_root, prepare_runtime
+from akuz_instance_lock import InstanceBusy, exclusive_instance
 from akuz_version import __version__
 from akuz_diagnostics import event as perf_event, phase as perf_phase
 
@@ -795,23 +796,34 @@ def main():
         return
     if not 1024 <= args.port <= 65535:
         p.error('port must be 1024..65535')
+    # Hold the same app-root OS lock over startup and ALL server requests,
+    # independent of the requested HTTP port. A crash releases the OS lock.
+    owner = exclusive_instance(ROOT)
     try:
-        prepare_runtime()
-    except OSError as exc:
-        p.error(f'Cannot prepare application files beside the executable: {exc}')
+        owner.__enter__()
+    except InstanceBusy as exc:
+        p.error(str(exc))
     try:
-        server=ThreadingHTTPServer(('127.0.0.1',args.port),make_handler(ROOT,STATE,args.port))
-    except OSError as exc:
-        p.error(f'Cannot start on 127.0.0.1:{args.port}: {exc}')
-    print(f'AKUZ Log Explorer {__version__}: http://127.0.0.1:{args.port}/\nОстановка: Ctrl+C',flush=True)
-    if not args.no_browser:
-        threading.Timer(0.6, lambda:webbrowser.open(f'http://127.0.0.1:{args.port}/')).start()
-    try:
-        server.serve_forever(poll_interval=.25)
-    except KeyboardInterrupt:
-        pass
+        try:
+            prepare_runtime()
+        except OSError as exc:
+            p.error(f'Cannot prepare application files beside the executable: {exc}')
+        try:
+            server=ThreadingHTTPServer(('127.0.0.1',args.port),make_handler(ROOT,STATE,args.port))
+        except OSError as exc:
+            p.error(f'Cannot start on 127.0.0.1:{args.port}: {exc}')
+        print(f'AKUZ Log Explorer {__version__}: http://127.0.0.1:{args.port}/\nОстановка: Ctrl+C',flush=True)
+        if not args.no_browser:
+            threading.Timer(0.6, lambda:webbrowser.open(f'http://127.0.0.1:{args.port}/')).start()
+        try:
+            server.serve_forever(poll_interval=.25)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
+
     finally:
-        server.server_close()
+        owner.__exit__(None, None, None)
 
 if __name__=='__main__':
     main()

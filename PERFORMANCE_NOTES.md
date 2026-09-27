@@ -2069,3 +2069,6 @@ fake Windows WinError behavior on Linux, previously documented before
 this workstream. Windows full suite, Windows process probe, packaged
 frozen build, real content parity and independent review remain gates
 before acceptance. No Release change.
+## Phase 9.0z-08 — application-root server ownership (candidate)
+
+Parallel workstream in Bazzite isolated worktree `phase9-single-instance`, based at `b6902c8` (not mixed with SHA writer candidate `14b45d2` during implementation). Adds stable crash-released OS advisory lock for one supported application server per root across HTTP ports, acquired BEFORE frozen `prepare_runtime` writes any UI assets and retained through `serve_forever`; second instance receives an operator-visible Russian error. Does not change low-level `save_store` or the existing two-process lost-update repro for external unguarded scripts. On Bazzite, 3/3 deterministic tests PASS: second actual HTTP process on another port blocked, kill releases ownership and next server starts, and failed port bind releases ownership. Focused existing 20/20 report/index/recovery tests PASS; git diff --check PASS. Windows/portable gate and combined exact-SHA tests OPEN. Detailed ownership boundary: PHASE9_APP_ROOT_OWNERSHIP.md.
