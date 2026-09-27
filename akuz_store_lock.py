@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import threading
 
+from akuz_path_guard import is_redirected_path
+
 
 class InventoryBusyError(RuntimeError):
     pass
@@ -33,8 +35,8 @@ def _root_lock(root: Path) -> _RootLock:
     # Match the server-root guard: refuse preexisting redirected cache
     # or lock names rather than silently creating ownership elsewhere.
     # A concurrent hostile path swap is a separate, unproven TOCTOU case.
-    if cache.is_symlink() or marker.is_symlink():
-        raise OSError('Refusing symlinked inventory lock path')
+    if is_redirected_path(cache) or is_redirected_path(marker):
+        raise OSError('Refusing redirected inventory lock path')
     path = marker.resolve()
     key = str(path)
     with _REGISTRY_GUARD:

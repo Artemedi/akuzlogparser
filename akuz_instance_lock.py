@@ -8,6 +8,8 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 
+from akuz_path_guard import is_redirected_path
+
 
 class InstanceBusy(RuntimeError):
     """Another supported process already owns this app-root workspace."""
@@ -17,11 +19,11 @@ class InstanceBusy(RuntimeError):
 def exclusive_instance(root: Path):
     cache = Path(root) / 'cache'
     cache.mkdir(parents=True, exist_ok=True)
-    if cache.is_symlink():
-        raise OSError('Refusing symlinked cache directory')
+    if is_redirected_path(cache):
+        raise OSError('Refusing redirected cache directory')
     lock = cache / '.akuz-instance.lock'
-    if lock.is_symlink():
-        raise OSError('Refusing symlinked instance lock')
+    if is_redirected_path(lock):
+        raise OSError('Refusing redirected instance lock')
     with lock.open('a+b') as stream:
         # msvcrt.locking() needs a real first byte in the file.
         stream.seek(0, os.SEEK_END)

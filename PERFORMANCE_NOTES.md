@@ -2098,3 +2098,13 @@ Portability README notes from independent 420ae24 included without
 changing the report or inventory format. Exact final Windows/real
 and peer-reviewed final-SHA gates remain separate, as do physical
 power-cut durability and path TOCTOU.
+
+P9-0Z-14 independent Windows NTFS junction hardening:
+Synthetic Windows `cmd /c mklink /J` in TemporaryDirectory succeeded;
+`Path.is_symlink=False`, reparse attribute True, canonical target
+redirected. Initial symlink-only guard on c701162 therefore did not
+cover NTFS junctions. Added `akuz_path_guard.is_redirected_path`
+for BOTH instance and inventory lock path components and a Windows
+junction regression; static path guards cannot guarantee protection
+against hostile TOCTOU/reparse swaps after checking. Linux focused
+17 cases = 16 PASS, 1 expected Windows-only SKIP, no user files.

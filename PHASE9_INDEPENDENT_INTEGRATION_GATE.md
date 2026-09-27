@@ -44,3 +44,20 @@ injection cases; details in PHASE9_FABLE_INTEGRATION_REVIEW.md.
 Reused the separately reviewed README/README_PORTABLE ownership
 instructions from 420ae24; no changes to report formats or parsing.
 Exact final SHA will be recorded after these patches are committed.
+
+## NTFS junction red-to-green extension
+
+The exact c701162 Windows synthetic probe created an NTFS junction
+without elevated symlink permissions: `Path.is_symlink()` returned
+False, `Path.resolve()` followed the redirected target and
+`lstat().st_file_attributes` reported FILE_ATTRIBUTE_REPARSE_POINT.
+Thus a symlink-only check is NOT sufficient for Windows portable.
+New common helper `akuz_path_guard.is_redirected_path` rejects both
+pre-existing ordinary symlinks and Windows reparse paths; invoked
+by BOTH `inventory_transaction` and `exclusive_instance`.
+The regression creates a disposable Windows junction and verifies
+neither lock file is created in its external destination. Linux
+focused suite after this change: 17 cases, 16 PASS, 1 expected
+Windows-only SKIP. Windows exact-final-SHA gate pending.
+This remains a check-then-open guard; a hostile simultaneous path
+swap and OS-level physical power loss are NOT proven safe.
