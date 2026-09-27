@@ -2072,3 +2072,29 @@ before acceptance. No Release change.
 ## Phase 9.0z-08 — application-root server ownership (candidate)
 
 Parallel workstream in Bazzite isolated worktree `phase9-single-instance`, based at `b6902c8` (not mixed with SHA writer candidate `14b45d2` during implementation). Adds stable crash-released OS advisory lock for one supported application server per root across HTTP ports, acquired BEFORE frozen `prepare_runtime` writes any UI assets and retained through `serve_forever`; second instance receives an operator-visible Russian error. Does not change low-level `save_store` or the existing two-process lost-update repro for external unguarded scripts. On Bazzite, 3/3 deterministic tests PASS: second actual HTTP process on another port blocked, kill releases ownership and next server starts, and failed port bind releases ownership. Focused existing 20/20 report/index/recovery tests PASS; git diff --check PASS. Windows/portable gate and combined exact-SHA tests OPEN. Detailed ownership boundary: PHASE9_APP_ROOT_OWNERSHIP.md.
+
+## Phase 9.0z-13 — independent combined inventory/instance candidate
+
+Reconciled concurrent branches WITHOUT touching main or another
+worktree: inventory transaction + prepublication revision 38679a0,
+then cherry-picked app-root server guard from 2d0bce1. Only the
+historical PERFORMANCE_NOTES append conflicted and both independent
+workstream notes were retained. Local integrated SHA 68305e7:
+Bazzite focused 13/13 PASS; Windows clean detached full
+155/155 PASS (54.630 s), focused 13/13 PASS, git diff --check PASS.
+Independent Fable read-only review on exact 68305e7 via Clean APIs
+HTTP 200, MODIFY with potential symlink inconsistency and claimed
+startup-lock leak; full original and independently checked triage in
+PHASE9_FABLE_INTEGRATION_RAW_REVIEW.md /
+PHASE9_FABLE_INTEGRATION_REVIEW.md. The startup-lock claim is NOT
+supported by code: an outer finally covers p.error after entering.
+
+Follow-up code adds refusal for pre-existing symlinked cache/lock at
+low-level inventory lock, plus 2 Linux symlink regression tests.
+Added an IN-PROCESS `main()` prepare-runtime/bind failure regression:
+lock reacquisition succeeds after each SystemExit; Fable leak claim
+refuted by executable test. Bazzite combined focused 16/16 PASS.
+Portability README notes from independent 420ae24 included without
+changing the report or inventory format. Exact final Windows/real
+and peer-reviewed final-SHA gates remain separate, as do physical
+power-cut durability and path TOCTOU.

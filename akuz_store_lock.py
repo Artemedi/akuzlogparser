@@ -28,7 +28,14 @@ class _RootLock:
 
 
 def _root_lock(root: Path) -> _RootLock:
-    path = (Path(root) / 'cache' / 'inventory.lock').resolve()
+    cache = Path(root) / 'cache'
+    marker = cache / 'inventory.lock'
+    # Match the server-root guard: refuse preexisting redirected cache
+    # or lock names rather than silently creating ownership elsewhere.
+    # A concurrent hostile path swap is a separate, unproven TOCTOU case.
+    if cache.is_symlink() or marker.is_symlink():
+        raise OSError('Refusing symlinked inventory lock path')
+    path = marker.resolve()
     key = str(path)
     with _REGISTRY_GUARD:
         lock = _REGISTRY.get(key)

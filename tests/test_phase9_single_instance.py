@@ -98,5 +98,30 @@ class SingleInstanceTests(unittest.TestCase):
                 self.assertTrue((root/'cache'/'.akuz-instance.lock').exists())
 
 
+    def test_in_process_startup_errors_release_owner(self):
+        from unittest.mock import patch
+        import akuz_app
+        with TemporaryDirectory(prefix='akuz_instance_inproc_') as td:
+            root=Path(td)
+            args=['akuz_app.py','--no-browser','--port','18081']
+            for target in ('prepare_runtime', 'ThreadingHTTPServer'):
+                with self.subTest(stage=target), patch.object(
+                        akuz_app, 'ROOT', root), patch.object(
+                        sys, 'argv', args), patch.object(
+                        akuz_app, 'prepare_runtime', return_value=None), patch.object(
+                        akuz_app, 'ThreadingHTTPServer') as server:
+                    if target == 'prepare_runtime':
+                        with patch.object(akuz_app, 'prepare_runtime',
+                                          side_effect=OSError('injected start error')):
+                            with self.assertRaises(SystemExit):
+                                akuz_app.main()
+                    else:
+                        server.side_effect=OSError('injected bind error')
+                        with self.assertRaises(SystemExit):
+                            akuz_app.main()
+                with exclusive_instance(root):
+                    self.assertTrue((root/'cache'/'.akuz-instance.lock').is_file())
+
+
 if __name__=='__main__':
     unittest.main()
