@@ -93,7 +93,7 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 
 **9.0a evidence:** `scripts/bench_phase9_baseline.py`, `scripts/phase9_memory.py`, `scripts/bench_phase9_errors.py`, `tests/test_phase9_baseline.py`; Windows Python synthetic fresh/warm/combined-miss/single-miss/mixed-cache and branch profiles. Details in `PERFORMANCE_NOTES.md`. This is NOT Phase 9.0 closure: portable EXE, unchanged real-snapshot SHA, full fault/corruption cases and old/new alternating A/B remain open.
 
-## 4. Phase 9.1 — выделить контракт Derived/ProcessedEvent [REAL FRESH/WARM + SYNTHETIC PASS; FULL FAILURE/CACHE GATE OPEN]
+## 4. Phase 9.1 — выделить контракт Derived/ProcessedEvent [BOUNDED CONTRACT GATES PASS; Phase 9.2/9.3 ARCHITECTURE SEPARATE]
 
 1. Провести точный аудит `generate()`, `read_input()` и `_iter_combined_sources()`; записать «инвариант относительно individual/combined» или «контекст отчёта» для каждого поля. Не объявлять `event_id`, `day_offset`, `source_idx`, `pattern_first`, shard index и source line автоматически инвариантными.
 2. Ввести чистый derive-этап `raw/message -> {category, normalized_pattern, duration, error_match, replacement_count}` и отдельный writer-этап, получающий derive + контекст отчёта; это **эскиз контракта**, не обязательные имена API.
@@ -102,7 +102,7 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 5. Изолировать `CAT_EXTRA` только если тестами доказана необходимость и точная прежняя семантика, включая порядок категорий.
 6. Дифференциально сравнить прежний и новый generator, включая настоящий combined и все четыре режима кэша; тестировать инъекции ошибок и атомарную публикацию.
 
-**Gate:** refactor-only, прежние HTML/JS/catalog/analytics byte-identical; одна функция derive в коде, отсутствие изменений бизнес-семантики; отдельный commit/push только после PASS.
+**Gate Phase 9.1 (2026-09-27):** refactor-only, прежние HTML/JS/catalog/analytics byte-identical; `derive_event` excludes report context. Synthetic four-cache-transition and combined-replay-failure tests in `tests/test_phase9_final_contract_gate.py`: Linux 164 tests OK (6 OS skips), Windows exact 1748ae0 164 tests OK (2 OS skips). Real SSH Python/frozen parity belongs to unchanged runtime 8cb/b724 (not newly run at tests-only SHA). See PERFORMANCE_NOTES.md Phase 9.1 contract-completion gate. This does NOT approve persistent sidecar or In-Flight Tee.
 
 ## 5. Phase 9.2 — прототип A, In-Flight Tee [OPEN, НЕ УТВЕРЖДЁН]
 

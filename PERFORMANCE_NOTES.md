@@ -2234,3 +2234,33 @@ portable smoke PASS, and real 23/24/25 source-SHA-gated Python/frozen
 five-dimension parity PASS with zero unreadable real telemetry.
 No additional parser/report changes were made by docs commits.
 The published GitHub Release remains unchanged.
+
+## Phase 9.1 contract-completion gate — 2026-09-27
+
+Starting `main == origin/main == b72400c5b3e7c78de70647ab04906e17460bca4c`
+on both Bazzite and DBA-008D, no unrelated dirty source changes.
+Created isolated Bazzite `phase9-final-contract-gate` worktree;
+new tests-only commit `1748ae09780684708b9efca921cbda817fecd4d8`.
+Added `tests/test_phase9_final_contract_gate.py` exercising fresh
+plus FOUR exact cache transitions: warm/no-op, combined-only miss,
+single-only miss, and mixed single+combined miss. Every transition
+compares ordinary no-spool and derived-spool report inventory/manifests,
+normalized SQLite and full semantic exports. Retains the exact
+per-report reused flags and checks temporary derived spool removal.
+
+Independent failure gate injects `akuz_app.verified_next` error during
+combined replay after all three single reports are published. Expects
+NO partial combined, no leftover `.building` or temporary spool;
+three completed single reports must remain indexed, retry must reuse
+all three singles and rebuild combined, next warm run must reuse ALL.
+The recovered output equals no-spool reference inventory/SQL/exports.
+On Bazzite new tests 2/2 PASS; full 164 tests OK (6 OS skips,
+6.881 s), `git diff --check` PASS. The earlier 11-item focused
+Phase 9.1 derived/spool/recovery/semantic group also passed.
+On exact clean Windows 1748ae0 detached worktree the 164-case full
+suite passed (2 OS/symlink skips, 72.034 s); diff-check PASS.
+Only tests added — NO runtime, generator or report format changes.
+Earlier exact 8cb/b724 runtime's SHA-gated Python/frozen real
+source parity (23/24/25 Sept, 956,307,242 bytes) remains applicable
+to these unchanged runtime bytes; do NOT misattribute it as a
+new real run specifically of the tests-only SHA.
