@@ -81,6 +81,52 @@ def _inventory(cfg: LocalConfig):
     return result
 
 
+
+def verify_local_source_sha(selected: dict, expected_sha: str) -> None:
+    """Opt-in warm-cache check of the ORIGINAL local file, never its snapshot.
+
+    A content hash is required to notice a same-size, same-mtime, same-inode
+    rewrite. Do not use a prefix/suffix sample as proof. Fail closed if source
+    identity changes while being read; this does not lock a live writer out.
+    """
+    if not isinstance(expected_sha, str) or not re.fullmatch(r'[0-9a-f]{64}', expected_sha):
+        raise FetchError('Нет корректной контрольной суммы исходного журнала для проверки')
+    source = Path(selected['path'])
+    if source.is_symlink():
+        raise FetchError('Локальный журнал заменён символической ссылкой')
+    flags = os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    def identity(st):
+        return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns
+    try:
+        fd = os.open(source, flags)
+        with os.fdopen(fd, 'rb') as stream:
+            before = os.fstat(stream.fileno())
+            digest = hashlib.sha256()
+            for block in iter(lambda: stream.read(1024 * 1024), b''):
+                digest.update(block)
+            after = os.fstat(stream.fileno())
+        if source.is_symlink():
+            raise FetchError('Локальный журнал заменён символической ссылкой')
+        visible = source.stat()
+    except FetchError:
+        raise
+    except OSError as exc:
+        raise FetchError('Не удалось перепроверить исходный локальный журнал') from exc
+    if (identity(before) != identity(after)
+            or identity(before) != identity(visible)
+            or before.st_size != selected['size']
+            or before.st_mtime_ns != int(selected['mtime_raw'])
+            or (selected.get('inode') is not None
+                and (before.st_dev, before.st_ino)
+                    != (selected['device'], selected['inode']))):
+        raise FetchError('Локальный журнал изменился во время проверки; обновите список файлов')
+    if digest.hexdigest() != expected_sha:
+        raise FetchError(
+            'Содержимое локального журнала отличается от сохранённой копии '
+            'при прежней файловой идентичности. Готовый отчёт не используется; '
+            'обновите источник с новым временем изменения или именем')
+
+
 def list_local(cfg: LocalConfig, notify=lambda msg: None):
     notify('Читаю выбранные локальные .log (без рекурсивного обхода)…')
     return _inventory(cfg)
