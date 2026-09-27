@@ -2580,3 +2580,14 @@ diff check PASS. One trial per mode is a SMOKE, not replicated
 A/B or owner's production architecture acceptance; setup memory
 was not measured. Independent Fable review not performed this
 session because external request was blocked. Release unchanged.
+
+## Phase 9.4 Fable manifest audit regression (2026-09-27)
+
+Second Fable independent read-only code review corrected the initial
+uncertain manifest/fallback claims (PHASE94_FABLE_REVIEW.md). Added
+3 narrowly scoped tests of file_manifest normalized-generated-only,
+single disposable catalog source and exact raw shard hashing; no
+production code or benchmark methodology change. Bazzite focused
+3/3 PASS; full 184 tests OK (6 OS skips), diff-check PASS. The
+Windows nine-trial real combined-only series started separately
+at unchanged 4743f9a, before this manifest-only regression commit.

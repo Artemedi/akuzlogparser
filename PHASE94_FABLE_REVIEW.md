@@ -56,3 +56,16 @@ a separate methodology change.
 
 This does not test production app cache, retention authorization,
 restart/failure matrix, setup RAM, power-loss or any GitHub Release.
+
+## Bounded manifest audit regression (separate workstream)
+
+The verified, narrowly scoped follow-up adds
+tests/test_phase94_manifest_scope.py, without modifying file_manifest
+or the runtime. Three deterministic tests check: generated timestamp
+alone is normalized but source host identity is not; exactly ONE
+temporary catalog source is normalized but a changed second occurrence
+is not silently hidden; and changed raw_000.js bytes fail parity.
+Bazzite focused 3/3 PASS, full suite 184 OK (6 OS skips), diff-check
+PASS. These tests establish the current manifest's intended scope,
+not a new arbitrary whole-directory-byte claim. Windows still needs
+exact new-SHA full suite once the ongoing older-SHA real run finishes.
