@@ -56,7 +56,11 @@ class FrozenCleanupTests(unittest.TestCase):
                 if len(attempts) == 1:
                     # rmtree may already have removed ownership marker.
                     (home / bench.MARKER).unlink()
-                    raise PermissionError(13, "synthetic exe lock", str(path), 5)
+                    lock_error = PermissionError(13, "synthetic exe lock", str(path), 5)
+                    # On Linux the fourth ctor argument does not expose
+                    # Windows winerror: emulate the real API explicitly.
+                    lock_error.winerror = 5
+                    raise lock_error
                 real_rmtree(path)
 
             with patch.object(bench, "DIAG", diag), \

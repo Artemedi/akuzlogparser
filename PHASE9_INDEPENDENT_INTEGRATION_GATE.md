@@ -61,3 +61,19 @@ focused suite after this change: 17 cases, 16 PASS, 1 expected
 Windows-only SKIP. Windows exact-final-SHA gate pending.
 This remains a check-then-open guard; a hostile simultaneous path
 swap and OS-level physical power loss are NOT proven safe.
+
+## Complete same-SHA 4f2445c cross-platform suite
+
+Exact `4f2445c4389148ce5dd8a0287456688d1134b15d`
+Windows full `python -B -m unittest discover -s tests -q`:
+159 total, 157 PASS, 2 ordinary symlink permission SKIP,
+53.800 seconds. NTFS junction test PASSED. `git diff --check` PASS.
+The Linux full 159-case discovery at 4f had exactly ONE known
+Windows-fake-WinError fixture error (5 platform skips), not a new
+application assertion failure. Ported ONLY its previously isolated
+test fix from `955e9f3`: assign synthetic `.winerror=5` explicitly
+on Linux in `tests/test_phase9_frozen_cleanup.py`. After that:
+Linux full 159 total, 154 PASS, 5 SKIP, 0 FAIL/ERROR (6.052 s).
+No production module changed by this test-only normalization.
+Authoritative final Windows SHA and real Python/frozen gate for the
+test-normalized commit remain separate.

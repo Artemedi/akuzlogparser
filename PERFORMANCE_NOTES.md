@@ -2108,3 +2108,13 @@ for BOTH instance and inventory lock path components and a Windows
 junction regression; static path guards cannot guarantee protection
 against hostile TOCTOU/reparse swaps after checking. Linux focused
 17 cases = 16 PASS, 1 expected Windows-only SKIP, no user files.
+
+P9-0Z-15 independent combined 4f Windows/Linux suite:
+Exact 4f2445c clean DBA-008D full 159 total, 157 PASS / 2 ordinary
+symlink privilege SKIP, 53.800 s; Windows junction case PASS.
+Linux 4f full 159 yielded only previously known fake WinError test
+ERROR / 5 OS SKIPs. Applied ONLY fixture normalization already
+independently present in 955e9f3 (`lock_error.winerror=5`);
+Linux full then 159 total, 154 PASS / 5 SKIP, zero fail/error,
+6.052 s. App runtime and report output unaffected by this test-only
+change. Windows final SHA and SSH parity still pending; no Release.
