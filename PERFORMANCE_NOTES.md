@@ -2293,3 +2293,35 @@ f7bbc64 full suite: 166 tests OK (2 symlink privilege SKIP,
 `akuz_app._publish`, so no claim about real app cache/recovery,
 source rotation, memory, local SSH/frozen real performance or safe
 production publication. See PHASE9_TEE_PROTOTYPE.md.
+
+## Phase 9.2 independent tee memory/scale correction (2026-09-27)
+
+Observed in tracked f7bbc64 synthetic Tee prototype: each event's
+immutable DerivedEvent was appended to `produced`, retaining ALL
+derived records for the lifetime of fan-out. This is unnecessary
+because the bounded queue already transports each detached event
+and consumers discard it after use. It biases peak-RSS analysis and
+violates a bounded-overhead intent. Isolated branch
+`phase9-tee-memory-gate` removes `produced` and returns the actual
+successfully completed `count` as `derived_events`. Existing one-pass
+37-event spy and cancellation tests remain green; no normal app
+path or published cache semantics changed.
+
+Also made `chunk_size` explicit for baseline and tee generators,
+allowing benchmark parity with production 1000-event raw shards
+instead of accidentally creating ~65k shards on the real 657k
+input using the tiny test-only default of 10. The combined worker's
+previous hardcoded 30-second result timeout is now optional
+`combined_timeout_s` (None = no arbitrary upper limit), while a
+separate outer benchmark/process watchdog is still required to stop
+stalls. These are experimental API changes, not production approval.
+
+Added owned TempDirectory regression with 350/350/351 events,
+`chunk_size=1000`, bounded queue=16: derived_events=1051,
+parser source count=3; three single and combined report manifests
+byte-equal to baseline, zero inventory/index writes. Bazzite focused
+3/3 PASS, `git diff --check` PASS. No user logs or cache touched.
+Next gates: full Linux/Windows suite, stable synthetic/real 3+ A/B
+with process-tree WS/Private, root-level inventory/cache/fault matrix,
+and independent reviewer of eventual application integration. Tee
+remains OFF for default execution; Phase 9.4 choice OPEN.

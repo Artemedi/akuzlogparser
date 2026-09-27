@@ -24,7 +24,8 @@ class TeeCancelled(RuntimeError):
 
 def tee_generate(sources: list[Path], individual: list[Path],
                  combined: Path, scratch: Path, *, queue_size: int = 64,
-                 fail_combined_at: int | None = None):
+                 fail_combined_at: int | None = None, chunk_size: int = 10,
+                 combined_timeout_s: float | None = None):
     """Prototype ONLY: input sources already resolved and sorted by date.
 
     All files are synthetic in this harness; production cache/ownership,
@@ -46,7 +47,8 @@ def tee_generate(sources: list[Path], individual: list[Path],
     count = 0
     line_offset = 0
     parser_calls = []
-    produced = []
+    # The experimental fan-out must not retain a third full copy of all
+    # derived records after the bounded queue has consumed them.
 
     def receive():
         seen = 0
@@ -76,7 +78,7 @@ def tee_generate(sources: list[Path], individual: list[Path],
 
     def run_combined():
         try:
-            return generate(scratch, combined, base, 10, 35,
+            return generate(scratch, combined, base, chunk_size, 35,
                             event_source=receive(), input_bytes=byte_count,
                             derived_hook=lambda ev: ev.pop('_phase9_derived'))
         except BaseException:
@@ -108,9 +110,8 @@ def tee_generate(sources: list[Path], individual: list[Path],
                     clone['end_line'] = line_offset + original_end
                     clone['_phase9_derived'] = value
                     send(clone)
-                    produced.append(value)
 
-                meta = generate(source, output, first_date, 10, 35,
+                meta = generate(source, output, first_date, chunk_size, 35,
                                 event_source=read_input(source, first_date,
                                     stats, defer_classify=True),
                                 derived_sink=sink,
@@ -118,7 +119,7 @@ def tee_generate(sources: list[Path], individual: list[Path],
                 line_offset += meta['physical_lines']
                 single_metas.append(meta)
             send(end)
-            combined_meta = future.result(timeout=30)
+            combined_meta = future.result(timeout=combined_timeout_s)
         except BaseException:
             cancel.set()
             try:
@@ -127,20 +128,20 @@ def tee_generate(sources: list[Path], individual: list[Path],
                 pass
             raise
     return dict(individual=single_metas, combined=combined_meta,
-                parser_calls=parser_calls, derived_events=len(produced),
+                parser_calls=parser_calls, derived_events=count,
                 event_count=count, queue_bound=queue_size)
 
 
 def baseline_generate(sources: list[Path], individual: list[Path],
-                      combined: Path, scratch: Path):
+                      combined: Path, scratch: Path, *, chunk_size: int = 10):
     first_dates = [date.fromisoformat(p.name[:4]+'-'+p.name[4:6]+'-'+p.name[6:8])
                    for p in sources]
     for source, output, first_date in zip(sources, individual, first_dates):
-        generate(source, output, first_date, 10, 35)
+        generate(source, output, first_date, chunk_size, 35)
     from akuz_store import sha256
     selections = [dict(local=p,sha=sha256(p),date=d.isoformat(),
                        remote=dict(name=p.name,path=str(p),mtime=i))
                   for i,(p,d) in enumerate(zip(sources,first_dates))]
-    return generate(scratch, combined, first_dates[0], 10, 35,
+    return generate(scratch, combined, first_dates[0], chunk_size, 35,
                     event_source=_iter_combined_sources(selections, first_dates[0]),
                     input_bytes=sum(p.stat().st_size for p in sources))

@@ -64,3 +64,32 @@ class TeePrototypeTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TeeLargeChunkTests(unittest.TestCase):
+    def test_production_sized_shard_without_retaining_derived_records(self):
+        from scripts.probe_phase9_tee import tee_generate, baseline_generate
+        from scripts.bench_phase9_baseline import create_sources, file_manifest
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        with TemporaryDirectory(prefix='akuz_phase92_chunk_') as td:
+            root=Path(td)
+            source_dir=root/'sources'
+            create_sources(source_dir, 350, 192)
+            files=sorted(source_dir.glob('*.log'))
+            scratch=root/'scratch.jsonl'
+            scratch.write_text('',encoding='utf-8')
+            controls=[root/'baseline'/str(i) for i in range(3)]
+            candidates=[root/'tee'/str(i) for i in range(3)]
+            baseline_generate(files,controls,root/'baseline'/'combined',scratch,
+                              chunk_size=1000)
+            result=tee_generate(files,candidates,root/'tee'/'combined',scratch,
+                                queue_size=16,chunk_size=1000)
+            self.assertEqual(result['derived_events'],1051)
+            self.assertEqual(result['event_count'],1051)
+            self.assertEqual(result['parser_calls'],[p.name for p in files])
+            for old,new in zip(controls,candidates):
+                self.assertEqual(file_manifest(old),file_manifest(new))
+            self.assertEqual(file_manifest(root/'baseline'/'combined'),
+                             file_manifest(root/'tee'/'combined'))
+            self.assertFalse(list(root.rglob('inventory.json')))
