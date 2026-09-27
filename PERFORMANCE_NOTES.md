@@ -1676,3 +1676,14 @@ review/test changes; do not record a Linux full-suite PASS.
 Exact focused crash/inventory/spool/new-limit suite on Bazzite remains
 19 total / 17 PASS / 2 expected failures. Windows full suite requires
 separate real Windows run after the docs-only commit.
+
+P9-0Y-04 final Windows gate after review-only commit `3b8900d`:
+full `python -B -m unittest discover -s tests -q` on DBA-008D
+129 tests in 45.800 s: 127 ordinary PASS, 2 EXPECTED FAILURES,
+zero unexpected failures/errors. `git diff --check` PASS.
+The 2 expected failures explicitly represent OPEN integrity gaps,
+not acceptance of corrupt indexed catalog or same-size raw damage.
+`main == origin/main == 3b8900d035e2cc757679f0da6eb04a6c305c8e53`.
+Unrelated concurrent uncommitted category isolation files remain
+untouched; release unmodified. The test count reflects this checkout;
+the prior accepted real SSH Python/frozen gate remains at be38fa1.

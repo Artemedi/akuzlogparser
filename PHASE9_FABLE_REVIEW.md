@@ -73,3 +73,12 @@ with Windows-specific error 5 but Linux does not populate `.winerror`;
 the production cleanup intentionally retries only `.winerror in (5,32)`.
 Do NOT report a Linux full-suite PASS; Windows suite is the appropriate
 full-run gate for this Windows/NTFS-specific code.
+
+Final Windows gate: after exact original review commit `3b8900d`
+was fast-forwarded onto DBA-008D and pushed, complete Windows
+`python -B -m unittest discover -s tests -q` finished with
+129 tests: 127 PASS, 2 **expected failures**, no other failures,
+45.800 s. Full suite is green only in that qualified sense:
+the two open integrity problems remain reproducible. `git diff --check`
+PASS; `main` and `origin/main` matched. Separate uncommitted
+category-isolation source/test were not staged, committed or altered.
