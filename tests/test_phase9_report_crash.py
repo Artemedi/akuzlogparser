@@ -238,5 +238,37 @@ class ReportCrashTests(unittest.TestCase):
         self.assertEqual(load_store(self.root)['reports'], {})
 
 
+    def test_legacy_v1_intent_recovers_unchanged_completed_report(self):
+        self.crash('after_report_rename', 71)
+        before = self.published_dirs()
+        marker = next((self.root/'cache'/'report_intents').glob('*.json'))
+        record = json.loads(marker.read_text(encoding='utf-8'))
+        record['version'] = 1
+        record['value']['integrity'].pop('all_sha256', None)
+        marker.write_text(json.dumps(record), encoding='utf-8')
+        value = akuz_app._publish(self.root, load_store(self.root),
+            'synthetic-key', self.source, None, [], 'synthetic', 'single',
+            gen_fn=self.generator)
+        self.assertTrue(value['reused'])
+        self.assertEqual(before, self.published_dirs())
+
+    def test_raw_hash_read_failure_leaves_no_index_or_intent(self):
+        import akuz_publication
+        original = akuz_publication.sha256
+        def fail_raw(path):
+            if path.name == 'raw_0000.js':
+                raise OSError('injected raw hash read failure')
+            return original(path)
+        with patch('akuz_publication.sha256', side_effect=fail_raw):
+            with self.assertRaisesRegex(OSError, 'raw hash read failure'):
+                akuz_app._publish(self.root, self.store, 'synthetic-key',
+                    self.source, None, [], 'synthetic', 'single',
+                    gen_fn=self.generator)
+        self.assertFalse(self.published_dirs())
+        self.assertFalse(list((self.root/'reports').glob('*.building')))
+        self.assertFalse(list((self.root/'cache'/'report_intents').glob('*')))
+        self.assertEqual(load_store(self.root)['reports'], {})
+
+
 if __name__ == '__main__':
     unittest.main()

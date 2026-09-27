@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 
 from akuz_store import sha256, save_store
+from akuz_diagnostics import phase as perf_phase
 
 _REPORT_ID = re.compile(r"v4_[0-9]{8}_[0-9]{6}_[0-9a-f]{8}\Z")
 
@@ -54,14 +55,22 @@ def write_intent(root: Path, value: dict, provenance: Path) -> Path:
         raise FileExistsError('Publication intent already exists')
     stage = root / 'reports' / (rid + '.building')
     sizes = _file_sizes(stage)
-    required_hashes = {
-        name: sha256(stage / name)
-        for name in ('provenance.json', 'index.html', 'data/catalog.js')
-    }
-    # Persist critical expected bytes for ordinary indexed/warm reuse too.
-    # Legacy inventory rows lack this field; do not invent historical hashes.
-    value['integrity'] = dict(files=sizes, required_sha256=required_hashes)
-    record = dict(version=1, value=value, files=sizes,
+    with perf_phase(root, 'report.integrity_hash',
+                    input_bytes=sum(sizes.values()), files=len(sizes)):
+        required_hashes = {
+            name: sha256(stage / name)
+            for name in ('provenance.json', 'index.html', 'data/catalog.js')
+        }
+        # Recovery needs full content integrity, including same-size raw damage.
+        # Full hashes are stored but NOT re-read on every ordinary warm hit.
+        all_hashes = dict(required_hashes)
+        for name in sizes:
+            if name not in all_hashes:
+                all_hashes[name] = sha256(stage / name)
+    value['integrity'] = dict(files=sizes,
+                              required_sha256=required_hashes,
+                              all_sha256=all_hashes)
+    record = dict(version=2, value=value, files=sizes,
                   provenance_sha256=required_hashes['provenance.json'],
                   index_sha256=required_hashes['index.html'],
                   catalog_sha256=required_hashes['data/catalog.js'])
@@ -82,7 +91,7 @@ def _validated_candidate(root: Path, marker: Path, record: dict,
                          key: str, sources: list, label: str, kind: str):
     rid = marker.name[:-5]
     value = record.get('value')
-    if (not _REPORT_ID.fullmatch(rid) or record.get('version') != 1
+    if (not _REPORT_ID.fullmatch(rid) or record.get('version') not in (1, 2)
             or not isinstance(value, dict) or value.get('id') != rid
             or value.get('key') != key or value.get('sources') != sources
             or value.get('kind') != kind or value.get('label') != label):
@@ -93,8 +102,21 @@ def _validated_candidate(root: Path, marker: Path, record: dict,
         return None
     try:
         final.resolve().relative_to(parent.resolve())
-        if _file_sizes(final) != record.get('files'):
+        sizes = _file_sizes(final)
+        if sizes != record.get('files'):
             return None
+        if record['version'] == 2:
+            integrity = value.get('integrity')
+            if not isinstance(integrity, dict) or integrity.get('files') != sizes:
+                return None
+            hashes = integrity.get('all_sha256')
+            if not isinstance(hashes, dict) or hashes.keys() != sizes.keys():
+                return None
+            for name, expected in hashes.items():
+                if sha256(final / name) != expected:
+                    return None
+        # Version 1 intents from older builds have no historical raw hashes;
+        # keep their preexisting bounded recovery semantics.
         for name, field in (('provenance.json', 'provenance_sha256'),
                             ('index.html', 'index_sha256'),
                             ('data/catalog.js', 'catalog_sha256')):

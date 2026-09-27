@@ -1722,3 +1722,31 @@ Important bounded limit: new warm cache validates required hashes
 and all file SIZES; same-size raw damage on a previously indexed
 report is not exhaustively detected on each warm visit, to avoid an
 unmeasured full data-shard hash scan on every page interaction.
+
+## Phase 9.0z-02 — content-verified interrupted-report recovery
+
+Separate follow-up to indexed-cache fix `75d8226`. Fable finding #4:
+previous intent version 1 checked SHA-256 of three identity files but
+only size/path for raw shards, so same-size raw damage could be adopted.
+Candidate version 2 now checks SHA-256 for EVERY report output file
+BEFORE an incomplete publication is reindexed. Full hashes are
+computed while `.building` is owned by the generating process and
+stored inside `value.integrity.all_sha256` in the local intent and
+inventory, without including raw content itself. A version-2 retry
+verifies exact path/size set and exact digest of every output file;
+mismatch fails closed and never deletes the unindexed original.
+Historical version-1 intents remain recoverable with their old limited
+size/critical-hash semantics; the new guarantee does NOT apply
+retroactively. Ordinary warm cached reads still check only critical
+file hashes and all sizes, not full raw content, to keep warm use
+bounded; physical power loss and parallel writers remain OPEN.
+Synthetic Linux focused group: 48/48 PASS (3.044 s), including
+formerly expectedFailure same-size raw mutation now PASS, legacy
+version-1 unchanged recovery PASS, injected raw-hash read OSError
+produces no inventory/intent/staging, and recovered one-single plus
+two-fresh combined sidecar semantic parity. No production logs touched
+by synthetic probes. `git diff --check` PASS.
+This SHA requires Windows full suite and separate SHA-gated SSH
+Python/frozen semantic + memory gate and an I/O overhead measurement
+before declaring the patch accepted for the real workload. Do not
+compare one noisy fresh wall sample to old values as causal A/B.

@@ -26,9 +26,8 @@ class ReviewedOpenLimits(unittest.TestCase):
             again = _publish(root, load_store(root), 'synthetic-key',
                 source, None, [], 'synthetic', 'single',
                 gen_fn=report_crash_fixture.ReportCrashTests.generator)
-            self.assertFalse(again['reused'], 'OPEN: weak cached_report validation')
+            self.assertFalse(again['reused'], 'Damaged indexed catalog must regenerate')
 
-    @unittest.expectedFailure
     def test_crash_recovery_rejects_same_size_raw_corruption(self):
         fixture = report_crash_fixture.ReportCrashTests()
         fixture.setUp()
@@ -42,7 +41,7 @@ class ReviewedOpenLimits(unittest.TestCase):
                 'synthetic-key', fixture.source, None, [], 'synthetic',
                 'single', gen_fn=fixture.generator)
             self.assertFalse(recovered['reused'],
-                'OPEN: recovery raw shards currently check sizes only')
+                'Same-size raw corruption must not be recovered')
         finally:
             fixture.doCleanups()
 

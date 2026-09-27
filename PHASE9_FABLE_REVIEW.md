@@ -95,3 +95,14 @@ structurally checked but cannot be retroactively hash-proven.
 The former catalog-review expectedFailure was promoted to a real
 assertion; raw same-size recovery expectedFailure stays OPEN until
 its separate workstream passes SHA-gated real performance tests.
+
+## Follow-up 9.0z-02 — accepted Fable issue #4
+
+New version-2 publication intents persist SHA-256 for all output
+files and verify all on crash recovery, including unchanged-size raw
+corruption. The second Fable expectedFailure became a normal passing
+assertion; v1 historical intents retain only their historical bound.
+Full warm raw-shard rescanning is deliberately NOT introduced.
+Acceptance of its extra fresh I/O depends on exact-SHA real SSH
+Python/frozen and measured resource/performance gates; no release or
+power-loss claim follows from synthetic tests alone.

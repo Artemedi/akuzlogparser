@@ -5,7 +5,8 @@ Status: **BOUNDED IMPLEMENTATION / SYNTHETIC + FIRST REAL GATE PASS**
 portable smoke passed at be38fa1; independent Fable 5.1 review
 completed with MODIFY/NEEDS-EVIDENCE and documented confirmed limits
 (`PHASE9_FABLE_REVIEW.md`). Indexed-cache catalog integrity repair
-is implemented in Phase 9.0z-01; same-size raw recovery remains OPEN.
+is implemented in Phase 9.0z-01; same-size raw recovery is implemented
+in the separate Phase 9.0z-02 candidate, pending real/frozen gate.
 3+ new-SHA A/B, remaining accepted review fixes,
 concurrent-writer and power-loss gates remain OPEN. Phase 9.2/9.3
 architectural approval is separate.
@@ -38,10 +39,15 @@ never sweep unknown `reports/v4_*` or user report/cache directories.
 The bounded candidate implementation in `akuz_publication.py` persists a
 narrowly scoped intent OUTSIDE the report output, associated with the exact
 report id and cache key, **before** renaming staging to final. It records
-value/provenance metadata, hashes of provenance/index/catalog, and paths
-and sizes of all generated files; raw shard contents are not rehashed.
-This is an identity and missing/truncated-file guard, not an assertion
-of tamper-proof integrity of every raw shard.
+value/provenance metadata, paths/sizes and SHA-256 of all generated
+files (version-2 intents). Version-1 intents created before Phase
+9.0z-02 have only provenance/index/catalog hashes plus all-file sizes;
+old contents cannot be retroactively proven. On a resumed version-2
+transaction, all files are rehashed before inventory adoption. Ordinary
+indexed-cache reuse checks critical hashes and all-file sizes, but does
+NOT rehash every raw file on each warm lookup. Metadata/local content
+hashes are not a security mechanism against an actor who can rewrite
+both the report and its local intent/inventory.
 Writing an intent must itself have atomic publication and explicit
 failure handling; no raw AKUZ event data, password or API token.
 
