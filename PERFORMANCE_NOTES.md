@@ -2382,3 +2382,31 @@ claim (no repetition/cache or matched preload). Owned workspace
 cleaned and private numeric results retain no raw payload.
 See PHASE9_SIDECAR_PROTOTYPE.md. Normal app/report/inventory,
 published Release and actual SSH logs remain untouched.
+
+## Phase 9.3 late-sidecar-corruption transactional fallback (2026-09-27)
+
+Starting main/origin `9decf9d`, standalone B-lite sidecar experiment
+`2d63b55`. New branch `phase9-sidecar-fallback` created in its OWN
+worktree, not editing the independently dirty sidecar owner branch.
+Problem: verified reader can fail only AFTER a combined generator
+already emitted some report files. Existing synthetic sidecar tests
+proved fail-closed but NOT discard-and-full-restart with completed
+single reports preserved. New separate prototype builds combined in
+an owned temp directory, validates reader exhaustiveness, and
+publishes only complete output via final directory rename. Typed
+`SidecarReplayInvalid` permits exactly one fresh-derive fallback
+following sidecar-specific corruption/missing metadata; disk-full,
+source snapshot mutation and pre-existing output are NOT swallowed
+or retried. No app cache, inventory or user report modified.
+
+Independent synthetic red-to-green tests cover sixth-event injected
+reader failure, forged sixth ordinal even when body digest/size are
+updated, absent manifest, ordinary valid sidecar, disk-full with
+exactly one attempted generator invocation, existing output file
+preservation and changed-source fail-before-output. Byte-exact
+three ready single reports and combined vs plain generator and zero
+owned staging folders after both success and failures. New tests
+5/5 PASS; full Linux suite 178 cases OK (6 platform skips),
+7.077 s, git diff --check PASS. Exact Windows full suite still
+required for source-file encoding, OS rename/cleanup and symlink
+behavior. No published Release or production code path changed.
