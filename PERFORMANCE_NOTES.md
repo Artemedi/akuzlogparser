@@ -2646,3 +2646,33 @@ initial ad hoc direct trial harness forgot to mkdir its owned home,
 then corrected and rerun PASS. Windows exact-SHA regression,
 real smoke and nine-trial gate OPEN. No application/Release change.
 See PHASE94_REAL_FRESH_ALL.md.
+
+## Phase 9.4 standalone real fresh-all nine-trial PASS (2026-09-28)
+
+Benchmark executable exact `a65007bb66196a9c24c6579151b4d557355cb45e`;
+same source date/size/SHA tuples as earlier combined-only input,
+955,774,851 bytes total. On Windows DBA-008D:
+ordinary wall min/median/max 221.925/222.744/222.809 s,
+Tee 148.656/148.767/148.805 s, B-lite
+170.609/170.760/170.936 s. Median process CPU
+222.391/148.062/170.562 s. Nine normalized deterministic
+single+combined report manifests identical, zero unreadable
+child memory samples, at least 20 readings/trial, owned
+workspaces removed. Source SHA checked before and after
+each process; metadata-only GitHub audit checked equivalence
+against prior combined-only source digest tuples without
+printing or uploading those digests. Only local ignored
+Windows JSON holds original SHA and full numeric trial detail:
+`diagnostics/private_phase94_fresh_all_real_win32_v1.json`.
+Audit [run #36356020771](https://github.com/Artemedi/akuzlogparser/actions/runs/36356020771)
+completed SUCCESS.
+
+Separate self-hosted CI [run #36355972972](https://github.com/Artemedi/akuzlogparser/actions/runs/36355972972)
+on GitHub commit `f252ecc`: 189 Python tests PASS
+(2 Windows skips; 87.076 s), Node browser controls PASS,
+diff-check PASS. These CI and audit commits are not
+benchmark executable SHA and do not retroactively alter
+the measured trial. See PHASE94_REAL_FRESH_ALL.md and
+PHASE94_OWNER_ARCHITECTURE_GATE.md. Production app
+cache/SQLite/exports/retention, interrupted publication
+and portable Release remain NOT approved.
