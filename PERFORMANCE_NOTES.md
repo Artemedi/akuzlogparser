@@ -2421,3 +2421,30 @@ imported by the default app route; portable/real production SHA-gate
 belongs to unchanged runtime 8cb/b724, NOT to a newly introduced
 production B-lite feature. B-lite lifecycle/privacy/performance
 approval remains OPEN.
+
+## Phase 9.4 equal-input synthetic fresh-all comparison (2026-09-27)
+
+Starting main/origin `b011589`. New clean
+`phase9-synthetic-comparison` worktree, source-only experiment
+`scripts/bench_phase9_architecture_synthetic.py`, none of the three
+paths imported into normal app/cache code. Nine independent Python
+processes across one synthetic 3000/3000/3001-event source snapshot,
+fixed queue 16 / shard 1000 / top 35, control/Tee/B-lite order
+ABС/CAB/BCA (three each). Every trial checks unmodified source
+SHA, reports manifest of 3 singles and combined BYTE-EQUAL to
+reference. Nine trials PASS; all owned temp workspaces cleaned,
+raw payload not in metrics. Existing API and published Release
+unchanged. Control source SHA resolved before timing; B-lite
+includes its source verification + sidecar write/replay cost.
+
+Measured medians wall/CPU s/maxRSS KiB/sidecar bytes:
+control 0.71672/0.70753/39476/0;
+Tee 0.55375/0.55450/42204/0;
+B-lite 0.64578/0.63668/41700/827976.
+Each mode's report data 8,246,435 bytes; all byte parity PASS.
+These are small highly compressible synthetic logs and Linux
+per-process resource.ru_maxrss, not Windows process-tree/real-log
+memory evidence. Full protocol, all nine numeric runs and owner
+non-selection: PHASE9_ARCHITECTURE_SYNTHETIC_COMPARE.md.
+The A/B runs do NOT authorize a user-visible production architecture
+change or persistent medical normalized-pattern retention.

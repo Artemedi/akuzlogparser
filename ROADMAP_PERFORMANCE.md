@@ -130,7 +130,7 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 
 **Gate:** побайтовая идентичность, корректный mixed-cache и net gain с учётом записи + чтения sidecar, приемлемый размер/пиковая RAM. Если нет — B-lite не включать в production.
 
-## 7. Phase 9.4 — выбор A / B-lite / гибрида; B-full только по отдельному доказательству [OPEN]
+## 7. Phase 9.4 — выбор A / B-lite / гибрида; B-full только по отдельному доказательству [SAME-INPUT SYNTHETIC EVIDENCE PASS; OWNER CHOICE OPEN]
 
 1. Свести прототипы на одной матрице: fresh-all, warm, mixed-cache, missing combined, повторное открытие спустя перезапуск, source changed, crash/rollback; CPU/wall/RSS/cache-disk.
 2. A даёт преимущество для свежего веера, B-lite — повторное использование прежних derive при смешанном кэше. Не объявлять один вариант абсолютным победителем до сравнительных данных.
