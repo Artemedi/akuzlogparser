@@ -5,13 +5,14 @@ One synthetic input snapshot; separate processes and owned temp outputs.
 """
 from __future__ import annotations
 import json
+import os
 from datetime import date
 from pathlib import Path
-import resource
 from statistics import median
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
+from threading import Event, Thread
 from time import perf_counter, process_time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +30,52 @@ ORDER = ('control','tee','b_lite',
          'tee','b_lite','control')
 
 
+def memory_monitor():
+    """Process peak RSS on Linux; OS peak WS plus sampled Private on Windows.
+
+    Sampling a short synthetic trial gives a Private Bytes LOWER BOUND,
+    never a guaranteed peak. No extra package is required on Windows.
+    """
+    if sys.platform != 'win32':
+        import resource
+        def finish_linux():
+            return dict(max_rss_kib=resource.getrusage(
+                resource.RUSAGE_SELF).ru_maxrss,
+                peak_ws_bytes=None, sampled_private_peak_bytes=None,
+                memory_samples=None, unreadable_memory_samples=None)
+        return finish_linux
+
+    from scripts.phase9_memory import sample
+    stop = Event()
+    private = []
+    unreadable = [0]
+    def poll():
+        while not stop.is_set():
+            reading = sample(os.getpid())
+            if reading is None:
+                unreadable[0] += 1
+            else:
+                private.append(reading['private_bytes'])
+            stop.wait(.01)
+    worker = Thread(target=poll, name='phase94-memory-sampler', daemon=True)
+    worker.start()
+    def finish_windows():
+        stop.set()
+        worker.join(timeout=2)
+        reading = sample(os.getpid())
+        if reading is None:
+            unreadable[0] += 1
+        else:
+            private.append(reading['private_bytes'])
+        return dict(max_rss_kib=None,
+            peak_ws_bytes=(reading['peak_working_set_bytes']
+                           if reading is not None else None),
+            sampled_private_peak_bytes=(max(private) if private else None),
+            memory_samples=len(private),
+            unreadable_memory_samples=unreadable[0])
+    return finish_windows
+
+
 def trial(mode: str, sources: Path, home: Path):
     files = sorted(sources.glob('*.log'))
     if len(files) != 3:
@@ -44,6 +91,7 @@ def trial(mode: str, sources: Path, home: Path):
     targets = [home/'reports'/str(i) for i in range(3)]
     combined = home/'reports'/'combined'
     all_input_bytes = sum(p.stat().st_size for p in files)
+    finish_memory = memory_monitor()
     start,cpu = perf_counter(),process_time()
     if mode == 'control':
         for file,out,day in zip(files,targets,days):
@@ -80,11 +128,11 @@ def trial(mode: str, sources: Path, home: Path):
                     if f.is_file())
     disk_sidecar=sum(f.stat().st_size for f in (home/'sidecars').rglob('*')
                      if f.is_file()) if (home/'sidecars').exists() else 0
+    memory = finish_memory()
     return dict(mode=mode,wall_s=round(elapsed,5),
                 cpu_s=round(process_cpu,5),
-                max_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
                 report_bytes=disk_report,sidecar_bytes=disk_sidecar,
-                reports=reports)
+                reports=reports, **memory)
 
 
 def main():
@@ -98,7 +146,8 @@ def main():
         raise SystemExit('Usage: python -B scripts/bench_phase9_architecture_synthetic.py')
     from collections import defaultdict
     (ROOT/'diagnostics').mkdir(exist_ok=True)
-    result_path=ROOT/'diagnostics'/'private_phase94_synthetic_result.json'
+    result_path=ROOT/'diagnostics'/(
+        'private_phase94_synthetic_result_'+sys.platform+'_v2.json')
     if result_path.exists():
         raise FileExistsError('Refusing to overwrite earlier A/B evidence')
     records=[]
@@ -128,17 +177,30 @@ def main():
             records.append(dict(number=number,**record,byte_parity=True))
             print('ARCHITECTURE_SYNTHETIC_PASS',number,mode,
                   record['wall_s'],record['cpu_s'],
-                  record['max_rss_kib'],record['sidecar_bytes'],flush=True)
+                  record['max_rss_kib'] if sys.platform!='win32'
+                  else record['peak_ws_bytes'],
+                  record['sidecar_bytes'],flush=True)
         digest=__import__('hashlib').sha256(json.dumps(reference,
             sort_keys=True).encode('utf8')).hexdigest()
     grouped=defaultdict(list)
     for record in records:
         grouped[record['mode']].append(record)
+    memory_keys = (('peak_ws_bytes','sampled_private_peak_bytes')
+                   if sys.platform == 'win32' else ('max_rss_kib',))
     summary={mode:{key:median(r[key] for r in grouped[mode])
-                  for key in ('wall_s','cpu_s','max_rss_kib',
-                              'report_bytes','sidecar_bytes')}
+                  for key in ('wall_s','cpu_s','report_bytes',
+                              'sidecar_bytes') + memory_keys}
              for mode in ('control','tee','b_lite')}
+    if sys.platform == 'win32':
+        for mode in summary:
+            summary[mode]['total_unreadable_memory_samples'] = sum(
+                r['unreadable_memory_samples'] for r in grouped[mode])
+            summary[mode]['min_memory_samples'] = min(
+                r['memory_samples'] for r in grouped[mode])
     result=dict(status='synthetic_only_not_architecture_approval',
+        platform=sys.platform,
+        memory_definition=('OS peak Working Set; sampled Private Bytes lower bound'
+             if sys.platform=='win32' else 'Linux ru_maxrss KiB'),
         code_sha=subprocess.check_output(['git','rev-parse','HEAD'],
             cwd=ROOT,text=True).strip(),
         order=list(ORDER),sources=3,total_events=9001,
