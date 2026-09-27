@@ -118,10 +118,11 @@ identity by new mtime/name before rebuilding the changed
 source. The option is not an automatic content-addressed
 source-id migration or a new cache schema.
 
-Four synthetic normal-app tests now cover same-size,
+Five synthetic normal-app tests now cover same-size,
 same-mtime, same-device/inode rewritten contents; valid
-warm reuse; saved-report SHA after downloads clear; and
-malformed option fail-closed. Original source and
+strict warm reuse; saved-report SHA after downloads clear;
+malformed option fail-closed; and explicit proof that the
+default warm path does NOT call original-source SHA. Original source and
 analytics remain preserved on rejected reuse.
 Implementation files: `akuz_local.py` and `akuz_app.py`,
 tests: `tests/test_phase94_normal_app_source_identity.py`.
@@ -157,3 +158,16 @@ log tail truncation means an indexed snapshot and its
 live original may intentionally differ; fail-closed
 is expected in strict mode.
 No published portable Release has this source change.
+
+### Default fast-path follow-up
+
+[DBA-008D Actions #36358007205](https://github.com/Artemedi/akuzlogparser/actions/runs/36358007205)
+on exact SHA `d331853403fb8eda736a289c9e5a713568234b6e`
+completed SUCCESS: 199 Python tests (2 Windows skips,
+103.067 s), Node browser controls and diff-check PASS.
+The incremental test asserts no invocation of the strict
+original SHA helper when `AKUZ_VERIFY_LOCAL_SOURCE_SHA=0`,
+and unchanged report identities, SQLite/JS exports and
+ephemeral spool lifecycle on warm reuse. This is
+regression evidence for the default path, not a timing
+measurement of a live server.
