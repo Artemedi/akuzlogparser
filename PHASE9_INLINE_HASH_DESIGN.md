@@ -113,3 +113,7 @@ SHA and re-run a new independent review when API connectivity allows.
 ## Bounded implementation candidate 9.0z-07
 
 Producer-integrated writer and publication manifest validation now have an implementation candidate in Bazzite (see PERFORMANCE_NOTES.md), NOT yet Windows accepted. On failure or custom-generator injection, the ordinary full-read code path remains in service. The earlier two Clean APIs design consultations returned HTTP 502, so no independent design review is claimed; conduct a fresh review of ACTUAL code after a committed snapshot and the Windows gates. No published Release change.
+
+## Exact implementation gate results (Phase 9.0z-07)
+
+The standalone producer-hash candidate `14b45d2` passed Windows 141/141 tests, legacy byte-level report/combined checks, diagnostic portable smoke, real SSH Python/frozen SHA-gated parity and semantic SQLite/export checks. Four real reports generated 2.275 GB of output, and only four provenance files (2,582 total bytes) needed a second read during publication. Python/frozen hash-phase wall: 0.034/0.005 s. Overall Python/frozen fresh wall: 214.921/205.875 s. This is NOT the final paired A/B performance result; the cross-SHA six-run gate remains separate. Actual-code independent Fable review HTTP 502, so the review is OPEN. Full details and memory figures: PERFORMANCE_NOTES.md P9-0Z-07.
