@@ -5,7 +5,10 @@ SQLite/JS analytics; no SSH, user .log, credentials or persistent sidecars.
 """
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from shutil import copyfile
 from tempfile import TemporaryDirectory
@@ -15,6 +18,8 @@ from akuz_store import load_store, sha256
 from scripts.bench_phase9_baseline import create_sources, inventory_manifest
 from scripts.phase9_semantic import semantic_exports, semantic_sql
 from tests.test_phase9_spool import build
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def signatures(root: Path):
@@ -86,6 +91,56 @@ class NormalAppSourceIdentityTests(unittest.TestCase):
             warm, _ = build(root, sources, True)
             self.assertTrue(warm["reused"])
             self.assertEqual(len(load_store(root)["reports"]), 6)
+
+    def test_warm_inventory_and_analytics_survive_real_python_restart(self):
+        with TemporaryDirectory(prefix="akuz_phase94_real_restart_") as td:
+            home = Path(td)
+            sources = home / "sources"
+            create_sources(sources, 5, 96)
+            root = home / "spool"
+            initial, _ = build(root, sources, True)
+            self.assertFalse(initial["reused"])
+            expected = signatures(root)
+            report_ids = [r["id"] for r in initial["reports"]]
+            combined_id = initial["combined"]["id"]
+            worker = """
+import json
+import sys
+from pathlib import Path
+from akuz_store import load_store
+from tests.test_phase9_spool import build
+root, sources = map(Path, sys.argv[1:3])
+result, _ = build(root, sources, True)
+state = load_store(root)
+print('RESTART_JSON=' + json.dumps(dict(
+    reused=result['reused'],
+    singles=[r['id'] for r in result['reports']],
+    singles_reused=[r['reused'] for r in result['reports']],
+    combined_id=result['combined']['id'],
+    combined_reused=result['combined']['reused'],
+    inventory_count=len(state['reports']),
+    analytics_warning=result['analytics_warning'],
+    lingering_spools=len(list((root/'cache').glob('akuz-phase9-derived-*'))),
+), ensure_ascii=False))
+"""
+            child = subprocess.run(
+                [sys.executable, "-B", "-c", worker, str(root), str(sources)],
+                cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+                env=dict(os.environ, PYTHONUTF8="1"), timeout=60)
+            self.assertEqual(child.returncode, 0, child.stderr)
+            marker = next((line for line in child.stdout.splitlines()
+                           if line.startswith("RESTART_JSON=")), None)
+            self.assertIsNotNone(marker, child.stdout)
+            result = json.loads(marker.partition("=")[2])
+            self.assertTrue(result["reused"])
+            self.assertEqual(result["singles"], report_ids)
+            self.assertEqual(result["singles_reused"], [True, True, True])
+            self.assertEqual(result["combined_id"], combined_id)
+            self.assertTrue(result["combined_reused"])
+            self.assertEqual(result["inventory_count"], 4)
+            self.assertEqual(result["analytics_warning"], "")
+            self.assertEqual(result["lingering_spools"], 0)
+            self.assertEqual(signatures(root), expected)
 
     def test_same_size_changed_contents_with_new_mtime_invalidates_report(self):
         with TemporaryDirectory(prefix="akuz_phase94_same_size_") as td:
