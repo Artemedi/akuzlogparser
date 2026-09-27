@@ -1,15 +1,18 @@
 # Phase 9 — Report publication crash recovery: bounded design gate
 
-Status: **BOUNDED IMPLEMENTATION / SYNTHETIC + FIRST REAL GATE PASS**
-(2026-09-27). New-SHA real SSH Python/frozen parity and diagnostic
-portable smoke passed at be38fa1; independent Fable 5.1 review
-completed with MODIFY/NEEDS-EVIDENCE and documented confirmed limits
-(`PHASE9_FABLE_REVIEW.md`). Indexed-cache catalog integrity repair
-is implemented in Phase 9.0z-01; same-size raw recovery is implemented
-in the separate Phase 9.0z-02 candidate, pending real/frozen gate.
-3+ new-SHA A/B, remaining accepted review fixes,
-concurrent-writer and power-loss gates remain OPEN. Phase 9.2/9.3
-architectural approval is separate.
+Status: **BOUNDED IMPLEMENTATION / SYNTHETIC + REAL CONTENT GATES PASS**
+(2026-09-27). Real SHA-gated SSH Python/frozen parity and diagnostic
+portable smokes passed for be38fa1, 75d8226 and d0132fd;
+independent Fable 5.1 reviews completed with MODIFY/NEEDS-EVIDENCE
+and documented remaining limits (`PHASE9_FABLE_REVIEW.md` and
+`PHASE9_FABLE_Z2_REVIEW.md`). Indexed-cache catalog integrity repair
+is implemented in Phase 9.0z-01; same-size raw recovery in the
+separate Phase 9.0z-02 `d0132fd`. Both fixes passed their real gates.
+On d013, full report SHA adds a material extra read (2.275 GB /
+21.023 s on Python). Real 3+ paired A/B and an inline-hash
+alternative remain OPEN. Other outstanding review fixes,
+concurrent-writer and power-loss gates remain OPEN.
+Phase 9.2/9.3 architectural approval is separate.
 Evidence: `PERFORMANCE_NOTES.md` P9-0R-01, P9-0U-01, P9-0V-01,
 P9-0W-01 and P9-0X-01/02; synthetic regressions
 `tests/test_phase9_report_crash.py` and `test_phase9_recovery_spool.py`.
