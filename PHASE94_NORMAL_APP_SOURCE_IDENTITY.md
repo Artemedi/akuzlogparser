@@ -36,6 +36,11 @@ already present. Do not claim them as newly implemented by Phase 9.4.
    no new singles or combined, identical report IDs,
    existing analytics SQL and JS exports unchanged,
    no temporary derived-spool directories remain.
+5. Inject a verified derived-spool replay failure before combined
+   publication, then start a genuinely new Python interpreter:
+   three completed singles retain their IDs and are reused,
+   combined is generated fresh, SQLite/JS outputs match ordinary
+   rederive, no partial building or derived-spool directory survives.
 
 All assertions use a disposable local `TemporaryDirectory`
 and normal `perform_build_current`, not standalone Tee/B-lite.
@@ -76,3 +81,12 @@ measurement.
   test fixtures. The documentation-only commit following them
   was not separately performance-benchmarked. No raw real logs,
   private evidence or runtime architecture were changed.
+
+## Fault+process-restart follow-up
+
+The fifth scenario was added as commit `f8a5cbd` on top of the
+four-case PASS `2c1aa09`. It targets a normal app exception
+(derived replay mismatch) rather than a forced process kill or
+power loss. A separate exact-SHA Windows Actions #36356901468
+is the acceptance gate for this incremental test; never infer
+PASS merely from the test definition.
