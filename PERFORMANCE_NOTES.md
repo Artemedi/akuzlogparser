@@ -1630,3 +1630,49 @@ This is a first new-SHA real content/CPU/memory gate, NOT a 3+ new
 A/B or a real process-kill-on-production-log trial. Whole-report
 power-loss, multiprocess cache concurrency and independent Fable
 review remain OPEN; Bazzite offline and Windows token unavailable.
+
+## Phase 9.0y — independent Claude Fable 5.1 bounded review (2026-09-27)
+
+P9-0Y-01: Bazzite Desktop Commander reconnected and direct ping PASS;
+`CleanApi.env` detected locally and curl Clean APIs smoke returned
+HTTP 200 / `claude-fable-5.1` / OK. Windows `main==origin/main` at
+`6f15b3de7419fe4ede3e6fc28778ec3bdaad43a9`, with unrelated
+`akuz_html_explorer.py` and category-isolation test dirty; preserved.
+Clean Bazzite clone fast-forwarded from `e40902c` to `6f15b3d`.
+No secrets/real logs/SSH config sent to Fable: nine line-numbered
+tracked code/tests/design files (~70,672 prompt chars), no file
+system/network access granted to the reviewing model.
+Python urllib HTTP 403 / code 1010; curl corrected the transport.
+First completed HTTP 200 response used 5,800 completion tokens but
+had empty content and `finish_reason=length`: NOT A REVIEW.
+Second HTTP 200 used 16,000 max output, completion 9,591 tokens,
+returned 12,999-character response, `finish_reason=stop`.
+Original reviewer result: `PHASE9_FABLE_RAW_REVIEW.md`; independent
+triage and all ten dispositions: `PHASE9_FABLE_REVIEW.md`.
+P9-0Y-02: clean Bazzite focused pre-existing suite 17/17 PASS.
+Direct synthetic probes CONFIRMED corrupt indexed `catalog.js` still
+reused, and unindexed recovered same-size changed raw shard reused.
+`tests/test_phase9_review_limits.py` records both as
+`unittest.expectedFailure`, NOT as fixed/accepted behavior.
+Focused suite 19 total: 17 PASS + 2 expected failures (1.376 s).
+Fable findings included already-declared power-loss/concurrency limits,
+intent staging accumulation, potential symlink races, inventory
+conflict policy, and `with_suffix` suggestion rejected as false bug.
+No production parser, generator, inventory or report code changed here;
+be38fa1 real SSH Python/frozen content gate retains exact scope.
+Unrelated Windows category-isolation workstream untouched;
+GitHub Release unchanged. Next implementation must first resolve
+indexed corrupt-cache lifecycle and raw same-size recovery integrity,
+then re-run focused tests plus SHA-gated real/frozen parity.
+P9-0Y-03 cross-platform validation note: unfiltered full
+`python3 -B -m unittest discover -s tests -q` on Bazzite/Python 3.14
+ran 128 tests, 4 skips, 2 expected failures, ONE ERROR in pre-existing
+Windows-only `test_phase9_frozen_cleanup.FrozenCleanupTests.
+test_retry_after_partial_cleanup_removed_marker`.
+Its synthetic `PermissionError(..., winerror=5)` does not set
+`.winerror` on Linux, while Windows cleanup deliberately checks
+`.winerror in (5,32)` and re-raises otherwise. Not caused by Fable
+review/test changes; do not record a Linux full-suite PASS.
+Exact focused crash/inventory/spool/new-limit suite on Bazzite remains
+19 total / 17 PASS / 2 expected failures. Windows full suite requires
+separate real Windows run after the docs-only commit.
