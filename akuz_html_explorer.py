@@ -307,6 +307,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                input_bytes=source.stat().st_size if input_bytes is None else input_bytes)
     stats: Counter[str] = Counter()
     category = Counter()
+    cat_extra: set[str] = set()
     component = Counter()
     hour = Counter()
     request = Counter()
@@ -419,7 +420,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         label = derived.category
         if label not in CAT:
             # Future parser categories are kept, not incorrectly collapsed to "прочее".
-            CAT_EXTRA.add(label)
+            cat_extra.add(label)
         comp = ev["component"]
         if comp not in component_ids:
             component_ids[comp] = len(components)
@@ -498,7 +499,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     for stale in data.glob("raw_*.js"):
         if stale.name[4:-3].isdigit() and int(stale.name[4:-3]) >= actual_shards:
             stale.unlink()
-    cats = list(CAT) + sorted(CAT_EXTRA)
+    cats = list(CAT) + sorted(cat_extra)
     catids = {c: i for i, c in enumerate(cats)}
     for r in rows:
         r[4] = catids[r[4]]
@@ -573,7 +574,6 @@ CSS += r"""
 .local-source input{width:100%;font-family:ui-monospace,Consolas,monospace}
 .local-source .small{margin:0}
 """
-CAT_EXTRA: set[str] = set()
 
 
 def main(argv: list[str] | None = None) -> int:
