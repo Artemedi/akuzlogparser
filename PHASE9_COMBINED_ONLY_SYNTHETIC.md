@@ -135,3 +135,43 @@ Linux initial 3-mode synthetic smoke: PASS; 181 unit tests OK,
 missing-date unit tests are included. Windows real smoke / repeated
 real runs and Windows full regression are PENDING at this checkpoint.
 The earlier 9-trial synthetic data above are not new real results.
+
+
+## Windows real 23/24/25 Sep FIRST SMOKE, NOT replicated A/B
+
+Exact commit 117d09148dd9be3ccfb821fb6329ef92b71823b0,
+Windows DBA-008D normal working tree CLEAN. Three previously local
+downloaded immutable-read inputs, total 955,774,851 B (different
+from earlier 956,307,242 B baseline). Per-date sizes and exact SHA
+are ONLY in ignored diagnostics/private_phase94_combined_only_real_win32_smoke_v1.json;
+no original log text or original absolute paths were published.
+The original-to-disposable-hardlink identity and original/linked
+SHA were checked before/after EACH trial. No SSH and no app cache.
+
+One independent child combined-only generation per route:
+| Route | Single setup wall s | Combined wall s | Combined CPU s | Child OS peak WS B | Child sampled peak Private B | Extra sidecar B |
+|---|---:|---:|---:|---:|---:|---:|
+| ordinary | 110.03034 | 112.57222 | 112.42188 | 1,288,069,120 | 979,824,640 | 0 |
+| B-lite | 122.13094 | 47.72034 | 47.79688 | 1,349,902,336 | 1,042,169,856 | 125,992,821 |
+| old single missing sidecar/fallback | 109.27749 | 114.68456 | 114.51562 | 1,286,651,904 | 978,395,136 | 0 |
+
+3/3 per-mode normalized deterministic combined manifests MATCH;
+all ready-single manifests unchanged; per-trial owned report folders
+and enclosing source-link root CLEANED; zero unreadable Windows
+memory readings. Windows full exact-117d091 suite: 181 tests OK,
+2 OS skips, 80.514 s; git diff --check PASS. Experimental
+SHA/result status is explicitly real_smoke_one_per_mode_NOT_AB_gate.
+
+The one observed B-lite combined wall is ~57.6% below ordinary,
+but its initial single setup is costlier and it creates ~120 MiB
+of potentially sensitive derived metadata. Child OS peak Working
+Set and sampled Private only describe combined WORKER lifetime;
+memory during single setup is NOT measured here. Private sampling
+is a lower bound. A single trial/variant with uncontrolled OS
+file-cache temperature is NOT a production speedup estimate.
+
+OPEN before any owner choice: 3+ alternated isolated real trials
+per mode on EXACT source SHA, production app cache and SQLite/export
+matrix, restart, changed-source, interruption, cross-process,
+privacy/retention approval, and production publication/rollback.
+Do NOT enable persistent sidecars or change GitHub Release.

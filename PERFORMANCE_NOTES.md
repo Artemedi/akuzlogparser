@@ -2557,3 +2557,26 @@ Linux full test discovery 181 OK (6 skips; 7.454s),
 git diff --check PASS. Windows real smoke/full tests OPEN; source
 25 Sep size differs from old baseline, so old real timing is not
 a same-input comparator. No architecture choice or Release change.
+
+
+## Phase 9.4 Windows local-real first smoke gate (2026-09-27)
+
+Exact 117d091; 3 local 23/24/25 Sep snapshots totaling
+955,774,851 B, NEW SHA-gated dataset (old baseline differs).
+Control/B-lite/old-single-no-sidecar combined-only one-process
+each PASS, respective wall 112.57222/47.72034/114.68456 s,
+combined CPU 112.42188/47.79688/114.51562 s.
+Single setup wall 110.03034/122.13094/109.27749 s.
+B-lite extra sidecar 125,992,821 B; child peak OS Working
+Set 1,288,069,120/1,349,902,336/1,286,651,904 B and
+sampled Private 979,824,640/1,042,169,856/978,395,136 B.
+0 unreadable memory samples, unchanged single manifests, 3/3
+deterministic combined manifest parity, all original/hardlink
+SHA stable, owned workspaces cleaned; no normal app cache/SQL.
+Private exact source SHAs/digests and numeric trials: ignored
+diagnostics/private_phase94_combined_only_real_win32_smoke_v1.json.
+Windows exact-SHA full 181 tests OK, 2 OS skips (80.514s),
+diff check PASS. One trial per mode is a SMOKE, not replicated
+A/B or owner's production architecture acceptance; setup memory
+was not measured. Independent Fable review not performed this
+session because external request was blocked. Release unchanged.
