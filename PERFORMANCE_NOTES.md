@@ -1815,3 +1815,28 @@ Previous isolated z1 source/config worktree removed after private
 result copy SHA-verified. z2 exact-SHA results and hash overhead are
 reported above. No original reports, input logs, user cache or Release
 were altered by either real benchmark.
+
+## Phase 9.0z-03 — collision-safe allocation against existing intents
+
+Starting clean Bazzite/Windows checkpoint `10f6d09c240f945209da7e3ce15edd1db871139c`.
+Fable follow-up #2: `_fresh_report_id` checked only final/staging
+reports. A stale `cache/report_intents/<rid>.json` or `.json.tmp`
+without a corresponding directory can collide with a freshly
+sampled same-second random suffix; `write_intent` then raises
+`FileExistsError` after generating output. This is a preexisting
+error condition independent of the full-file SHA cost.
+
+Added deterministic synthetic tests using a fixed local timestamp
+and token sequence: existing `.json` -> retry next suffix without
+removing evidence; existing `.json.tmp` -> same; ten reserved tokens
+-> bounded `FetchError` without publishing files or mutating marker.
+Before code patch three tests FAIL with `FileExistsError`, proving
+regression reproduction. `_fresh_report_id` now checks final,
+`.building`, marker and marker draft; also considers dangling
+symlinks reserved rather than reusing their names. No orphan sweep,
+TTL deletion, cache key relaxation or simultaneous-writer lock.
+Bazzite focused crash/inventory/recovery/indexed suite: 25/25 PASS;
+`git diff --check` PASS. Concurrent Windows `akuz_html_explorer.py`
+and category test are untouched, and no real logs or config sent
+outside owner machines. A single-process name reservation check
+cannot prove two-process atomic allocation or inventory lost-update.

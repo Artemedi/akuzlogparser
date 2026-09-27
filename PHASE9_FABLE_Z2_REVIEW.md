@@ -77,3 +77,12 @@ possible OS page-cache warmth invalidates an intrinsic runtime-speed
 conclusion. Difference between one build per SHA is NOT causal A/B.
 Both disposable source/config worktrees were removed, SHA-verified
 private numeric results retained locally; public Release untouched.
+
+## Follow-up 9.0z-03 — report ID collision finding #2
+
+Bounded repair: existing final/staging directories AND local intent
+marker/draft now reserve a newly sampled report ID. Three
+fixed-clock/token regression tests reproduced pre-fix `FileExistsError`
+and passed with the fix. Previously abandoned intent artifacts remain
+untouched. This is NOT an atomic multi-process reservation protocol;
+missing lock/transaction and TOCTOU risks remain OPEN.

@@ -22,7 +22,7 @@ from akuz_windows import fetch_windows, list_windows, load_windows_config
 from akuz_local import fetch_local, list_local, load_local_config
 from akuz_html_explorer import generate
 from akuz_log_parser import event_stream
-from akuz_publication import (recover_report, retire_indexed_intent,
+from akuz_publication import (intent_path, recover_report, retire_indexed_intent,
                               retire_intent, write_intent)
 from akuz_derived_spool import SpoolWriter, replay, verified_next, verify_exhausted
 from akuz_store import (cached_download, cached_report, clear_cache, key_for,
@@ -139,7 +139,10 @@ def perform_list(root: Path, state: State, list_fn=list_remote, source='linux', 
 def _fresh_report_id(root: Path):
     for _ in range(10):
         rid = 'v4_' + datetime.now().strftime('%Y%m%d_%H%M%S') + '_' + secrets.token_hex(4)
-        if not (root/'reports'/rid).exists() and not (root/'reports'/(rid+'.building')).exists():
+        marker = intent_path(root, rid)
+        draft = marker.with_suffix('.json.tmp')
+        reserved = (root/'reports'/rid, root/'reports'/(rid+'.building'), marker, draft)
+        if all(not path.exists() and not path.is_symlink() for path in reserved):
             return rid
     raise FetchError('Не удалось назначить идентификатор отчёта')
 
