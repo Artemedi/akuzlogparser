@@ -142,6 +142,66 @@ print('RESTART_JSON=' + json.dumps(dict(
             self.assertEqual(result["lingering_spools"], 0)
             self.assertEqual(signatures(root), expected)
 
+    def test_failed_combined_replay_then_new_interpreter_recovers_ready_singles(self):
+        from unittest.mock import patch
+
+        with TemporaryDirectory(prefix="akuz_phase94_fault_restart_") as td:
+            home = Path(td)
+            sources = home / "sources"
+            create_sources(sources, 5, 96)
+            control = home / "control"
+            build(control, sources, False)
+            expected = signatures(control)
+            root = home / "spool"
+            with patch("akuz_app.verified_next",
+                       side_effect=ValueError("injected replay failure")):
+                with self.assertRaisesRegex(ValueError, "replay failure"):
+                    build(root, sources, True)
+            previous = load_store(root)
+            single_ids = {row["id"] for row in previous["reports"].values()
+                          if row["kind"] == "single"}
+            self.assertEqual(len(single_ids), 3)
+            self.assertEqual(len(previous["reports"]), 3)
+            self.assertFalse(list((root / "reports").glob("*.building")))
+            self.assertTrue(no_ephemeral_spools(root))
+            worker = """
+import json
+import sys
+from pathlib import Path
+from akuz_store import load_store
+from tests.test_phase9_spool import build
+root, sources = map(Path, sys.argv[1:3])
+result, _ = build(root, sources, True)
+inventory = load_store(root)
+print('RECOVERY_JSON=' + json.dumps(dict(
+    singles=[r['id'] for r in result['reports']],
+    single_reused=[r['reused'] for r in result['reports']],
+    combined_reused=result['combined']['reused'],
+    combined_id=result['combined']['id'],
+    inventory_count=len(inventory['reports']),
+    warning=result['analytics_warning'],
+    lingering_spools=len(list((root/'cache').glob('akuz-phase9-derived-*'))),
+)))
+"""
+            child = subprocess.run(
+                [sys.executable, "-B", "-c", worker, str(root), str(sources)],
+                cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+                env=dict(os.environ, PYTHONUTF8="1"), timeout=60)
+            self.assertEqual(child.returncode, 0, child.stderr)
+            line = next((line for line in child.stdout.splitlines()
+                         if line.startswith("RECOVERY_JSON=")), None)
+            self.assertIsNotNone(line, child.stdout)
+            value = json.loads(line.partition("=")[2])
+            self.assertEqual(set(value["singles"]), single_ids)
+            self.assertEqual(value["single_reused"], [True, True, True])
+            self.assertFalse(value["combined_reused"])
+            self.assertNotIn(value["combined_id"], single_ids)
+            self.assertEqual(value["inventory_count"], 4)
+            self.assertEqual(value["warning"], "")
+            self.assertEqual(value["lingering_spools"], 0)
+            self.assertEqual(signatures(root), expected)
+            self.assertTrue(build(root, sources, True)[0]["reused"])
+
     def test_same_size_changed_contents_with_new_mtime_invalidates_report(self):
         with TemporaryDirectory(prefix="akuz_phase94_same_size_") as td:
             home = Path(td)
