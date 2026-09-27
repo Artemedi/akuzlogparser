@@ -2516,3 +2516,25 @@ and medically sensitive retention gates REMAIN OPEN; this synthetic
 benchmark is NOT the production architecture decision. Numeric
 and hash data only in ignored private JSON. Complete protocol:
 PHASE9_COMBINED_ONLY_SYNTHETIC.md.
+
+Phase 9.4 exact `0722b48` combined-only Windows nine-trial gate:
+All input source SHA and three ready single report manifests stable;
+all combined output manifests BYTE-EQUAL across ordinary, verified
+B-lite and missing-sidecar-fallback; all disposable workspaces
+cleaned, zero unreadable samples. Median setup wall ordinary/B-lite/
+missing .59080/.72444/.59573 s; combined wall
+.60524/.39331/.61662 s, CPU .60938/.39062/.60938 s;
+OS peak WS 48918528/50044928/49106944 B, sampled peak Private
+36052992/37208064/36200448 B (lower bounds), B-lite additional
+827979 B private synthetic JSONL+manifest. Results are Windows
+only and distinct from Linux .37031/.22878/.37629 combined.
+These numbers do not authorize persistent clinical derived metadata;
+normal app/cache inventory integration remains OPEN. Full method and
+bounds: PHASE9_COMBINED_ONLY_SYNTHETIC.md.
+
+Phase 9.4 combined-only exact `0722b480d0df6ae003de267f4fbad767be10ef11`
+full regression: Bazzite 178 tests OK (6 platform skips, 7.611 s),
+DBA-008D Windows 178 tests OK (2 platform skips, 80.485 s),
+`git diff --check` PASS both. Linux/Windows nine-run combined-only
+source/report byte-parity PASS per host; zero unreadable Windows
+memory readings. Experimental benchmark only; default app untouched.

@@ -138,6 +138,8 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 4. **B-full** с `raw_offset/raw_length` и обходом второго `event_stream()` оценивать только после доказательства точного преобразования исходных байтов в `raw` (BOM, invalid UTF-8 replacement, CRLF, multiline, Windows trace, преамбула). Считать вторым парсером любой код, который заново определяет границы событий; не принимать его без полного differential corpus.
 5. Целевой `combined.generate.parse≈46–52 s` из предложения агента №1 и экономию 50–80 s считать **непроверенными сценариями**, а не gate-условием. Важнее устойчивый net gain, correctness и RSS.
 
+**Bounded Phase 9.4 combined-only evidence (2026-09-27):** nine equal-input standalone synthetic trials per OS, ready singles preserved and combined byte parity for ordinary/B-lite/missing-sidecar fallback. B-lite's already-stored derived metadata reduced subsequent combined wall on this tiny fixture, but creating metadata with singles added setup time, disk and potentially sensitive normalized patterns. Linux/Windows medians and exact scopes in PHASE9_COMBINED_ONLY_SYNTHETIC.md. This is NOT actual app cached_report/inventory/analytics, nor a real 956-MB or retention gate.
+
 **Gate:** документированное решение владельца по выбранной архитектуре. Только затем ограниченное production-внедрение, отдельные коммиты, rollback и Windows portable.
 
 ## 8. Следующие независимые улучшения после Phase 9 (НЕ смешивать)

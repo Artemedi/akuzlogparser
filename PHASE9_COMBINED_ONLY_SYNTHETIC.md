@@ -56,3 +56,46 @@ Private per-trial numeric/hash evidence:
 (ignored; no log event text). Windows results, full exact-SHA
 suites and final integration will be appended when independently
 verified. GitHub Release unchanged.
+
+## Windows DBA-008D same-SHA combined-only-miss matrix
+
+Exact clean detached `0722b480d0df6ae003de267f4fbad767be10ef11`,
+9 independent combined-only child processes and 9 separate owned
+single-report setup workspaces; all source SHA, unchanged ready
+single manifests, exact combined bytes, fallback route and owned
+workspace cleanup PASS. Each Windows variant's sidecar writes are
+limited to a disposable synthetic root. No user `.log` was read.
+
+| Mode | Median setup wall s | Combined wall s | CPU s | OS peak WS B | Sampled peak Private B | Extra sidecar B |
+|---|---:|---:|---:|---:|---:|---:|
+| Ordinary | 0.59080 | 0.60524 | 0.60938 | 48,918,528 | 36,052,992 | 0 |
+| B-lite | 0.72444 | 0.39331 | 0.39062 | 50,044,928 | 37,208,064 | 827,979 |
+| Old single missing sidecar | 0.59573 | 0.61662 | 0.60938 | 49,106,944 | 36,200,448 | 0 |
+
+The minimum sampled Private-memory observations per Windows trial
+were 32, 34 and 33 for ordinary/B-lite/fallback respectively;
+0 unreadable readings in all nine trials. OS peak Working Set is
+a process high-water mark; sampled Private is only a lower bound.
+Linux KiB maxRSS is not directly interchangeable with Windows WS.
+The experiment measures combined generation in a NEW process;
+single setup time is charged separately, and extra B-lite cost
+at first single creation is not concealed. Combined-only replay
+has no Tee mode, because there are no two active fresh writers.
+The normal AKUZ app's `cached_report`/inventory, SQL/exports and
+production privacy decision are STILL OPEN; these microseconds-scale
+synthetic numbers do not predict 956-MB workload savings.
+
+Private ignored Windows result:
+`diagnostics/private_phase94_combined_only_win32_v1.json`.
+Full exact-SHA Windows suite is a separate gate.
+
+## Exact-SHA 0722b48 full cross-platform regression
+
+Linux Bazzite detached experimental branch: full
+`python3 -B -m unittest discover -s tests -q`: **178 tests OK,
+6 platform SKIP**, 7.611 s, diff-check PASS.
+Windows DBA-008D CLEAN detached exact `0722b48` worktree: full
+`python -B -m unittest discover -s tests -q`: **178 tests OK,
+2 platform SKIP**, 80.485 s, diff-check PASS.
+These suites are on the tracked benchmark experiment; no standalone
+Python/frozen real-load or new Release gate was implied.
