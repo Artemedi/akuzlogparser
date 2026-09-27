@@ -101,19 +101,19 @@ ordinary warm-cache behavior and v2 interrupted recovery semantics.
 
 ## Review / acceptance state
 
-This is an **engineering experiment specification**, not implemented
-application logic, evidence of output-byte compatibility or a
-promise of performance improvement. Two independent design-consult
-requests to Fable 5.1 through Clean APIs received HTTP 502; no model
-review was completed for the inline-hash proposal. Previous Fable
-reviews of actual `d0132fd` and `1cea8b1` code do not authorize this
-new design. Test and record any eventual candidate against an exact
-SHA and re-run a new independent review when API connectivity allows.
+The experiment is now implemented at exact code `14b45d2` and has
+passed Windows unit/byte-equivalence gates, real Python/frozen parity,
+and a separate six-trial real AB/BA/AB performance gate. Independent
+Fable 5.1 review of the ACTUAL clean SHA ultimately returned HTTP 200,
+finish_reason=stop and bounded verdict **APPROVE** after earlier
+502/524/length failures. See `PHASE9_FABLE_INLINE_REVIEW.md`.
+This still does NOT prove multiprocess inventory safety, physical
+power-loss/fsync durability or approve a public Release.
 
 ## Bounded implementation candidate 9.0z-07
 
-Producer-integrated writer and publication manifest validation now have an implementation candidate in Bazzite (see PERFORMANCE_NOTES.md), NOT yet Windows accepted. On failure or custom-generator injection, the ordinary full-read code path remains in service. The earlier two Clean APIs design consultations returned HTTP 502, so no independent design review is claimed; conduct a fresh review of ACTUAL code after a committed snapshot and the Windows gates. No published Release change.
+Producer-integrated writer and publication manifest validation are implemented in `14b45d2`. On failure or custom-generator injection, the ordinary full-read code path remains in service. Exact-code Windows and real-content gates plus independent Fable review are complete; final integration is the later category-isolation merge `7e1a6c2` and its clean Windows suite. No published Release change.
 
 ## Exact implementation gate results (Phase 9.0z-07)
 
-The standalone producer-hash candidate `14b45d2` passed Windows 141/141 tests, legacy byte-level report/combined checks, diagnostic portable smoke, real SSH Python/frozen SHA-gated parity and semantic SQLite/export checks. Four real reports generated 2.275 GB of output, and only four provenance files (2,582 total bytes) needed a second read during publication. Python/frozen hash-phase wall: 0.034/0.005 s. Overall Python/frozen fresh wall: 214.921/205.875 s. This is NOT the final paired A/B performance result; the cross-SHA six-run gate remains separate. Actual-code independent Fable review HTTP 502, so the review is OPEN. Full details and memory figures: PERFORMANCE_NOTES.md P9-0Z-07.
+The standalone producer-hash candidate `14b45d2` passed Windows 141/141 tests, legacy byte-level report/combined checks, diagnostic portable smoke, real SSH Python/frozen SHA-gated parity and semantic SQLite/export checks. Four real reports generated 2.275 GB of output, and only four provenance files (~2.5 KB) needed a second read during publication. Python/frozen hash-phase wall: 0.034/0.005 s. A later six-trial AB/BA/AB against `b6902c8` measured median wall 227.353 -> 215.147 s and CPU 208.156 -> 206.156 s with all signatures equal. Actual-code independent Fable review APPROVE. Full details: PERFORMANCE_NOTES.md P9-0Z-07/08 and PHASE9_FABLE_INLINE_REVIEW.md.

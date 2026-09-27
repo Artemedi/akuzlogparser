@@ -1960,3 +1960,46 @@ P9-0Z-07 exact-SHA Windows/real content gate, code `14b45d248e5f5c49b843a0a2ba26
 - Prior real six-run control/candidate gate only compared `75d8226` and `d0132fd`; it is NOT directly the A/B for this new writer. A NEW six-run local A/B `b6902c8` vs `14b45d2` is running separately on an isolated SHA-verified real snapshot, no SSH download included in trial wall. Do not interpret the one-pair 214.921s vs prior 226.400s median as an accepted causal gain.
 - Windows original main has uncommitted category-isolation changes. Rehearsal of direct fast-forward in a disposable worktree refused because same generator file is dirty; a read-only 3-way merge probe of old base/new producer/category code exited 0 and retained both changes, but original user file is not modified or stashed. Preserve and reconcile only after acceptance; public Release unchanged.
 - Exact-code independent Fable review attempted once via Clean APIs and returned HTTP 502; prior two design attempts also 502. There is no independent APPROVE of this SHA writer yet. Resume independent review on actual code when provider returns HTTP 200; never claim a fictional verdict.
+
+## Phase 9.0z-08 — producer-fed SHA six-trial A/B + independent review
+
+Exact versions: control `b6902c8884e9afb9a749bf21327fb3582cd09fc8`
+(full publication reread) vs candidate
+`14b45d248e5f5c49b843a0a2ba26fbdc0075538b` (producer-fed hashes).
+One SHA/size-verified read-only 2026-09-23/24/25 SSH snapshot was reused
+locally for all six fresh builds; fixed AB/BA/AB order. All six matched
+normalized inventory, all four deterministic report manifests, semantic
+SQLite, semantic analytics exports and 657,738 events. No raw payload
+saved; every trial owned and cleaned its workspace; 0 unreadable memory
+or CPU samples.
+
+Control wall seconds: 226.953, 227.881, 227.353; median 227.353.
+Candidate: 214.944, 216.113, 215.147; median 215.147.
+Observed median wall delta -12.206 s (-5.369%).
+Control CPU: 208.766, 208.156, 208.094; median 208.156.
+Candidate: 206.422, 205.828, 206.156; median 206.156.
+Observed median CPU delta -2.000 s (-0.961%).
+
+Control publication integrity phase reread 2,275,278,553 B / 1,394
+files, median about 21.01 s. Candidate reread only 2,504 B
+(provenance files), producer_files=1,390, phase 0.034-0.035 s.
+All trial report disk sizes identical (2,275,278,553 B) and normalized
+content signatures equal. Candidate sampled process-tree memory was
+also lower in all three trials, but no general memory-reduction claim
+is made from three samples. Private evidence remains ignored on
+DBA-008D: `diagnostics/phase9_inline_ab_real_private.json`.
+
+Independent Fable 5.1 review on exact clean 14b45d2 eventually returned
+HTTP 200, finish_reason=stop and bounded verdict APPROVE after earlier
+failed 502/524/length attempts. No proven defect found in newline
+translation, UTF-8/chunk boundaries, partial/close failures, manifest
+path/size/hash validation or builtin-wrapper trust. See
+PHASE9_FABLE_INLINE_RAW_REVIEW.md and PHASE9_FABLE_INLINE_REVIEW.md.
+
+The later category-isolation commit `7e1a6c2` is a separate merge of
+the user's previously uncommitted Windows change onto the accepted
+producer-hash chain. Focused Bazzite producer/category/crash/recovery
+suite 25/25 PASS plus report/combined byte-equivalence PASS. Full Linux
+discovery: 142 total, 137 PASS, 4 SKIP, one known pre-existing
+Windows-specific fake-WinError cleanup ERROR; authoritative combined
+full-suite gate must therefore run on Windows.
