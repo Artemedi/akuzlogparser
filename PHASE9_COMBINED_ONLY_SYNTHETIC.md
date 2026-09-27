@@ -175,3 +175,63 @@ per mode on EXACT source SHA, production app cache and SQLite/export
 matrix, restart, changed-source, interruption, cross-process,
 privacy/retention approval, and production publication/rollback.
 Do NOT enable persistent sidecars or change GitHub Release.
+
+
+## Windows real 23/24/25 Sep NINE-trial combined-only gate
+
+Exact code SHA **4743f9a** on DBA-008D. Nine process-isolated
+combined-only builds, 3/mode, order control/B-lite/fallback,
+fallback/control/B-lite, B-lite/fallback/control.
+Sources: same exact three locally downloaded AKUZ snapshots as
+first real smoke, total **955,774,851 B**, not old 956,307,242 B.
+Original source SHA and NTFS hardlink samefile were checked before
+and after each measured trial; ready-single normalized deterministic
+file manifests stayed unchanged; all nine combined manifests
+matched the first route. Inputs/outputs remain private/disposable.
+No real source contents or source absolute paths committed.
+
+| Route | Combined wall 3 samples, s | Wall min / median / max, s | CPU median, s | Single setup median, s |
+|---|---|---|---:|---:|
+| Ordinary fresh derive | 112.87017 / 112.81800 / 112.73135 | 112.73135 / 112.81800 / 112.87017 | 112.81250 | 108.71882 |
+| Verified B-lite | 47.86947 / 48.00877 / 47.72104 | 47.72104 / 47.86947 / 48.00877 | 47.78125 | 121.98579 |
+| Missing sidecar -> fresh fallback | 114.63461 / 114.66120 / 114.78986 | 114.63461 / 114.66120 / 114.78986 | 114.53125 | 109.39896 |
+
+Median B-lite combined-only wall was **57.6% lower than ordinary
+rederive** on THESE sources and on this isolated route. That does
+not describe end-to-end normal application runtime or authorize
+permanent sidecar storage. B-lite single setup median was **13.27 s
+higher** than ordinary. No SSH/inventory/SQLite/exports/restart/
+normal cache was benchmarked; single setup PROCESS MEMORY is not
+measured. Three replicates/mode are bounded descriptive evidence,
+not a production performance guarantee or an owner decision.
+
+Median combined-child OS Peak Working Set ordinary/B-lite/fallback:
+1,284,923,392 / 1,350,811,648 / 1,286,295,552 bytes. Median
+sampled Private Bytes (LOWER BOUND): 1,192,718,336 /
+1,256,124,416 / 978,046,976 bytes; the control Private
+samples varied notably across trials. Median trial memory samples
+were all >2,600; ZERO unreadable samples. B-lite created
+**125,992,821 bytes** of extra potentially sensitive
+derived JSONL/manifest per trial, deleted with owned workspace.
+All nine route and normalized deterministic parity gates PASS,
+all ready singles unchanged, source SHA stable; 0 owned
+trial roots remain. No raw log content saved to metrics.
+
+Ignored private evidence (on DBA-008D ONLY):
+diagnostics/private_phase94_combined_only_real_win32_v1.json.
+Status from benchmark itself:
+real_standalone_NOT_app_cache_gate, trials_per_mode=3.
+The benchmark deliberately normalizes provenance.generated and
+one disposable catalog source filename; no literal equality
+is claimed for those two volatile fields.
+
+Windows exact 9ec38a9 full suite: **186 OK, 2 platform skips,
+82.363 s, git diff --check PASS**. Bazzite exact 9ec38a9:
+**186 OK, 6 skips, 7.449 s, diff-check PASS**.
+These newer test-only commits do not turn the nine real trials,
+which ran on 4743f9a, into new-SHA performance measurements.
+
+OPEN: normal application cache+SQLite/analytics matrix, crash/restart,
+host/path identity and privacy retention authorization, original-
+source mutation mid-read and setup-memory validation; no production
+B-lite deployment, no GitHub Release changes.

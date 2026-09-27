@@ -2601,3 +2601,33 @@ equivalent combined, leave ready singles unmodified and remove
 partial staging. Linux focused 7 PASS and full 186 OK (6 skips);
 no production runtime/sidecar format modified. Windows remains
 a separate exact-SHA gate after older real benchmark completion.
+
+
+## Phase 9.4 nine-trial exact-real combined-only gate (2026-09-28)
+
+Windows DBA-008D exact 4743f9a; same 955,774,851-B local
+23/24/25 Sep snapshots as first smoke, with SAME input SHA
+per each of the nine trials. Three process-isolated runs per
+mode, fixed balanced order. Normalized deterministic combined
+manifests MATCH 9/9, ready single manifests untouched, source
+hardlink identity+SHA stable before/after, no unreadable memory
+samples, all owned temporary workspaces cleaned.
+Wall median control/B-lite/missing-fallback:
+112.81800/47.86947/114.66120 s; CPU:
+112.81250/47.78125/114.53125 s; single setup wall:
+108.71882/121.98579/109.39896 s.
+B-lite extra sidecar: 125,992,821 B.
+Combined-child OS peak WS median:
+1,284,923,392 / 1,350,811,648 / 1,286,295,552 B.
+See PHASE9_COMBINED_ONLY_SYNTHETIC.md for all nine wall
+observations and limits. Private JSON exact numeric/SHA
+evidence retained ONLY under ignored Windows diagnostics:
+private_phase94_combined_only_real_win32_v1.json.
+No log payload/raw sources committed or sent to external review.
+
+Exact 9ec38a9 test-only follow-up regression:
+Bazzite 186 OK, 6 skips, 7.449 s; Windows DBA-008D
+186 OK, 2 skips, 82.363 s; diff-check PASS both.
+Real nine-trial code SHA remains 4743f9a, not 9ec38a9.
+This experiment is NOT normal app-cache/analytics, sidecar
+retention/privacy acceptance, production switch or Release gate.
