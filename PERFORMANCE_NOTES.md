@@ -2709,3 +2709,24 @@ test. Actual SSH host/path identity, real medical-log data
 privacy approval, failure/restart of experimental Tee/B-lite,
 SQLite/exports on integrated candidates and true interrupted
 publication remain separate gates. Release untouched.
+
+## Phase 9.4 recovered combined replay across process boundary
+
+Narrow synthetic normal-app fault test:
+`tests/test_phase94_normal_app_source_identity.py`
+`test_failed_combined_replay_then_new_interpreter_recovers_ready_singles`.
+Patch verified derived replay to raise a controlled ValueError;
+three completed singles remain indexed and staging/spool are
+cleaned. A new Python interpreter reopens the persistent local
+cache, reuses exactly those three single IDs and generates ONLY
+the missing combined. Final deterministic reports, normalized
+semantic analytics SQLite and JS exports match fresh ordinary
+control. A further warm run reuses all four reports.
+
+Windows DBA-008D exact `f8a5cbd`,
+[Actions #36356901468](https://github.com/Artemedi/akuzlogparser/actions/runs/36356901468):
+194 Python tests OK (2 OS skips, 97.558 s),
+Node browser controls PASS, git diff --check PASS.
+No runtime change, SSH, real log upload, persistent B-lite,
+GitHub Release or literal crash/power-loss test. See
+PHASE94_NORMAL_APP_SOURCE_IDENTITY.md.
