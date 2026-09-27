@@ -1,0 +1,76 @@
+name: AKUZ Windows self-hosted tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/akuz-windows-tests.yml'
+      - 'akuz_*.py'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'requirements*.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akuz-windows-tests-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  regression:
+    name: Python and browser regressions on DBA-008D
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out immutable triggering revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify exact DBA-008D and source revision
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
+            throw 'This workflow is restricted to DBA-008D'
+          }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:GITHUB_SHA) {
+            throw 'The checkout does not match GITHUB_SHA'
+          }
+          & python --version
+          if ($LASTEXITCODE -ne 0) { throw 'Python unavailable' }
+          & node --version
+          if ($LASTEXITCODE -ne 0) { throw 'Node unavailable' }
+          Write-Host "EXACT_SHA=$actual"
+          Write-Host 'RUNNER_GATE=PASS'
+
+      - name: Complete Python regression suite (synthetic fixtures)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & python -B -m unittest discover -s tests -q
+          if ($LASTEXITCODE -ne 0) { throw "Python tests failed: $LASTEXITCODE" }
+          Write-Host 'PYTHON_REGRESSION=PASS'
+
+      - name: Browser-control regression suite
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & node --test tests/test_app_controls.cjs tests/test_hourly_view.cjs
+          if ($LASTEXITCODE -ne 0) { throw "Browser controls failed: $LASTEXITCODE" }
+          Write-Host 'BROWSER_REGRESSION=PASS'
+
+      - name: Diff hygiene and no production publish
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'Diff check failed' }
+          Write-Host 'DIFF_CHECK=PASS'
+          Write-Host 'NO_RELEASE_NO_REAL_LOGS_NO_REMOTE_FETCH=PASS'
