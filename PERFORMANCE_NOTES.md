@@ -2448,3 +2448,45 @@ memory evidence. Full protocol, all nine numeric runs and owner
 non-selection: PHASE9_ARCHITECTURE_SYNTHETIC_COMPARE.md.
 The A/B runs do NOT authorize a user-visible production architecture
 change or persistent medical normalized-pattern retention.
+
+## Phase 9.4 — same-SHA Windows/Linux synthetic benchmark cross-check
+
+The initially valid Linux-only `8265544` comparison could not run on
+DBA-008D because `resource` has no Windows implementation and the
+Windows system Python has no `psutil`. This was fixed in the separate
+benchmark-only `fe589408ed04c5fc9fc5030122dfb6dbd3b6e3e4`:
+Linux uses `resource.ru_maxrss` in KiB; Windows uses the EXISTING
+stdlib/ctypes `scripts.phase9_memory.sample` with OS peak Working
+Set per worker and 10-ms sampled max Private Bytes (a lower bound).
+No runtime app, parser, report, inventory, sidecar format or test
+fixtures were changed. The benchmark explicitly records platform,
+metric definitions and unreadable sample counts. No dependency added.
+
+Exact `fe58940` independent nine-trial fresh-all SHA-checked
+synthetic ABC/CAB/BCA (A=control, B=Tee, C=B-lite) on each OS:
+Linux median control/Tee/B-lite wall: .72587/.55911/.67442 s;
+CPU .71603/.55748/.66572 s; maxRSS 40,296/41,632/41,772 KiB.
+Windows DBA-008D median wall 1.21199/.93915/1.12712 s;
+CPU 1.20312/.92188/1.10938 s; OS peak WS
+46,985,216/48,861,184/47,849,472 B; sampled peak Private
+34,263,040/36,507,648/35,205,120 B, **0 unreadable samples**.
+All nine on BOTH systems had per-system byte parity for all four
+reports, unchanged source SHA and removed owned trial workspace.
+Linux report/sidecar 8,246,435/827,976 B; Windows report/sidecar
+8,251,219/827,979 B (platform-specific output formatting; no
+cross-OS byte parity is claimed). Sources are 9001 synthetic events,
+not real 956-MB AKUZ production input. Private numeric result stays
+ignored under diagnostics; no user log content in it.
+See PHASE9_ARCHITECTURE_SYNTHETIC_COMPARE.md. Windows exact-SHA full
+suite and integration into main are recorded in subsequent gate,
+NOT conflated with benchmark completion. Normal app remains on
+validated ephemeral derived spool, not Tee or permanent B-lite.
+
+Exact-SHA `fe58940` separate complete regression suites:
+Windows DBA-008D 178 tests OK (2 OS skips), 80.802 s;
+Linux Bazzite 178 tests OK (6 OS skips), 7.348 s.
+Both `git diff --check` PASS. The Windows sampler had >=82,
+>=111, >=87 samples per corresponding variant trial and zero
+unreadable memory readings; Private Bytes remain sampled lower
+bounds. All nine synthetic builds byte-equivalent within each OS.
+The Windows Python has no psutil; this benchmark adds NONE.

@@ -75,3 +75,61 @@ Its prior exact real six-trial A/B and Python/frozen content gates
 are not comparable to the 0.5–0.7 s synthetic standalone timings.
 This comparison does not make the required owner architecture choice,
 mark Phase 9.2/9.3 production-ready, or authorize a GitHub Release.
+
+## Cross-platform repeat and corrected Windows memory measurement
+
+After the initial Linux-only experiment `8265544`, the isolated
+`fe589408ed04c5fc9fc5030122dfb6dbd3b6e3e4` change removed the
+unavailable Windows `resource` import and introduced OS-native
+`phase9_memory.sample` (no `psutil`/third-party dependency). Windows
+memory reports **OS Peak Working Set** (high-water per process) and
+**sampled peak Private Bytes** (lower bound from 10-ms polls),
+including unreadable-sample counts. Linux still reports its own
+`resource.ru_maxrss` in KiB. The two platform memory counters are
+NOT claimed to be directly interchangeable.
+
+Linux full second 9-trial run at exact `fe58940`: all byte parity
+and original-source SHA gates PASS, temp workspace CLEANED. Median
+wall/CPU s/maxRSS KiB: control 0.72587/0.71603/40,296;
+Tee 0.55911/0.55748/41,632;
+B-lite 0.67442/0.66572/41,772. Every mode has
+8,246,435 report bytes; B-lite adds 827,976 JSONL+manifest bytes.
+
+DBA-008D Windows exact `fe58940` 9-trial run: ALL nine per-platform
+single+combined report manifests byte-equal; every input SHA
+unchanged; owned workspace cleaned; no raw log text persisted.
+
+| Windows mode | Median wall s | CPU s | OS peak WS B | Sampled peak Private B | Extra sidecar B |
+|---|---:|---:|---:|---:|---:|
+| Ordinary | 1.21199 | 1.20312 | 46,985,216 | 34,263,040 | 0 |
+| Tee | 0.93915 | 0.92188 | 48,861,184 | 36,507,648 | 0 |
+| B-lite | 1.12712 | 1.10938 | 47,849,472 | 35,205,120 | 827,979 |
+
+OS peak WS is an actual per-process high-water mark; Private B
+values are **sampled lower bounds**. Minimum Windows samples in
+one run were ordinary 82, Tee 111, B-lite 87, all nine runs ZERO
+unreadable memory samples. All three Windows variants emit the
+same 8,251,219 report bytes. The few-byte Linux/Windows output
+size difference is cross-OS formatting, not a reported cross-OS
+byte-equivalence gate; parity was checked separately within each OS.
+Private numeric Windows evidence remains ignored under
+`diagnostics/private_phase94_synthetic_result_win32_v2.json`.
+
+The extra Windows thread sampler changes benchmark instrumentation
+vs the earlier Linux-only 8265544 trial; prefer same-SHA `fe58940`
+results for this comparison. Still NO production app integration,
+real 956-MB A/B, user-sidecar retention policy or architecture
+owner approval. A full exact-SHA Windows test suite is recorded
+separately after its completion, not inferred from these nine trials.
+
+## Exact-SHA regression gates for Windows-ready harness
+
+On tracked `fe589408ed04c5fc9fc5030122dfb6dbd3b6e3e4`, Windows
+DBA-008D detached **CLEAN** worktree: full
+`python -B -m unittest discover -s tests -q` **178 tests OK,
+2 platform skips**, 80.802 seconds; `git diff --check` PASS.
+Linux Bazzite same `fe58940`: **178 tests OK, 6 platform
+skips**, 7.348 seconds; `git diff --check` PASS.
+These suites do not make the standalone benchmark a normal
+production route; only benchmark instrumentation + documentation
+changed after the earlier b011589 production-runtime checkpoint.
