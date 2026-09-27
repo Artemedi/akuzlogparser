@@ -2591,3 +2591,13 @@ production code or benchmark methodology change. Bazzite focused
 3/3 PASS; full 184 tests OK (6 OS skips), diff-check PASS. The
 Windows nine-trial real combined-only series started separately
 at unchanged 4743f9a, before this manifest-only regression commit.
+
+## Phase 9.4 Fable bounded fallback regression extension
+
+Two synthetic tests added in test_phase9_sidecar_fallback.py:
+truncated derived.jsonl and mismatched manifest code revision.
+Both must take typed corrupt-sidecar fallback, generate byte-
+equivalent combined, leave ready singles unmodified and remove
+partial staging. Linux focused 7 PASS and full 186 OK (6 skips);
+no production runtime/sidecar format modified. Windows remains
+a separate exact-SHA gate after older real benchmark completion.

@@ -69,3 +69,14 @@ Bazzite focused 3/3 PASS, full suite 184 OK (6 OS skips), diff-check
 PASS. These tests establish the current manifest's intended scope,
 not a new arbitrary whole-directory-byte claim. Windows still needs
 exact new-SHA full suite once the ongoing older-SHA real run finishes.
+
+## Standalone fallback extension — truncated body and revision mismatch
+
+Two additional RED/green-independent synthetic scenarios now assert
+fail-closed fresh-derive fallback when the body is truncated without
+updating its signed size/SHA or when the stored code-revision marker
+differs. In both cases completed singles remain unchanged, combined
+matches normalized deterministic control, and no partial staging
+directories remain. No runtime path or sidecar format changed.
+Bazzite focused 7 tests PASS, full suite 186 OK (6 OS skips),
+git diff --check PASS. Windows full exact-SHA regression is separate.

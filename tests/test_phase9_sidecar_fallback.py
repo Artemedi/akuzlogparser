@@ -153,5 +153,41 @@ class SidecarFallbackTests(unittest.TestCase):
                               for i in range(3)], singles)
 
 
+    def test_truncated_body_falls_back_with_ready_singles_untouched(self):
+        with TemporaryDirectory(prefix='akuz_phase93_truncated_') as td:
+            root = Path(td)
+            selected, folders, singles, scratch, expected = self.fixture(root)
+            body = next(iter(folders.values()))/'derived.jsonl'
+            payload = body.read_bytes()
+            self.assertGreater(len(payload), 5)
+            body.write_bytes(payload[:-5])
+            target = root/'recovered_truncated'
+            self.assertEqual(combined_with_fallback(
+                selected, folders, target, scratch, chunk_size=10),
+                'fallback')
+            self.assertEqual(file_manifest(target), expected)
+            self.assertEqual([file_manifest(root/'single'/str(i))
+                              for i in range(3)], singles)
+            self.assertFalse(list(root.glob('phase9-proto-combined-*')))
+
+    def test_wrong_sidecar_code_revision_falls_back_safely(self):
+        import json
+        with TemporaryDirectory(prefix='akuz_phase93_revision_') as td:
+            root = Path(td)
+            selected, folders, singles, scratch, expected = self.fixture(root)
+            header_path = next(iter(folders.values()))/'manifest.json'
+            header = json.loads(header_path.read_text('utf8'))
+            header['revision'] = 'wrong-code-revision'
+            header_path.write_text(json.dumps(header), encoding='utf8')
+            target = root/'recovered_revision'
+            self.assertEqual(combined_with_fallback(
+                selected, folders, target, scratch, chunk_size=10),
+                'fallback')
+            self.assertEqual(file_manifest(target), expected)
+            self.assertEqual([file_manifest(root/'single'/str(i))
+                              for i in range(3)], singles)
+            self.assertFalse(list(root.glob('phase9-proto-combined-*')))
+
+
 if __name__ == '__main__':
     unittest.main()
