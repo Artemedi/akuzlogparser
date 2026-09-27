@@ -5,6 +5,7 @@ that bypass main() and not physical power loss. Never delete a lockfile.
 """
 from __future__ import annotations
 from contextlib import contextmanager
+import errno
 import os
 from pathlib import Path
 
@@ -36,7 +37,9 @@ def exclusive_instance(root: Path):
             try:
                 msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
             except OSError as exc:
-                raise InstanceBusy('Каталог AKUZ Explorer уже занят другим экземпляром') from exc
+                if exc.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                    raise InstanceBusy('Каталог AKUZ Explorer уже занят другим экземпляром') from exc
+                raise
             try:
                 yield
             finally:
@@ -47,7 +50,9 @@ def exclusive_instance(root: Path):
             try:
                 fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError as exc:
-                raise InstanceBusy('Каталог AKUZ Explorer уже занят другим экземпляром') from exc
+                if exc.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                    raise InstanceBusy('Каталог AKUZ Explorer уже занят другим экземпляром') from exc
+                raise
             try:
                 yield
             finally:

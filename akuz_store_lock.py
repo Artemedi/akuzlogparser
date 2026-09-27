@@ -38,7 +38,9 @@ def _root_lock(root: Path) -> _RootLock:
     if is_redirected_path(cache) or is_redirected_path(marker):
         raise OSError('Refusing redirected inventory lock path')
     path = marker.resolve()
-    key = str(path)
+    # Windows paths are case-insensitive: alternate spelling must share
+    # the same within-process RLock as well as the OS file lock.
+    key = os.path.normcase(str(path))
     with _REGISTRY_GUARD:
         lock = _REGISTRY.get(key)
         if lock is None:
