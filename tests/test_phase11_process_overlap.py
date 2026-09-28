@@ -2,6 +2,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+import json
 import unittest
 from unittest.mock import patch
 
@@ -56,6 +57,9 @@ class Sender:
     def send(self, value):
         self.values.append(value)
 
+    def send_bytes(self, payload):
+        self.values.append(json.loads(bytes(payload).decode("utf-8")))
+
     def close(self):
         self.closed = True
 
@@ -108,7 +112,7 @@ class Phase11ProcessOverlapTests(unittest.TestCase):
                 side_effect=RuntimeError("SECRET /srv/private/path")):
             with self.assertRaises(RuntimeError):
                 bench._child_fetch(cfg, spec, "unused", sender)
-        self.assertEqual(sender.values, [("error", "RuntimeError")])
+        self.assertEqual(sender.values, [["error", "RuntimeError"]])
         self.assertTrue(sender.closed)
 
     def test_run_balanced_order_and_strips_private_hashes(self):
