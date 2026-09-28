@@ -1,0 +1,56 @@
+name: AKUZ Phase 11 portable multiprocessing gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/akuz-phase11-portable-spawn.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    name: Build and verify frozen Windows spawn
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install pinned build toolchain
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install --disable-pip-version-check -r requirements-build.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Build dependency installation failed' }
+      - name: Build portable without publishing
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/build_portable.py
+          if ($LASTEXITCODE -ne 0) { throw 'Portable build failed' }
+      - name: Verify frozen spawn self-test
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $json = & .\dist\AKUZLogExplorer.exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen self-test failed' }
+          $data = $json | ConvertFrom-Json
+          if (-not $data.ok -or -not $data.spawn -or -not $data.crypto) { throw 'Frozen spawn/crypto proof missing' }
+          Write-Host 'PHASE11_PORTABLE_SPAWN=PASS'
+      - name: Packaged smoke
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/smoke_portable.py dist/AKUZLogExplorer-windows-x64.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged smoke failed' }
+          Write-Host 'PHASE11_PACKAGED_SMOKE=PASS'
+      - name: No publish or artifact upload
+        run: |
+          Write-Host 'NO_RELEASE_CHANGE=PASS'
+          Write-Host 'NO_ACTIONS_ARTIFACT_UPLOAD=PASS'
