@@ -1,4 +1,5 @@
 name: AKUZ Phase 10 SSH compression smoke
+# Harness direct-run fix: bfd8721
 
 on:
   push:
