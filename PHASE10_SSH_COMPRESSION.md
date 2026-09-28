@@ -72,10 +72,25 @@ Contract tests were added in
 DBA-008D:
 [Actions #36384234697](https://github.com/Artemedi/akuzlogparser/actions/runs/36384234697).
 
-The first real replicated run is
-[Actions #36384569840](https://github.com/Artemedi/akuzlogparser/actions/runs/36384569840)
-against a fixed 23-Sep prefix. Until it finishes, no replicated performance
-claim is recorded.
+The first replicated run,
+[Actions #36384569840](https://github.com/Artemedi/akuzlogparser/actions/runs/36384569840),
+completed SUCCESS against the fixed 23-Sep prefix (171,378,567 B). All 6/6
+transfers produced the same client SHA.
+
+| Mode | Median wall, s | Median client CPU, s | Median parent sshd CPU, s | Median socket RX, B | RX / logical |
+|---|---:|---:|---:|---:|---:|
+| control | 19.617381 | 4.281250 | 0.730 | 171,726,336 | 1.002029 |
+| compressed | 5.681805 | 2.125000 | 4.100 | 42,752,000 | 0.249459 |
+
+On this repeated 23-Sep workload, compression reduced median wall by about
+71.0% and client socket RX by about 75.1% (roughly 4.0x fewer received
+socket bytes), while measured parent-`sshd` CPU increased from 0.73 s to
+4.10 s (about 5.6x). The client process CPU median was lower in the compressed
+runs, but this should not be generalized before the larger-file series.
+
+This remains partial Phase 10: server page cache was natural/uncontrolled.
+The next required large-source series uses the current 25-Sep fixed prefix
+of 644,567,384 B.
 
 ## Acceptance boundary
 
