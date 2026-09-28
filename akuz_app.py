@@ -230,8 +230,22 @@ def _iter_combined_sources(selected, base: date, trace_root: Path | None = None,
             (item['remote']['path'], item['sha'], item['date']))
             if derived_spools else None)
         spool_path, expected_sha = spool_entry if spool_entry else (None, None)
-        if spool_path and sha256(spool_path) != expected_sha:
-            raise ValueError('Derived spool content checksum mismatch')
+        if spool_path:
+            try:
+                spool_valid = (
+                    Path(spool_path).is_file()
+                    and sha256(spool_path) == expected_sha)
+            except OSError:
+                spool_valid = False
+            if not spool_valid:
+                # The derived spool is disposable acceleration only. A missing
+                # or damaged sidecar must never make combined less reliable
+                # than the historical raw event_stream path.
+                if trace_root is not None:
+                    perf_event(
+                        trace_root, 'derived.spool', 'fallback',
+                        source_index=index, enabled=0)
+                spool_path = None
         with (replay(spool_path) if spool_path else nullcontext(None)) as spooled:
             for ev in event_stream(item['local'], stats):
                 if spooled is not None:
@@ -294,16 +308,31 @@ def _cleanup_phase11_prefetch_orphans(root: Path, local_dest: Path) -> int:
     if not local_dest.is_dir():
         return 0
     for candidate in local_dest.glob(prefix + '*'):
+        # Never follow an owned-name symlink outside local_dest. The directory
+        # entry itself is ours to remove; its target is not.
+        if candidate.is_symlink():
+            try:
+                candidate.unlink(missing_ok=True)
+                removed += 1
+            except OSError:
+                pass
+            continue
         try:
             candidate.resolve().relative_to(local_dest)
         except (OSError, ValueError):
             continue
-        if candidate.is_symlink() or candidate.is_file():
-            candidate.unlink(missing_ok=True)
-            removed += 1
+        if candidate.is_file():
+            try:
+                candidate.unlink(missing_ok=True)
+                removed += 1
+            except OSError:
+                pass
         elif candidate.is_dir():
-            shutil.rmtree(candidate)
-            removed += 1
+            try:
+                shutil.rmtree(candidate)
+                removed += 1
+            except OSError:
+                pass
     return removed
 
 
@@ -486,6 +515,10 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         try:
             operation.start()
         except Exception:
+            try:
+                operation.close()
+            except Exception:
+                pass
             perf_event(root, 'process.prefetch', 'start_fallback',
                        source_index=current_index + 1, enabled=0)
             return None
@@ -548,6 +581,14 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             try:
                 save_store(root, store)
             except BaseException:
+                pass
+            try:
+                result.path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            try:
+                operation.close()
+            except Exception:
                 pass
             raise
         prefetched_downloads[next_fid] = (final, result.digest, details)
