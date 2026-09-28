@@ -11,12 +11,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from akuz_process_fetch import _run_after_parent_gate
+from akuz_process_fetch import ProcessFetch
+from akuz_win_job_spawn import get_job_bound_spawn_context
 from scripts.phase9_memory import sample
 
 
-def never_run(destination, sender):
-    Path(destination).write_bytes(b"unexpected")
+def hanging_child(destination, sender):
+    Path(destination).write_bytes(b"owned partial")
+    time.sleep(60)
     sender.close()
 
 
@@ -25,29 +27,27 @@ def main():
     root.mkdir(parents=True, exist_ok=True)
     pid_file = root / "child.pid"
     destination = root / "owned.log"
+    payload_size = len(b"owned partial")
 
-    ctx = multiprocessing.get_context("spawn")
-    receiver, sender = ctx.Pipe(duplex=False)
-    gate = ctx.Event()
-    child = ctx.Process(
-        target=_run_after_parent_gate,
-        args=(never_run, (), str(destination), sender, gate),
-        name="akuz-phase11-pregate-parent-death")
-    child.start()
-    sender.close()
-    deadline = time.time() + 5
-    identity = None
-    while identity is None and time.time() < deadline:
-        identity = sample(child.pid)
-        if identity is None:
-            time.sleep(.01)
+    op = ProcessFetch(
+        get_job_bound_spawn_context(),
+        hanging_child, (), destination,
+        poll_timeout_s=30, join_timeout_s=5, kill_timeout_s=5,
+        expected_listed_bytes=payload_size,
+        require_kill_job=True, safe_ipc=True)
+    op.start()
+
+    identity = sample(op.child.pid)
     if identity is None:
         raise SystemExit(3)
     pid_file.write_text(json.dumps({
-        "pid": child.pid,
+        "pid": op.child.pid,
         "creation_time_ticks": identity["creation_time_ticks"],
     }), encoding="ascii")
-    # Deliberately exit before assigning a Job Object or opening the gate.
+
+    # start() can return only after CreateProcess(CREATE_SUSPENDED), exact
+    # Job assignment and ResumeThread. Exit immediately afterwards; the Job
+    # handle must close at process teardown and kill the same child identity.
     os._exit(79)
 
 
