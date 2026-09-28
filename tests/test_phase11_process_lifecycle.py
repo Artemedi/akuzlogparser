@@ -371,6 +371,42 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             self.assertEqual(result.digest, digest)
             self.assertTrue(dest.is_file())
 
+    @unittest.skipUnless(os.name == "nt", "Windows handle deletion")
+    def test_windows_handle_cleanup_deletes_exact_owned_file(self):
+        with TemporaryDirectory(prefix="akuz_process_win_delete_") as td:
+            target = Path(td) / "snapshot.log"
+            target.write_bytes(b"owned")
+            remove_owned_snapshot(target, attempts=2, delay_s=.01)
+            self.assertFalse(target.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows handle deletion")
+    def test_windows_handle_cleanup_rejects_path_replacement(self):
+        with TemporaryDirectory(prefix="akuz_process_win_swap_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            replacement = root / "replacement.log"
+            target.write_bytes(b"owned")
+            replacement.write_bytes(b"external")
+            import akuz_process_fetch as process_fetch
+            real_identity = process_fetch._windows_cleanup_identity
+            calls = {"count": 0}
+
+            def racing_identity(handle):
+                identity = real_identity(handle)
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    os.replace(replacement, target)
+                return identity
+
+            with patch(
+                    "akuz_process_fetch._windows_cleanup_identity",
+                    side_effect=racing_identity):
+                with self.assertRaisesRegex(
+                        ProcessFetchUnsafeError, "pathname was replaced"):
+                    remove_owned_snapshot(
+                        target, attempts=2, delay_s=.01)
+            self.assertEqual(target.read_bytes(), b"external")
+
     def test_owned_snapshot_cleanup_failure_is_unsafe(self):
         with TemporaryDirectory(prefix="akuz_process_cleanup_unsafe_") as td:
             root = Path(td)
@@ -899,6 +935,51 @@ class RealSpawnLifecycleTests(unittest.TestCase):
                 op.start()
             self.assertFalse(target.exists())
             self.assertIsNone(op.child)
+
+    @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
+    def test_atomic_open_osfhandle_failure_closes_raw_pipe_handles(self):
+        import akuz_win_job_spawn as job_spawn
+
+        with TemporaryDirectory(prefix="akuz_process_openfd_fail_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            real_create_pipe = job_spawn._winapi.CreatePipe
+            real_close = job_spawn._winapi.CloseHandle
+            created = {}
+            closed = []
+
+            def capture_pipe(*args):
+                pair = real_create_pipe(*args)
+                created["handles"] = tuple(int(value) for value in pair)
+                return pair
+
+            def close_and_record(handle):
+                closed.append(int(handle))
+                return real_close(handle)
+
+            op = ProcessFetch(
+                get_job_bound_spawn_context(),
+                real_spawn_hanging_child, (), target,
+                poll_timeout_s=5, join_timeout_s=2, kill_timeout_s=2,
+                expected_listed_bytes=1,
+                require_kill_job=True, safe_ipc=True)
+            with patch(
+                    "akuz_win_job_spawn._winapi.CreatePipe",
+                    side_effect=capture_pipe), \
+                 patch(
+                    "akuz_win_job_spawn.msvcrt.open_osfhandle",
+                    side_effect=OSError("injected open_osfhandle failure")), \
+                 patch(
+                    "akuz_win_job_spawn._winapi.CloseHandle",
+                    side_effect=close_and_record):
+                with self.assertRaisesRegex(
+                        OSError, "open_osfhandle failure"):
+                    op.start()
+
+            self.assertEqual(
+                sorted(closed), sorted(created["handles"]))
+            self.assertIsNone(op.child)
+            self.assertFalse(target.exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
     def test_atomic_createprocess_failure_closes_empty_job(self):

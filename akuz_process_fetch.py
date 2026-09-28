@@ -452,18 +452,143 @@ def _windows_handle_value(handle) -> int:
         raise ProcessFetchUnsafeError("Windows handle value invalid") from exc
 
 
-def remove_owned_snapshot(path: Path, *, attempts=100, delay_s=0.10):
-    """Remove one owned temp file without ever unlinking a replacement.
+def _windows_cleanup_identity(handle):
+    import ctypes
+    from ctypes import wintypes
 
-    A transient Windows lock may require retries. Once the first existing
-    pathname identity is observed, every retry must still refer to that exact
-    filesystem object; if another process replaces the name, cleanup fails
-    unsafe instead of deleting the replacement.
-    """
+    class BY_HANDLE_FILE_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("dwFileAttributes", wintypes.DWORD),
+            ("ftCreationTime", wintypes.FILETIME),
+            ("ftLastAccessTime", wintypes.FILETIME),
+            ("ftLastWriteTime", wintypes.FILETIME),
+            ("dwVolumeSerialNumber", wintypes.DWORD),
+            ("nFileSizeHigh", wintypes.DWORD),
+            ("nFileSizeLow", wintypes.DWORD),
+            ("nNumberOfLinks", wintypes.DWORD),
+            ("nFileIndexHigh", wintypes.DWORD),
+            ("nFileIndexLow", wintypes.DWORD),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetFileInformationByHandle.argtypes = [
+        wintypes.HANDLE, ctypes.POINTER(BY_HANDLE_FILE_INFORMATION)]
+    kernel32.GetFileInformationByHandle.restype = wintypes.BOOL
+    info = BY_HANDLE_FILE_INFORMATION()
+    if not kernel32.GetFileInformationByHandle(
+            wintypes.HANDLE(_windows_handle_value(handle)),
+            ctypes.byref(info)):
+        raise ProcessFetchUnsafeError(
+            "Could not identify owned Windows snapshot handle")
+    if info.dwFileAttributes & 0x0400:
+        raise ProcessFetchUnsafeError(
+            "Owned process snapshot became a reparse point")
+    if info.dwFileAttributes & 0x0010:
+        raise ProcessFetchUnsafeError(
+            "Owned process snapshot became a directory")
+    file_index = (int(info.nFileIndexHigh) << 32) | int(info.nFileIndexLow)
+    file_size = (int(info.nFileSizeHigh) << 32) | int(info.nFileSizeLow)
+    return int(info.dwVolumeSerialNumber), file_index, file_size
+
+
+def _windows_open_cleanup_handle(path: Path, access: int):
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+        ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+
+    file_share_read = 0x00000001
+    file_share_write = 0x00000002
+    file_share_delete = 0x00000004
+    open_existing = 3
+    open_reparse_point = 0x00200000
+    handle = kernel32.CreateFileW(
+        str(path), access,
+        file_share_read | file_share_write | file_share_delete,
+        None, open_existing, open_reparse_point, None)
+    value = getattr(handle, "value", handle)
+    invalid = ctypes.c_void_p(-1).value
+    if value in (None, invalid):
+        error = ctypes.get_last_error()
+        if error in (2, 3):
+            return None
+        raise OSError(error, "Could not open owned Windows snapshot")
+    return handle
+
+
+def _remove_owned_snapshot_windows(
+        target: Path, *, attempts=100, delay_s=0.10):
+    import ctypes
+    from ctypes import wintypes
+
+    file_read_attributes = 0x00000080
+    delete_access = 0x00010000
+    anchor = _windows_open_cleanup_handle(target, file_read_attributes)
+    if anchor is None:
+        return
+    try:
+        owned_identity = _windows_cleanup_identity(anchor)
+        last_error = None
+
+        class FILE_DISPOSITION_INFO(ctypes.Structure):
+            _fields_ = [("DeleteFile", ctypes.c_ubyte)]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.SetFileInformationByHandle.argtypes = [
+            wintypes.HANDLE, ctypes.c_int,
+            ctypes.c_void_p, wintypes.DWORD]
+        kernel32.SetFileInformationByHandle.restype = wintypes.BOOL
+
+        for attempt in range(max(1, attempts)):
+            delete_handle = None
+            try:
+                delete_handle = _windows_open_cleanup_handle(
+                    target, delete_access | file_read_attributes)
+                if delete_handle is None:
+                    return
+                if _windows_cleanup_identity(delete_handle) != owned_identity:
+                    raise ProcessFetchUnsafeError(
+                        "Owned process snapshot pathname was replaced")
+                disposition = FILE_DISPOSITION_INFO(1)
+                if not kernel32.SetFileInformationByHandle(
+                        wintypes.HANDLE(_windows_handle_value(delete_handle)),
+                        4, ctypes.byref(disposition),
+                        ctypes.sizeof(disposition)):
+                    error = ctypes.get_last_error()
+                    raise OSError(
+                        error, "Could not mark owned Windows snapshot deleted")
+                return
+            except ProcessFetchUnsafeError:
+                raise
+            except OSError as exc:
+                last_error = exc
+            finally:
+                if delete_handle is not None:
+                    _close_windows_handle(delete_handle)
+
+            if attempt + 1 < max(1, attempts):
+                sleep(delay_s)
+
+        raise ProcessFetchUnsafeError(
+            "Owned process snapshot could not be removed") from last_error
+    finally:
+        _close_windows_handle(anchor)
+
+
+def remove_owned_snapshot(path: Path, *, attempts=100, delay_s=0.10):
+    """Remove one owned temp file without ever deleting a replacement."""
     target = Path(path)
+    if os.name == "nt":
+        return _remove_owned_snapshot_windows(
+            target, attempts=attempts, delay_s=delay_s)
+
+    # Non-production fallback for POSIX test/benchmark callers.
     last_error = None
     owned_identity = None
-
     for attempt in range(max(1, attempts)):
         try:
             st = target.lstat()
@@ -480,7 +605,6 @@ def remove_owned_snapshot(path: Path, *, attempts=100, delay_s=0.10):
             elif identity != owned_identity:
                 raise ProcessFetchUnsafeError(
                     "Owned process snapshot pathname was replaced")
-
             try:
                 target.unlink()
                 return
@@ -499,7 +623,6 @@ def remove_owned_snapshot(path: Path, *, attempts=100, delay_s=0.10):
     if still_exists:
         raise ProcessFetchUnsafeError(
             "Owned process snapshot could not be removed") from last_error
-
 
 def _run_after_parent_gate(target, args, destination, sender, gate):
     """Legacy proof helper; production uses suspended Job-bound spawn."""
