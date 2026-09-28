@@ -88,17 +88,15 @@ class ProcessFetch:
                 sender.close()
                 raise ProcessFetchError(
                     "Kill-on-close Job Object requires Windows")
-            self._start_gate = self.ctx.Event()
-            child = self.ctx.Process(
-                target=_run_after_parent_gate,
-                args=(self.target, self.args, str(self.destination),
-                      sender, self._start_gate),
-                name=self.name)
-        else:
-            child = self.ctx.Process(
-                target=self.target,
-                args=(*self.args, str(self.destination), sender),
-                name=self.name)
+            if not getattr(self.ctx, "_akuz_job_bound_context", False):
+                receiver.close()
+                sender.close()
+                raise ProcessFetchUnsafeError(
+                    "Production prefetch requires atomic Job-bound spawn")
+        child = self.ctx.Process(
+            target=self.target,
+            args=(*self.args, str(self.destination), sender),
+            name=self.name)
         self.receiver = receiver
         self.child = child
         self.started_at = perf_counter()
@@ -113,10 +111,9 @@ class ProcessFetch:
             remove_owned_snapshot(self.destination)
             raise
         if self.require_kill_job:
-            try:
-                self._kill_job = _create_kill_on_close_job(child)
-                self._start_gate.set()
-            except BaseException:
+            popen = getattr(child, "_popen", None)
+            owner = getattr(popen, "_akuz_job_owner", None)
+            if owner is None or getattr(owner, "closed", True):
                 try:
                     self.abort()
                 finally:
@@ -124,7 +121,9 @@ class ProcessFetch:
                         sender.close()
                     except BaseException:
                         pass
-                raise
+                raise ProcessFetchUnsafeError(
+                    "Atomic Job-bound spawn did not expose live Job ownership")
+            self._kill_job = owner
         try:
             sender.close()
         except BaseException:
@@ -141,12 +140,20 @@ class ProcessFetch:
     def _release_kill_job(self):
         if self._kill_job is None:
             return
-        # Transfer ownership out of object state before CloseHandle. If the
-        # close itself fails, the failure is unsafe but must never trigger a
-        # second close attempt on the same integer HANDLE from finally/abort.
+        # Transfer ownership out of object state before closing it. The
+        # atomic Windows spawn context exposes an idempotent owner; legacy
+        # integer handles remain supported only by isolated unit helpers.
         handle = self._kill_job
         self._kill_job = None
-        _close_windows_handle(handle)
+        close = getattr(handle, "close", None)
+        if callable(close):
+            try:
+                close()
+            except BaseException as exc:
+                raise ProcessFetchUnsafeError(
+                    "Could not close Windows kill Job Object") from exc
+        else:
+            _close_windows_handle(handle)
 
     def finish(self) -> ProcessFetchResult:
         if self.child is None or self.receiver is None or self.started_at is None:
@@ -464,7 +471,7 @@ def remove_owned_snapshot(path: Path, *, attempts=100, delay_s=0.10):
 
 
 def _run_after_parent_gate(target, args, destination, sender, gate):
-    """Arm parent-death supervision before waiting for Job assignment gate."""
+    """Legacy proof helper; production uses suspended Job-bound spawn."""
     try:
         _arm_parent_watchdog()
     except BaseException:
