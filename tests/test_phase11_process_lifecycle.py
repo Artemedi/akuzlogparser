@@ -32,6 +32,12 @@ class FakeReceiver:
         self.closed = True
 
 
+class CloseErrorReceiver(FakeReceiver):
+    def close(self):
+        self.closed = True
+        raise OSError("injected pipe close failure")
+
+
 class FakeSender:
     def __init__(self):
         self.closed = False
@@ -270,6 +276,22 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             with self.assertRaisesRegex(ProcessFetchError, "FetchError"):
                 with op:
                     op.finish()
+            self.assertFalse(dest.exists())
+
+    def test_pipe_close_failure_still_aborts_child_and_cleans_snapshot(self):
+        with TemporaryDirectory(prefix="akuz_process_pipe_close_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            receiver = CloseErrorReceiver(ready=False)
+            child = FakeChild(
+                on_start=lambda: dest.write_bytes(b"partial"),
+                alive_after_start=True)
+            op, _ = self.make(root, receiver, child)
+            with self.assertRaisesRegex(TimeoutError, "did not return"):
+                with op:
+                    op.finish()
+            self.assertTrue(receiver.closed)
+            self.assertTrue(child.terminated)
             self.assertFalse(dest.exists())
 
     def test_timeout_terminates_child_and_removes_partial_snapshot(self):
