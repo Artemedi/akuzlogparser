@@ -1,0 +1,153 @@
+name: AKUZ Phase 11 Fable independent review
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/akuz-phase11-fable-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: Claude Fable independent production review
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Ask Fable to review Phase 11 production semantics
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
+            throw 'DBA-008D only'
+          }
+
+          $secretFile = 'E:\Software\Project\LogAkusExplorer\secrets\fable.env'
+          if (-not (Test-Path $secretFile)) { throw 'Fable env file not found' }
+
+          Get-Content $secretFile | ForEach-Object {
+            $line = $_.Trim()
+            if (-not $line -or $line.StartsWith('#') -or -not $line.Contains('=')) { return }
+            $pair = $line.Split('=', 2)
+            $name = $pair[0].Trim()
+            $value = $pair[1].Trim().Trim('"').Trim("'")
+            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+          }
+
+          @'
+          import json
+          import os
+          from pathlib import Path
+          import urllib.request
+          import sys
+
+          token = os.environ.get('ANTHROPIC_AUTH_TOKEN', '')
+          base = os.environ.get('ANTHROPIC_BASE_URL', '').rstrip('/')
+          model = os.environ.get('ANTHROPIC_MODEL', 'claude-fable-5.1')
+          if not token or not base:
+              raise SystemExit('Fable API environment incomplete')
+
+          files = [
+              'akuz_process_fetch.py',
+              'akuz_app.py',
+              'tests/test_phase11_process_lifecycle.py',
+              'tests/test_phase11_normal_app_process_prefetch.py',
+              'PHASE11_SSH_OVERLAP.md',
+          ]
+          parts = []
+          for name in files:
+              text = Path(name).read_text(encoding='utf-8')
+              # Keep the request code-only/documentation-only; no private logs,
+              # config, source paths, diagnostics JSON or credentials.
+              parts.append(f'\n\n===== {name} =====\n{text}')
+
+          prompt = r"""
+          You are the independent senior reviewer for AKUZ Log Explorer.
+          Review the current Phase 11 Windows process-isolated SSH prefetch
+          implementation as if it is about to become the default production
+          path in a portable PyInstaller EXE.
+
+          Do NOT assume the implementation is correct because tests pass.
+          Search for concrete failure modes and races. Focus especially on:
+          - one-child ownership and cancellation;
+          - Windows spawn/PyInstaller semantics;
+          - hard parent exit watchdog and orphan cleanup;
+          - child failure / timeout / pipe-close behavior;
+          - race between child completion, temp snapshot promotion, inventory
+            save and report publication;
+          - rollback if inventory persistence fails;
+          - mixed warm/fresh cache behavior and restart recovery;
+          - remote growth/rotation/truncation between refreshed inventory and
+            child fetch;
+          - active log snapshot semantics;
+          - whether a child can leak a temp/final snapshot or leave inventory
+            inconsistent;
+          - whether default-enabled behavior can accidentally affect local or
+            SMB sources;
+          - privacy: no raw clinical log text/path/credentials in IPC/logging;
+          - whether any benchmark-only dependency leaked into production.
+
+          Existing measured evidence, for context only:
+          - full Windows suite on the current runtime lineage: 251 Python tests
+            PASS, 2 skips, browser controls PASS, diff-check PASS after fixing
+            the hard-exit helper import;
+          - real normal-app static 24-27 Sep A/B on 857,563,363 source bytes:
+            prior accepted process trial 326.138 s vs serial 444.242 s,
+            inventory/analytics SQL/export parity PASS;
+          - portable frozen spawn self-test and packaged smoke previously PASS;
+          - process-prefetch is now default ON only for Linux/SSH multi-source,
+            with AKUZ_PHASE11_PROCESS_PREFETCH=0 as rollback switch;
+          - SSH compression remains default OFF;
+          - persistent B-lite metadata is not used.
+
+          Return:
+          1. BLOCKERS (must fix before release)
+          2. HIGH risks
+          3. MEDIUM/LOW observations
+          4. Missing tests you would require
+          5. Final verdict exactly one of: ACCEPT, MODIFY, BLOCK
+
+          Be specific: cite function/test names and describe a reproducible
+          scenario. Do not praise the project and do not repeat the prompt.
+          """
+
+          payload = json.dumps({
+              'model': model,
+              'max_tokens': 7000,
+              'messages': [{
+                  'role': 'user',
+                  'content': prompt + ''.join(parts)
+              }]
+          }).encode('utf-8')
+          req = urllib.request.Request(
+              base + '/chat/completions',
+              data=payload,
+              headers={
+                  'Authorization': 'Bearer ' + token,
+                  'Content-Type': 'application/json',
+              },
+              method='POST')
+          with urllib.request.urlopen(req, timeout=180) as response:
+              data = json.loads(response.read().decode('utf-8'))
+          content = data['choices'][0]['message']['content']
+          if not isinstance(content, str) or not content.strip():
+              raise SystemExit('Fable returned empty review')
+          print('FABLE_REVIEW_BEGIN')
+          print(content)
+          print('FABLE_REVIEW_END')
+          print('FABLE_MODEL=' + model)
+          print('NO_PRIVATE_LOGS_OR_SECRETS_SENT=PASS')
+          '@ | python -B -
+          if ($LASTEXITCODE -ne 0) { throw 'Fable independent review failed' }
