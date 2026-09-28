@@ -1,0 +1,44 @@
+name: AKUZ Phase 10 SSH compression smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/akuz-phase10-ssh-compression-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: One control/compressed SSH fetch on DBA-008D
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out exact smoke harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Run bounded compression smoke on stable 23-Sep source
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
+            throw 'DBA-008D only'
+          }
+          $privateRoot = 'E:\Software\Project\LogAkusExplorer\akuzlogparser'
+          python -B scripts/bench_phase10_ssh_compression_smoke.py `
+            --config (Join-Path $privateRoot 'ConnectConf.cfg') `
+            --app-root $privateRoot `
+            --day 20260923 `
+            --result (Join-Path $privateRoot 'diagnostics\phase10_ssh_compression_smoke_20260928.json')
+          if ($LASTEXITCODE -ne 0) { throw 'Phase 10 compression smoke failed' }
+          Write-Host 'PHASE10_BOUNDARY=SMOKE_ONLY_NOT_ACCEPTANCE'
+          Write-Host 'NO_RELEASE_CHANGE=PASS'
