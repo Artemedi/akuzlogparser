@@ -15,7 +15,8 @@ from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
                                 _close_windows_handle,
                                 _create_kill_on_close_job,
                                 _owned_snapshot_stat,
-                                _same_path_lexical, _windows_handle_value,
+                                _same_path_lexical, _sha256_owned_snapshot,
+                                _windows_handle_value,
                                 remove_owned_snapshot, ssh_fetch_child)
 from akuz_fetch import ConnectConfig
 from akuz_win_job_spawn import (JobBoundSpawnError,
@@ -271,6 +272,19 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             self.assertEqual(result.digest, digest)
             self.assertTrue(dest.is_file())
 
+
+    def test_owned_snapshot_hash_rejects_same_size_identity_swap(self):
+        with TemporaryDirectory(prefix="akuz_process_identity_swap_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            replacement = root / "replacement.log"
+            target.write_bytes(b"AAAA")
+            expected = _owned_snapshot_stat(target)
+            replacement.write_bytes(b"BBBB")
+            os.replace(replacement, target)
+            with self.assertRaisesRegex(
+                    ProcessFetchError, "identity changed before hashing"):
+                _sha256_owned_snapshot(target, expected)
 
     def test_windows_path_identity_is_case_insensitive(self):
         with patch("akuz_process_fetch.os.path.normcase",
@@ -859,6 +873,40 @@ class RealSpawnLifecycleTests(unittest.TestCase):
                 op.start()
             self.assertFalse(target.exists())
             self.assertIsNone(op.child)
+
+    @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
+    def test_atomic_createprocess_failure_closes_empty_job(self):
+        class FakeOwner:
+            def __init__(self):
+                self.handle = 123
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+                self.handle = None
+
+        with TemporaryDirectory(prefix="akuz_process_create_fail_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            owner = FakeOwner()
+            op = ProcessFetch(
+                get_job_bound_spawn_context(),
+                real_spawn_hanging_child, (), target,
+                poll_timeout_s=5, join_timeout_s=2, kill_timeout_s=2,
+                expected_listed_bytes=1,
+                require_kill_job=True, safe_ipc=True)
+            with patch(
+                    "akuz_win_job_spawn._create_kill_job",
+                    return_value=owner), \
+                 patch(
+                    "akuz_win_job_spawn._winapi.CreateProcess",
+                    side_effect=OSError("injected CreateProcess failure")):
+                with self.assertRaisesRegex(
+                        OSError, "CreateProcess failure"):
+                    op.start()
+            self.assertTrue(owner.closed)
+            self.assertIsNone(op.child)
+            self.assertFalse(target.exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
     def test_atomic_job_assignment_failure_never_resumes_child(self):
