@@ -21,8 +21,8 @@ class ProcessFetchResult:
     path: Path
     digest: str
     bytes: int
-    child_cpu_s: float
-    child_fetch_wall_s: float
+    child_cpu_s: float | None
+    child_fetch_wall_s: float | None
     ready_latency_s: float
     metadata: dict
 
@@ -37,7 +37,7 @@ class ProcessFetch:
 
     def __init__(self, ctx, target, args, destination: Path,
                  *, poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10,
-                 name="akuz-phase11-fetch"):
+                 name="akuz-phase11-fetch", require_metrics=False):
         self.ctx = ctx
         self.target = target
         self.args = tuple(args)
@@ -46,6 +46,7 @@ class ProcessFetch:
         self.join_timeout_s = join_timeout_s
         self.kill_timeout_s = kill_timeout_s
         self.name = name
+        self.require_metrics = require_metrics
         self.receiver = None
         self.child = None
         self.started_at = None
@@ -105,16 +106,17 @@ class ProcessFetch:
                 raise ProcessFetchError("Process fetch snapshot incomplete")
             if not isinstance(digest, str) or len(digest) != 64:
                 raise ProcessFetchError("Process fetch digest invalid")
-            if child_cpu is None or child_cpu <= 0:
-                raise ProcessFetchError("Process fetch CPU evidence unavailable")
-            if child_fetch_wall is None or child_fetch_wall <= 0:
-                raise ProcessFetchError("Process fetch wall evidence unavailable")
+            if self.require_metrics:
+                if child_cpu is None or child_cpu <= 0:
+                    raise ProcessFetchError("Process fetch CPU evidence unavailable")
+                if child_fetch_wall is None or child_fetch_wall <= 0:
+                    raise ProcessFetchError("Process fetch wall evidence unavailable")
             result = ProcessFetchResult(
                 path=returned,
                 digest=digest,
                 bytes=count,
-                child_cpu_s=float(child_cpu),
-                child_fetch_wall_s=float(child_fetch_wall),
+                child_cpu_s=(None if child_cpu is None else float(child_cpu)),
+                child_fetch_wall_s=(None if child_fetch_wall is None else float(child_fetch_wall)),
                 ready_latency_s=perf_counter() - self.started_at,
                 metadata=dict(metadata))
             self._success = True
