@@ -504,7 +504,12 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             path=str(final), sha256=result.digest, size=final.stat().st_size,
             host=cfg.host, remote=next_remote['path'],
             mtime=next_remote['mtime'], snapshot=details)
-        save_store(root, store)
+        try:
+            save_store(root, store)
+        except BaseException:
+            store['downloads'].pop(next_fid, None)
+            final.unlink(missing_ok=True)
+            raise
         prefetched_downloads[next_fid] = (final, result.digest, details)
         process_prefetch_downloads += 1
         if result.child_cpu_s is not None:
