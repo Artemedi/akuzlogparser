@@ -41,11 +41,14 @@ ORDER = ("serial", "process", "process", "serial")
 def _child_fetch(cfg, spec: SourceSpec, destination: str, sender) -> None:
     """Spawn-safe worker: fetch one fixed prefix, return only local proof + OS CPU."""
     try:
+        worker_wall0 = perf_counter()
         snapshot = _fetch_fixed(cfg, spec, Path(destination))
+        worker_wall_s = perf_counter() - worker_wall0
         from scripts.phase9_memory import sample
         own = sample(os.getpid())
         sender.send(("ok", str(snapshot.path), snapshot.digest, snapshot.bytes,
-                     own["cpu_time_s"] if own is not None else None))
+                     own["cpu_time_s"] if own is not None else None,
+                     worker_wall_s))
     except BaseException as exc:
         # Local-only IPC. Never print remote identity or credentials.
         try:
@@ -153,6 +156,7 @@ def _process_pair_mode(cfg, specs: tuple[SourceSpec, ...], root: Path) -> dict:
         child.start()
         sender.close()
         child_cpu = None
+        child_fetch_wall = None
         message = None
         try:
             outputs.append(_parse_snapshot(first, reports, parse_metrics))
@@ -165,15 +169,21 @@ def _process_pair_mode(cfg, specs: tuple[SourceSpec, ...], root: Path) -> dict:
             if child.exitcode != 0 or not message or message[0] != "ok":
                 kind = message[1] if message and message[0] == "error" else "ChildExit"
                 raise RuntimeError("Phase 11 process fetch failed: " + kind)
-            _, returned_path, digest, count, child_cpu = message
+            _, returned_path, digest, count, child_cpu, child_fetch_wall = message
             if Path(returned_path).resolve() != second_path.resolve():
                 raise AssertionError("Phase 11 child returned unexpected snapshot path")
             second = CompletedSnapshot(
                 item=specs[1], path=second_path, digest=digest, bytes=count)
             if not second.path.is_file() or second.path.stat().st_size != second.bytes:
                 raise AssertionError("Phase 11 child snapshot incomplete")
-            fetch_metrics[specs[1].day] = round(
-                perf_counter() - second_start, 6)
+            ready_latency = perf_counter() - second_start
+            if child_fetch_wall is None or child_fetch_wall <= 0:
+                raise AssertionError("Phase 11 child fetch wall evidence unavailable")
+            fetch_metrics[specs[1].day] = round(child_fetch_wall, 6)
+            ready_metrics = {
+                specs[0].day: fetch_metrics[specs[0].day],
+                specs[1].day: round(ready_latency, 6),
+            }
             source_sha[specs[1].day] = second.digest
             outputs.append(_parse_snapshot(second, reports, parse_metrics))
         finally:
@@ -190,6 +200,8 @@ def _process_pair_mode(cfg, specs: tuple[SourceSpec, ...], root: Path) -> dict:
 
     if child_cpu is None:
         raise AssertionError("Phase 11 child CPU evidence unavailable")
+    if child_fetch_wall is None:
+        raise AssertionError("Phase 11 child fetch wall evidence unavailable")
     parent_cpu = process_time() - parent_cpu0
     return dict(
         mode="process",
@@ -198,7 +210,8 @@ def _process_pair_mode(cfg, specs: tuple[SourceSpec, ...], root: Path) -> dict:
         parent_cpu_s=round(parent_cpu, 6),
         child_cpu_s=round(child_cpu, 6),
         fetched=2, parsed=2, outputs=outputs,
-        fetch=fetch_metrics, parse=parse_metrics, source_sha=source_sha,
+        fetch=fetch_metrics, fetch_ready_latency=ready_metrics,
+        parse=parse_metrics, source_sha=source_sha,
         sampled_peak_ws_bytes=memory.peak_ws,
         sampled_peak_private_bytes=memory.peak_private,
         memory_samples=memory.samples,
@@ -234,6 +247,9 @@ def _summary(rows: list[dict], mode: str) -> dict:
         peak_ws_median_bytes=int(med("sampled_peak_ws_bytes")),
         wall_values_s=[row["wall_s"] for row in subset],
         second_fetch_values_s=[row["fetch"]["20260924"] for row in subset],
+        second_ready_values_s=[
+            row.get("fetch_ready_latency", row["fetch"])["20260924"]
+            for row in subset],
         first_parse_values_s=[
             row["parse"]["20260923"]["wall_s"] for row in subset],
     )
@@ -316,6 +332,8 @@ def main():
                   "peak_private_median_bytes", row["peak_private_median_bytes"],
                   "second_fetch_values_s",
                   ",".join(f"{v:.6f}" for v in row["second_fetch_values_s"]),
+                  "second_ready_values_s",
+                  ",".join(f"{v:.6f}" for v in row["second_ready_values_s"]),
                   "first_parse_values_s",
                   ",".join(f"{v:.6f}" for v in row["first_parse_values_s"]))
         print("SOURCE_SHA_EQUAL=PASS")
