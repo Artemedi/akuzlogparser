@@ -18,6 +18,8 @@ from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
                                 _same_path_lexical, _windows_handle_value,
                                 remove_owned_snapshot, ssh_fetch_child)
 from akuz_fetch import ConnectConfig
+from akuz_win_job_spawn import (JobBoundSpawnError,
+                                get_job_bound_spawn_context)
 
 
 class FakeReceiver:
@@ -800,7 +802,7 @@ class ParentWatchdogTests(unittest.TestCase):
 
 class WindowsKillJobTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
-    def test_hard_parent_exit_kills_job_assigned_child(self):
+    def test_hard_parent_exit_kills_atomically_bound_child(self):
         from scripts.phase9_memory import sample
 
         with TemporaryDirectory(prefix="akuz_process_job_") as td:
@@ -820,7 +822,7 @@ class WindowsKillJobTests(unittest.TestCase):
                 time.sleep(.05)
             self.assertIsNone(
                 sample(child_pid),
-                "Job Object child survived hard parent termination")
+                "atomically Job-bound child survived hard parent termination")
 
 
 class RealSpawnLifecycleTests(unittest.TestCase):
@@ -842,9 +844,8 @@ class RealSpawnLifecycleTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), b"real windows spawned snapshot")
 
     @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
-    @unittest.skipUnless(os.name == "nt", "Windows kill Job Object")
-    def test_kill_job_assignment_failure_aborts_child_before_gate(self):
-        with TemporaryDirectory(prefix="akuz_process_job_assign_fail_") as td:
+    def test_regular_spawn_context_is_rejected_before_production_child_start(self):
+        with TemporaryDirectory(prefix="akuz_process_regular_ctx_") as td:
             root = Path(td)
             target = root / "snapshot.log"
             op = ProcessFetch(
@@ -853,43 +854,33 @@ class RealSpawnLifecycleTests(unittest.TestCase):
                 poll_timeout_s=5, join_timeout_s=2, kill_timeout_s=2,
                 expected_listed_bytes=1,
                 require_kill_job=True, safe_ipc=True)
+            with self.assertRaisesRegex(
+                    ProcessFetchUnsafeError, "atomic Job-bound spawn"):
+                op.start()
+            self.assertFalse(target.exists())
+            self.assertIsNone(op.child)
+
+    @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
+    def test_atomic_job_assignment_failure_never_resumes_child(self):
+        with TemporaryDirectory(prefix="akuz_process_atomic_assign_fail_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
             with patch(
-                    "akuz_process_fetch._create_kill_on_close_job",
-                    side_effect=ProcessFetchError("injected job assign failure")):
+                    "akuz_win_job_spawn._assign_job",
+                    side_effect=JobBoundSpawnError(
+                        "injected atomic assignment failure")):
+                op = ProcessFetch(
+                    get_job_bound_spawn_context(),
+                    real_spawn_hanging_child, (), target,
+                    poll_timeout_s=5, join_timeout_s=2, kill_timeout_s=2,
+                    expected_listed_bytes=1,
+                    require_kill_job=True, safe_ipc=True)
                 with self.assertRaisesRegex(
-                        ProcessFetchError, "job assign failure"):
+                        JobBoundSpawnError, "assignment failure"):
                     op.start()
-            self.assertFalse(op.child.is_alive())
             self.assertFalse(target.exists())
             self.assertIsNone(op._kill_job)
 
-    @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
-    def test_job_assignment_uses_spawn_handle_not_pid_lookup(self):
-        with TemporaryDirectory(prefix="akuz_process_job_handle_") as td:
-            root = Path(td)
-            target = root / "snapshot.log"
-            ctx = multiprocessing.get_context("spawn")
-            receiver, sender = ctx.Pipe(duplex=False)
-            child = ctx.Process(
-                target=real_spawn_hanging_child,
-                args=(str(target), sender))
-            child.start()
-            sender.close()
-
-            class NoPidProxy:
-                _popen = child._popen
-                @property
-                def pid(self):
-                    raise AssertionError("PID lookup must not be used")
-
-            job = _create_kill_on_close_job(NoPidProxy())
-            _close_windows_handle(job)
-            child.join(timeout=5)
-            if child.is_alive():
-                child.kill()
-                child.join(timeout=5)
-            receiver.close()
-            self.assertFalse(child.is_alive())
 
     def test_real_spawn_required_kill_job_completes_successfully(self):
         with TemporaryDirectory(prefix="akuz_process_real_job_") as td:
@@ -897,7 +888,7 @@ class RealSpawnLifecycleTests(unittest.TestCase):
             target = root / "snapshot.log"
             payload = b"real windows spawned snapshot"
             op = ProcessFetch(
-                multiprocessing.get_context("spawn"),
+                get_job_bound_spawn_context(),
                 real_spawn_safe_child, (), target,
                 poll_timeout_s=20, join_timeout_s=10, kill_timeout_s=5,
                 expected_listed_bytes=len(payload),
