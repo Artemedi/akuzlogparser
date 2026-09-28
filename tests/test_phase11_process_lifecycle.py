@@ -258,7 +258,10 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             op, _ = self.make(root, receiver, child)
             op.start()
             op.abort()
-            self.assertGreaterEqual(child.join_calls, 1)
+            op.abort()
+            self.assertGreaterEqual(child.join_calls, 2)
+            self.assertTrue(receiver.closed)
+            self.assertIsNone(op.receiver)
 
     def test_abort_reports_child_that_survives_terminate_and_kill(self):
         with TemporaryDirectory(prefix="akuz_process_fetch_survivor_") as td:
