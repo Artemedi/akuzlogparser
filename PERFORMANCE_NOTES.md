@@ -2959,3 +2959,38 @@ the spawned worker separately from parent spawn-to-readiness latency.
 Decision revised: promising isolated candidate, but repeat corrected 23+24
 balanced pair before the large-source multi-source gate. NOT normal app
 integration.
+
+## Phase 11 corrected process-isolation pair rerun (2026-09-28)
+
+Instrumentation correction `be7b332` + `57e482f` separates
+child-measured pure fetch wall from parent spawn-to-readiness
+latency. Exact `57e482f` DBA-008D regression:
+Actions #36397172147, 231 Python PASS (2 skips, 109.684 s),
+Node controls + diff PASS.
+
+New immutable real evidence file via Actions #36403656948,
+exact workflow `27ef63f`; independent read-only numeric audit
+#36403687747 exact `c1e8512`; both SUCCESS. Same fixed
+23+24 Sep prefixes, compression OFF, order serial/process/process/serial.
+4/4 source SHA and deterministic report manifest equality PASS,
+owned workspace cleanup PASS, no payload retained, no app cache/
+Release mutation.
+
+Serial wall 100.777862 / 101.672542 s, median 101.225202.
+Process wall 88.732724 / 92.426783 s, median 90.579754:
+~10.5% lower median wall; both process trials beat both serial trials.
+Total CPU median 61.351562 -> 70.390625 s (~14.7% higher).
+Process-tree private median 367,276,032 -> 318,515,200 B (~13.3%
+lower in this two-trial series; not generalized).
+
+Corrected 24-Sep child pure fetch = 19.953724 / 18.679295 s;
+process readiness latency = 32.732658 / 31.004642 s.
+Serial 24-Sep fetch = 16.589666 / 22.345354 s. Thus the prior
+~57.6% fetch-slowdown statement was instrumentation error and remains
+retracted; pure child fetch is in the serial range, while readiness
+intentionally includes overlap with parse(A).
+
+Decision: corrected pair candidate advances only to an isolated
+23+24+25 multi-source/large-source benchmark with one child maximum,
+fixed prefix, parity, process-tree memory, CPU split, fetch/readiness
+timing and cleanup. No normal-app integration yet.
