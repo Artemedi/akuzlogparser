@@ -191,6 +191,35 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                     op.finish()
             self.assertFalse(dest.exists())
 
+    def test_parent_listed_size_binding_rejects_child_metadata_drift(self):
+        with TemporaryDirectory(prefix="akuz_process_fetch_binding_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            payload = b"complete snapshot"
+            receiver = FakeReceiver()
+            child = FakeChild(on_start=lambda: dest.write_bytes(payload))
+            digest = hashlib.sha256(payload).hexdigest()
+            receiver.message = (
+                "ok", str(dest), digest, len(payload), .2, .5,
+                {
+                    "active": False,
+                    "captured_bytes": len(payload),
+                    "stored_bytes": len(payload),
+                    "dropped_tail_bytes": 0,
+                    "listed_bytes": len(payload) - 1,
+                })
+            ctx = FakeContext(receiver, child)
+            op = ProcessFetch(
+                ctx, lambda *args: None, ("cfg", "spec"), dest,
+                poll_timeout_s=.01, join_timeout_s=.01,
+                kill_timeout_s=.01,
+                expected_listed_bytes=len(payload))
+            with self.assertRaisesRegex(
+                    ProcessFetchError, "listed-size binding mismatch"):
+                with op:
+                    op.finish()
+            self.assertFalse(dest.exists())
+
     def test_child_error_removes_partial_snapshot(self):
         with TemporaryDirectory(prefix="akuz_process_fetch_error_") as td:
             root = Path(td)
