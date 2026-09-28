@@ -1,6 +1,6 @@
 # Phase 11 — overlap SSH download and single-report generation
 
-Status: **THREAD ONE-AHEAD REJECTED BY BALANCED REAL REPLICATION; CORRECTNESS PASS; NOT PRODUCTION INTEGRATED**.
+Status: **THREAD ONE-AHEAD REJECTED; PROCESS-ISOLATED PAIR CANDIDATE REPLICATED PASS; LARGE-SOURCE / PRODUCTION GATES OPEN**.
 
 No normal application scheduler, cache schema, compression default, Phase 9
 architecture, or GitHub Release is changed by this phase.
@@ -201,6 +201,72 @@ the CPU-heavy parser (for example a separate process or another bounded
 architecture), but it must be a new isolated candidate with its own
 snapshot ownership, cancellation, memory and byte-parity contracts. It
 must not be presented as an accepted fix for the cause before measurement.
+
+## Process-isolated pair replication
+
+After the threaded candidate regressed, a separate benchmark-only candidate
+moved only the next SSH fetch into a Windows spawned Python process while
+report generation remained in the parent. It did **not** modify
+`perform_build`, inventory, cache schema, compression default or Release.
+
+Implementation/contract commits:
+- `df5f762` — process-isolated benchmark with simultaneous process-tree
+  memory sampling and parent+child CPU accounting;
+- `93b71b2` — five contract tests. Exact DBA-008D regression
+  [#36395600470](https://github.com/Artemedi/akuzlogparser/actions/runs/36395600470):
+  **231 Python tests PASS, 2 Windows skips, 117.566 s**; Node controls and
+  diff-check PASS.
+
+Balanced real workflow:
+[Actions #36396123108](https://github.com/Artemedi/akuzlogparser/actions/runs/36396123108),
+exact workflow commit `54c305e`. Independent numeric audit:
+[Actions #36396165254](https://github.com/Artemedi/akuzlogparser/actions/runs/36396165254),
+exact audit commit `95bc620`. Both SUCCESS.
+
+Order was `serial, process, process, serial` against the same fixed 23+24
+Sep prefixes, compression forced OFF. Source SHA and deterministic report
+manifests matched across all four trials; workspace cleanup PASS; no raw
+payload persisted; app cache and Release unchanged. Audit additionally
+required process trials to sample at least two processes and non-zero child
+CPU.
+
+| Mode | Wall trials, s | Median wall, s | Median total CPU, s | Median process-tree private, B |
+|---|---|---:|---:|---:|
+| serial | 113.946302, 101.149178 | 107.547740 | 58.726562 | 367,253,504 |
+| process | 78.452962, 83.730728 | 81.091845 | 65.875000 | 328,448,000 |
+
+Both process trials were faster than both serial trials. Median wall improved
+about **24.6%**, while total measured CPU increased about **12.2%**.
+Process-tree private-memory median was about 10.6% lower in this series, but
+that direction should not be generalized from two trials.
+
+The next fetch still slows under concurrent report generation:
+
+| Mode | 24-Sep fetch values, s | Mean, s |
+|---|---|---:|
+| serial | 19.356464, 18.350266 | 18.853365 |
+| process | 30.071016, 29.367467 | 29.719242 |
+
+That is about **57.6% slower** for the fetch itself. First 23-Sep parse mean
+also rises from 25.657197 s to 26.271071 s (~2.4%). Process isolation therefore
+does not remove resource contention; it makes the overlap useful enough that
+the hidden time exceeds the contention/launch cost on this pair.
+
+Child OS CPU evidence was 3.906250 / 3.875000 s; parent CPU was
+61.578125 / 62.390625 s for the two process trials. Thus the candidate's
+CPU figure is not a parent-only undercount.
+
+### Decision for the process candidate
+
+The process-isolated pair result is **promising enough for a bounded
+large-source/multi-source gate**, but it is not production acceptance.
+The next experiment should include the current 25-Sep ~644.6 MB fixed
+prefix in a realistic one-ahead sequence and retain balanced serial/process
+ordering, process-tree RSS/private sampling, full source/report parity and
+cleanup. It must also expose spawn/cancellation behavior and avoid carrying
+raw payloads outside owned temporary workspaces.
+
+No normal application integration is authorized yet.
 
 ## Production gates still open
 
