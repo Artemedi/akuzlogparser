@@ -150,7 +150,8 @@ def _process_pair_mode(cfg, specs: tuple[SourceSpec, ...], root: Path) -> dict:
         second_path = snapshots / specs[1].name
         with ProcessFetch(
                 ctx, _child_fetch, (cfg, specs[1]), second_path,
-                poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10
+                poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10,
+                require_metrics=True
         ) as prefetch:
             outputs.append(_parse_snapshot(first, reports, parse_metrics))
             result = prefetch.finish()
