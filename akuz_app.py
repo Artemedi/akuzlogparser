@@ -34,6 +34,7 @@ from akuz_store_lock import inventory_transaction
 from akuz_runtime import DOCUMENTS, app_root, prepare_runtime
 from akuz_instance_lock import InstanceBusy, exclusive_instance
 from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
+                                ProcessFetchUnsafeError,
                                 remove_owned_snapshot, ssh_fetch_child)
 from akuz_version import __version__
 from akuz_diagnostics import event as perf_event, phase as perf_phase
@@ -526,9 +527,13 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             safe_ipc=True)
         try:
             operation.start()
+        except ProcessFetchUnsafeError:
+            raise
         except Exception:
             try:
                 operation.close()
+            except ProcessFetchUnsafeError:
+                raise
             except Exception:
                 pass
             perf_event(root, 'process.prefetch', 'start_fallback',
@@ -546,13 +551,20 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         next_fid, next_remote, operation = prefetch
         try:
             result = operation.finish()
+        except ProcessFetchUnsafeError:
+            # A live child or unclosed Windows Job can still write to the
+            # owned snapshot. Starting a serial fetch now would create two
+            # writers, so this is a hard reliability failure, not fallback.
+            raise
         except Exception:
             # Prefetch is an optimization only. Any ordinary child/IPC/
             # validation failure must not make the default path less reliable
             # than the historical serial scheduler. The next loop iteration
-            # performs the ordinary
-            # fetch, which re-applies all rotation/truncation/stat checks.
-            operation.close()
+            # performs the ordinary fetch and re-applies all source checks.
+            try:
+                operation.close()
+            except ProcessFetchUnsafeError:
+                raise
             perf_event(root, 'process.prefetch', 'finish_fallback',
                        source_index=ids.index(next_fid) + 1, enabled=0)
             state.set_stage(
