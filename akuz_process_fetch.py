@@ -13,6 +13,7 @@ import os
 import re
 import threading
 from multiprocessing import parent_process
+from multiprocessing.connection import wait as wait_connections
 from time import monotonic, perf_counter, process_time, sleep
 
 from akuz_fetch import fetch_selected
@@ -151,16 +152,41 @@ class ProcessFetch:
         primary_error = None
         try:
             deadline = monotonic() + self.poll_timeout_s
-            while True:
+            sentinel = getattr(self.child, "sentinel", None)
+            if sentinel is None:
+                # Test/non-Windows fallback: the Pipe remains the authority.
+                while True:
+                    remaining = deadline - monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("Process fetch did not return")
+                    try:
+                        if self.receiver.poll(min(0.10, remaining)):
+                            break
+                    except (EOFError, OSError) as exc:
+                        raise ProcessFetchError(
+                            "Process fetch pipe closed or invalid") from exc
+            else:
                 remaining = deadline - monotonic()
                 if remaining <= 0:
                     raise TimeoutError("Process fetch did not return")
-                try:
-                    if self.receiver.poll(min(0.10, remaining)):
-                        break
-                except (EOFError, OSError) as exc:
-                    raise ProcessFetchError(
-                        "Process fetch pipe closed or invalid") from exc
+                ready = wait_connections(
+                    [self.receiver, sentinel], timeout=remaining)
+                if not ready:
+                    raise TimeoutError("Process fetch did not return")
+                if self.receiver not in ready:
+                    # The child is dead. A successful send immediately before
+                    # exit can become readable slightly after the process
+                    # handle signals, so allow a bounded drain grace instead
+                    # of waiting the full 300 s or using a 100 ms heuristic.
+                    self.child.join(timeout=0)
+                    drain = min(2.0, max(0.0, deadline - monotonic()))
+                    try:
+                        if drain <= 0 or not self.receiver.poll(drain):
+                            raise ProcessFetchError(
+                                "Process fetch child exited before IPC result")
+                    except (EOFError, OSError) as exc:
+                        raise ProcessFetchError(
+                            "Process fetch pipe closed or invalid") from exc
 
             try:
                 raw = self.receiver.recv_bytes(maxlength=8192)
@@ -183,14 +209,20 @@ class ProcessFetch:
             if not isinstance(metadata, dict):
                 raise ProcessFetchError("Process fetch metadata invalid")
 
-            returned = Path(returned_path)
-            if not _same_path(returned, self.destination):
+            if not isinstance(returned_path, str):
+                raise ProcessFetchError("Process fetch returned path invalid")
+            if not _same_path_lexical(returned_path, self.destination):
                 raise ProcessFetchError(
                     "Process fetch returned unexpected snapshot path")
+            # The parent owns the destination path. Do not resolve or open the
+            # child-provided path; validate the known owned path itself and
+            # reject symlink/reparse substitution.
+            returned = self.destination
+            st = _owned_snapshot_stat(returned)
             if (not isinstance(count, int) or isinstance(count, bool)
                     or count < 0):
                 raise ProcessFetchError("Process fetch size invalid")
-            if not returned.is_file() or returned.stat().st_size != count:
+            if st.st_size != count:
                 raise ProcessFetchError("Process fetch snapshot incomplete")
             if (not isinstance(digest, str) or
                     re.fullmatch(r"[0-9a-f]{64}", digest) is None):
@@ -236,10 +268,10 @@ class ProcessFetch:
                         "Process fetch static snapshot size mismatch")
 
             if self.require_metrics:
-                if child_cpu is None or child_cpu <= 0:
+                if child_cpu is None or float(child_cpu) < 0:
                     raise ProcessFetchError(
                         "Process fetch CPU evidence unavailable")
-                if child_fetch_wall is None or child_fetch_wall <= 0:
+                if child_fetch_wall is None or float(child_fetch_wall) < 0:
                     raise ProcessFetchError(
                         "Process fetch wall evidence unavailable")
 
@@ -361,16 +393,48 @@ class ProcessFetch:
         return self.start()
 
     def __exit__(self, exc_type, exc, tb):
-        # Do not hide cleanup failure while another exception is active.
-        # Python exception chaining preserves the original failure as context.
-        self.close()
+        if exc_type is None:
+            self.close()
+            return False
+        try:
+            self.close()
+        except ProcessFetchUnsafeError as cleanup_exc:
+            # Safety failure wins, but preserve the report/parse failure as
+            # explicit exception context for diagnosis.
+            raise cleanup_exc from exc
         return False
 
 
-def _same_path(left: Path, right: Path) -> bool:
-    left_value = os.path.normcase(os.path.normpath(str(Path(left).resolve())))
-    right_value = os.path.normcase(os.path.normpath(str(Path(right).resolve())))
+def _same_path_lexical(left, right) -> bool:
+    left_value = os.path.normcase(os.path.abspath(os.path.normpath(str(left))))
+    right_value = os.path.normcase(os.path.abspath(os.path.normpath(str(right))))
     return left_value == right_value
+
+
+def _owned_snapshot_stat(path: Path):
+    target = Path(path)
+    try:
+        st = target.lstat()
+    except OSError as exc:
+        raise ProcessFetchError("Process fetch snapshot missing") from exc
+    if target.is_symlink():
+        raise ProcessFetchError("Process fetch snapshot is a symlink")
+    # Windows st_file_attributes exposes junction/reparse substitution without
+    # following it. Reject every reparse-point file on the owned temp path.
+    if getattr(st, "st_file_attributes", 0) & 0x0400:
+        raise ProcessFetchError("Process fetch snapshot is a reparse point")
+    import stat
+    if not stat.S_ISREG(st.st_mode):
+        raise ProcessFetchError("Process fetch snapshot is not a regular file")
+    parent = target.parent
+    try:
+        parent_st = parent.lstat()
+    except OSError as exc:
+        raise ProcessFetchError("Process fetch snapshot parent missing") from exc
+    if parent.is_symlink() or (
+            getattr(parent_st, "st_file_attributes", 0) & 0x0400):
+        raise ProcessFetchError("Process fetch snapshot parent is redirected")
+    return st
 
 
 def _windows_handle_value(handle) -> int:
@@ -383,7 +447,7 @@ def _windows_handle_value(handle) -> int:
         raise ProcessFetchUnsafeError("Windows handle value invalid") from exc
 
 
-def remove_owned_snapshot(path: Path, *, attempts=40, delay_s=0.10):
+def remove_owned_snapshot(path: Path, *, attempts=100, delay_s=0.10):
     """Remove one owned temporary snapshot or fail closed if it survives."""
     target = Path(path)
     last_error = None
@@ -419,7 +483,7 @@ def _run_after_parent_gate(target, args, destination, sender, gate):
 
 
 def _create_kill_on_close_job(child):
-    """Assign a Windows child process tree to JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE."""
+    """Assign the exact spawned process handle to a kill-on-close Job Object."""
     if os.name != "nt":
         raise ProcessFetchError("Windows Job Object unavailable")
     import ctypes
@@ -467,44 +531,50 @@ def _create_kill_on_close_job(child):
     kernel32.AssignProcessToJobObject.argtypes = [
         wintypes.HANDLE, wintypes.HANDLE]
     kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
-    kernel32.OpenProcess.argtypes = [
-        wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetCurrentProcess.argtypes = []
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.DuplicateHandle.argtypes = [
+        wintypes.HANDLE, wintypes.HANDLE, wintypes.HANDLE,
+        ctypes.POINTER(wintypes.HANDLE), wintypes.DWORD,
+        wintypes.BOOL, wintypes.DWORD]
+    kernel32.DuplicateHandle.restype = wintypes.BOOL
 
-    handle = kernel32.CreateJobObjectW(None, None)
-    if not handle:
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
         raise ProcessFetchError("Could not create Windows kill Job Object")
-    process_handle = None
+    duplicate = wintypes.HANDLE()
     try:
         info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
         info.BasicLimitInformation.LimitFlags = 0x00002000
         if not kernel32.SetInformationJobObject(
-                handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
+                job, 9, ctypes.byref(info), ctypes.sizeof(info)):
             raise ProcessFetchError(
                 "Could not configure Windows kill Job Object")
-        # AssignProcessToJobObject requires PROCESS_SET_QUOTA and
-        # PROCESS_TERMINATE. Open an explicit handle with those rights rather
-        # than assuming multiprocessing's sentinel has a stable access mask.
-        process_set_quota = 0x0100
-        process_terminate = 0x0001
-        process_query_limited_information = 0x1000
-        process_handle = kernel32.OpenProcess(
-            process_set_quota | process_terminate |
-            process_query_limited_information,
-            False, int(child.pid))
-        if not process_handle:
+
+        popen = getattr(child, "_popen", None)
+        source_handle = getattr(popen, "_handle", None)
+        if source_handle is None:
             raise ProcessFetchError(
-                "Could not open prefetch child for Windows Job assignment")
-        if not kernel32.AssignProcessToJobObject(handle, process_handle):
+                "Spawned child process handle unavailable for Job assignment")
+        current = kernel32.GetCurrentProcess()
+        duplicate_same_access = 0x00000002
+        if not kernel32.DuplicateHandle(
+                current, wintypes.HANDLE(_windows_handle_value(source_handle)),
+                current, ctypes.byref(duplicate),
+                0, False, duplicate_same_access):
+            raise ProcessFetchError(
+                "Could not duplicate spawned child process handle")
+        if not kernel32.AssignProcessToJobObject(job, duplicate):
             raise ProcessFetchError(
                 "Could not assign prefetch child to Windows kill Job Object")
-        return _windows_handle_value(handle)
+        return _windows_handle_value(job)
     except BaseException:
-        _close_windows_handle(handle)
+        _close_windows_handle(job)
         raise
     finally:
-        if process_handle:
-            _close_windows_handle(process_handle)
+        if duplicate.value:
+            _close_windows_handle(duplicate)
+
 
 
 def _close_windows_handle(handle):
