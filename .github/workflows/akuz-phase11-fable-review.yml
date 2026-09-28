@@ -206,8 +206,18 @@ jobs:
           lifetime, sanitized IPC, and whether any scenario can leave a child
           alive or a partial snapshot trusted as complete.
 
-          Evidence: real Windows spawn + forced abort tests pass; packaged
-          PyInstaller spawn self-test passes. Treat tests as evidence, not proof.
+          Current hardening to review, not assume correct:
+          - parent recomputes SHA-256 over the completed child snapshot;
+          - child metadata is bound to parent-owned refreshed listed size;
+          - production Windows prefetch requires a KILL_ON_JOB_CLOSE Job Object;
+          - child I/O is start-gated until Job Object assignment succeeds;
+          - a parent-process watchdog remains defense-in-depth;
+          - pipe EOF/OSError/crash paths fail fast and direct abort reaps child.
+
+          Evidence: exact Windows suite eec56d0 ran 267 Python tests PASS
+          (2 skips), browser/diff PASS, including real spawn under required
+          Job Object and hard-parent-exit child termination. Treat tests as
+          evidence, not proof.
 
           Return <=500 words:
           BLOCKERS
@@ -251,10 +261,13 @@ jobs:
           - owned prefetch workspaces are purged for every Linux build even when
             AKUZ_PHASE11_PROCESS_PREFETCH=0.
 
-          Current evidence: full Windows regression, real normal-app A/B
-          inventory/analytics parity and portable spawn/smoke have passed on
-          the current runtime lineage. Persistent B-lite is not used and SSH
-          compression remains default OFF.
+          Current evidence: exact Windows suite eec56d0: 267 Python tests
+          PASS (2 skips), browser/diff PASS. Real normal-app A/B has
+          inventory/analytics parity; portable spawn/smoke previously passed.
+          Missing/corrupt derived spool now deliberately falls back to raw
+          event_stream parsing; Linux owned prefetch workspaces are purged
+          even when the feature rollback switch disables new prefetch.
+          Persistent B-lite is not used and SSH compression remains default OFF.
 
           Return <=700 words:
           BLOCKERS
