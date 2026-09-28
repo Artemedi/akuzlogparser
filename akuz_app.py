@@ -321,7 +321,7 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
                   use_derived_spool=None):
     if use_derived_spool is None:
         use_derived_spool = os.environ.get('AKUZ_PHASE9_DERIVED_SPOOL', '1').strip().lower() not in ('0', 'false', 'no', 'off')
-    process_flag = os.environ.get('AKUZ_PHASE11_PROCESS_PREFETCH', '0').strip().lower()
+    process_flag = os.environ.get('AKUZ_PHASE11_PROCESS_PREFETCH', '1').strip().lower()
     valid_flags = ('0', 'false', 'no', 'off', '', '1', 'true', 'yes', 'on')
     if process_flag not in valid_flags:
         raise FetchError('Неверное значение AKUZ_PHASE11_PROCESS_PREFETCH')
