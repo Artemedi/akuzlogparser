@@ -14,8 +14,7 @@ import pickle
 import re
 import threading
 from multiprocessing import parent_process
-from multiprocessing.connection import wait as wait_connections
-from time import perf_counter, process_time, sleep
+from time import monotonic, perf_counter, process_time, sleep
 
 from akuz_fetch import fetch_selected
 
@@ -141,36 +140,30 @@ class ProcessFetch:
             raise RuntimeError("ProcessFetch not started")
         message = None
         try:
-            sentinel = getattr(self.child, "sentinel", None)
-            if sentinel is None:
-                if not self.receiver.poll(self.poll_timeout_s):
+            deadline = monotonic() + self.poll_timeout_s
+            while True:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
                     raise TimeoutError("Process fetch did not return")
-            else:
-                ready = wait_connections(
-                    [self.receiver, sentinel], timeout=self.poll_timeout_s)
-                if not ready:
-                    raise TimeoutError("Process fetch did not return")
-                if self.receiver not in ready:
-                    # A child may send a small result and exit quickly enough
-                    # for the sentinel to win the Windows wait race. Drain a
-                    # buffered pipe before classifying this as "exited before
-                    # IPC"; otherwise a valid snapshot can spuriously fall
-                    # back to the serial path.
+                try:
+                    if self.receiver.poll(min(0.10, remaining)):
+                        break
+                except (EOFError, OSError) as exc:
+                    raise ProcessFetchError(
+                        "Process fetch pipe closed or invalid") from exc
+                if not self.child.is_alive():
+                    self.child.join(timeout=0)
+                    # One short final drain covers a child that flushed IPC
+                    # immediately before exiting without depending on the
+                    # platform-specific multiprocessing sentinel handle.
                     try:
-                        buffered = self.receiver.poll(0)
+                        if self.receiver.poll(min(0.10, max(0.0, remaining))):
+                            break
                     except (EOFError, OSError) as exc:
                         raise ProcessFetchError(
                             "Process fetch pipe closed or invalid") from exc
-                    if not buffered:
-                        self.child.join(timeout=self.join_timeout_s)
-                        try:
-                            buffered = self.receiver.poll(0)
-                        except (EOFError, OSError) as exc:
-                            raise ProcessFetchError(
-                                "Process fetch pipe closed or invalid") from exc
-                    if not buffered:
-                        raise ProcessFetchError(
-                            "Process fetch child exited before IPC result")
+                    raise ProcessFetchError(
+                        "Process fetch child exited before IPC result")
             try:
                 if self.safe_ipc:
                     raw = self.receiver.recv_bytes(maxlength=8192)
@@ -321,7 +314,7 @@ class ProcessFetch:
         self.close()
 
 
-def remove_owned_snapshot(path: Path, *, attempts=20, delay_s=0.05):
+def remove_owned_snapshot(path: Path, *, attempts=40, delay_s=0.10):
     """Remove one owned temporary snapshot or fail closed if it survives."""
     target = Path(path)
     last_error = None
@@ -405,10 +398,14 @@ def _create_kill_on_close_job(child):
     kernel32.AssignProcessToJobObject.argtypes = [
         wintypes.HANDLE, wintypes.HANDLE]
     kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.OpenProcess.argtypes = [
+        wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
 
     handle = kernel32.CreateJobObjectW(None, None)
     if not handle:
         raise ProcessFetchError("Could not create Windows kill Job Object")
+    process_handle = None
     try:
         info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
         info.BasicLimitInformation.LimitFlags = 0x00002000
@@ -416,7 +413,19 @@ def _create_kill_on_close_job(child):
                 handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
             raise ProcessFetchError(
                 "Could not configure Windows kill Job Object")
-        process_handle = wintypes.HANDLE(int(child.sentinel))
+        # AssignProcessToJobObject requires PROCESS_SET_QUOTA and
+        # PROCESS_TERMINATE. Open an explicit handle with those rights rather
+        # than assuming multiprocessing's sentinel has a stable access mask.
+        process_set_quota = 0x0100
+        process_terminate = 0x0001
+        process_query_limited_information = 0x1000
+        process_handle = kernel32.OpenProcess(
+            process_set_quota | process_terminate |
+            process_query_limited_information,
+            False, int(child.pid))
+        if not process_handle:
+            raise ProcessFetchError(
+                "Could not open prefetch child for Windows Job assignment")
         if not kernel32.AssignProcessToJobObject(handle, process_handle):
             raise ProcessFetchError(
                 "Could not assign prefetch child to Windows kill Job Object")
@@ -424,6 +433,9 @@ def _create_kill_on_close_job(child):
     except BaseException:
         _close_windows_handle(handle)
         raise
+    finally:
+        if process_handle:
+            _close_windows_handle(process_handle)
 
 
 def _close_windows_handle(handle):
