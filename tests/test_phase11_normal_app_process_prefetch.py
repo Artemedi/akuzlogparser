@@ -214,6 +214,43 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             self.assertEqual((other / "keep.log").read_bytes(), b"keep")
             self.assertEqual(normal.read_bytes(), b"normal")
 
+    def test_prefetch_inventory_save_failure_rolls_back_promoted_snapshot(self):
+        with TemporaryDirectory(prefix="akuz_p11_inventory_rollback_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+            real_save = akuz_app.save_store
+
+            def fail_only_prefetch(app_root, store):
+                if (len(store["downloads"]) == 2
+                        and len(store["reports"]) == 1):
+                    raise OSError("injected prefetch inventory failure")
+                return real_save(app_root, store)
+
+            FakeProcessFetch.reset()
+            with patch("akuz_app.save_store", side_effect=fail_only_prefetch):
+                with self.assertRaisesRegex(
+                        OSError, "prefetch inventory failure"):
+                    self.build(root, rows, process=True)
+
+            store = load_store(root)
+            self.assertEqual(len(store["downloads"]), 1)
+            self.assertEqual(len(store["reports"]), 1)
+            second_final = selected_snapshot_path(
+                self.config(root), rows[1])
+            self.assertFalse(second_final.exists())
+            self.assertFalse(list((root / "downloads").glob(
+                ".akuz-phase11-prefetch-*")))
+            self.assertFalse(list((root / "reports").glob("*.building")))
+
+            FakeProcessFetch.reset()
+            recovered, calls = self.build(root, rows, process=True)
+            self.assertTrue(recovered["reports"][0]["reused"])
+            self.assertEqual(calls, [rows[1]["name"]])
+            self.assertEqual(FakeProcessFetch.starts, [rows[2]["name"]])
+            self.assertIsNotNone(recovered["combined"])
+            self.assertEqual(len(load_store(root)["downloads"]), 3)
+
     def test_prefetch_failure_keeps_completed_single_then_restart_recovers(self):
         with TemporaryDirectory(prefix="akuz_p11_app_fault_") as td:
             home = Path(td)
