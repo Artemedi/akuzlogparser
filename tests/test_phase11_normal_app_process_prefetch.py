@@ -187,6 +187,33 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             self.assertIsNotNone(result["combined"])
             self.assertEqual(len(load_store(root)["downloads"]), 3)
 
+    def test_orphan_cleanup_is_scoped_to_one_app_root(self):
+        with TemporaryDirectory(prefix="akuz_p11_orphan_") as td:
+            home = Path(td)
+            downloads = home / "downloads"
+            downloads.mkdir()
+            root_a = home / "app-a"
+            root_b = home / "app-b"
+            own = downloads / (
+                akuz_app._phase11_prefetch_prefix(root_a) + "stale")
+            other = downloads / (
+                akuz_app._phase11_prefetch_prefix(root_b) + "active")
+            normal = downloads / "ordinary-file.log"
+            own.mkdir()
+            (own / "partial.log").write_bytes(b"partial")
+            other.mkdir()
+            (other / "keep.log").write_bytes(b"keep")
+            normal.write_bytes(b"normal")
+
+            removed = akuz_app._cleanup_phase11_prefetch_orphans(
+                root_a, downloads)
+
+            self.assertEqual(removed, 1)
+            self.assertFalse(own.exists())
+            self.assertTrue(other.is_dir())
+            self.assertEqual((other / "keep.log").read_bytes(), b"keep")
+            self.assertEqual(normal.read_bytes(), b"normal")
+
     def test_prefetch_failure_keeps_completed_single_then_restart_recovers(self):
         with TemporaryDirectory(prefix="akuz_p11_app_fault_") as td:
             home = Path(td)
