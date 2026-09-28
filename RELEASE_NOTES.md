@@ -1,10 +1,24 @@
-# AKUZ Log Explorer 4.7.0 — Windows 10/11 x64 portable
+# AKUZ Log Explorer 4.7.1 — Windows 10/11 x64 portable
 
 Релиз анализирует **только файловые журналы AKUZ `.log`**. Системные
 журналы Windows/Linux и VCLib не собираются. Portable EXE включает Python,
 Paramiko и необходимые зависимости.
 
-## Главное в v4.7.0
+## Hotfix v4.7.1
+
+- Исправлено восстановление связи UI с локальным сервисом при единичном
+  transient `fetch('/api/status')` failure во время долгой обработки.
+  Раньше один такой сбой оставлял страницу навсегда в состоянии
+  «Нет связи с локальным сервисом: Failed to fetch», даже если backend
+  продолжал строить отчёты. Теперь UI автоматически повторяет только
+  read-only status polling с ограниченным backoff и восстанавливает
+  состояние после ответа сервиса.
+- Команда `/api/build` при этом **не повторяется**, поэтому hotfix не может
+  запустить вторую обработку той же пачки.
+- Добавлен browser regression, который воспроизводит один `Failed to fetch`
+  и подтверждает последующее восстановление UI.
+
+## База v4.7.1
 
 - **Быстрее multi-source fresh build:** normal-app использует проверенный
   временный derived spool для свежих single-отчётов и повторно применяет
@@ -28,7 +42,7 @@ Paramiko и необходимые зависимости.
   на 67,6–71,0% и socket RX на 72,1–76,9%, но measured parent `sshd` CPU вырос
   приблизительно в 5,2–6,1 раза. Поэтому `compression=false` остаётся default.
 - Экспериментальные Phase 11 thread/process overlap harness **не подключены к
-  обычному приложению v4.7.0**. Thread-вариант отклонён. Process-isolated
+  обычному приложению v4.7.1**. Thread-вариант отклонён. Process-isolated
   23+24+25 benchmark на тех же fixed-prefix данных дал ~19,9% меньший median
   wall при ~17,2% большем total CPU и полной source/report parity, но normal-app
   cancellation/cache/restart integration не закрыта; поэтому runtime scheduler
