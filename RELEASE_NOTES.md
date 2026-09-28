@@ -28,8 +28,11 @@ Paramiko и необходимые зависимости.
   на 67,6–71,0% и socket RX на 72,1–76,9%, но measured parent `sshd` CPU вырос
   приблизительно в 5,2–6,1 раза. Поэтому `compression=false` остаётся default.
 - Экспериментальные Phase 11 thread/process overlap harness **не подключены к
-  обычному приложению v4.7.0**. Thread-вариант отклонён; process-вариант
-  исследуется отдельно и не меняет runtime scheduler этого релиза.
+  обычному приложению v4.7.0**. Thread-вариант отклонён. Process-isolated
+  23+24+25 benchmark на тех же fixed-prefix данных дал ~19,9% меньший median
+  wall при ~17,2% большем total CPU и полной source/report parity, но normal-app
+  cancellation/cache/restart integration не закрыта; поэтому runtime scheduler
+  этого релиза сознательно остаётся последовательным.
 
 ## Совместимость и обновление
 
