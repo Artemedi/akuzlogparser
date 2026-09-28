@@ -4,6 +4,10 @@ import os
 import sys
 import time
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from akuz_process_fetch import _arm_parent_watchdog
 
 
