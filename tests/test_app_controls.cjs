@@ -165,3 +165,43 @@ test('clear cache is cache-only and works without legacy report-deletion checkbo
   assert.match(prompts[0],/Готовые отчёты сохранятся/);
   assert.equal(nodes.has('clear-reports'),false);
 });
+
+
+test('transient status fetch failure retries automatically and recovers UI',async()=>{
+  const nodes=new Map();
+  const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
+  let statusCalls=0,nextPoll=null,nextDelay=null;
+  const context={
+    document:{getElementById:get,createElement:()=>new Element()},
+    location:{hostname:'127.0.0.1',protocol:'http:',pathname:'/',assign(){}},
+    setTimeout:(fn,delay)=>{nextPoll=fn;nextDelay=delay;return 1;},
+    clearTimeout(){},confirm:()=>true,
+    fetch:async url=>{
+      if(url==='/api/status'){
+        statusCalls++;
+        if(statusCalls===1)throw new TypeError('Failed to fetch');
+        return {ok:true,json:async()=>({
+          busy:false,source:'linux',local_path:'',listing:[],stage:'Готов к работе',
+          error:'',result:null,notice:''
+        })};
+      }
+      if(url==='/api/reports')return {ok:true,json:async()=>({reports:[]})};
+      return {ok:true,json:async()=>({started:true})};
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../app_controls.js'),'utf8'),context);
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  await flush();
+  assert.match(get('fetch-status').textContent,/Временно нет связи/);
+  assert.match(get('fetch-status').textContent,/Failed to fetch/);
+  assert.equal(nextDelay,1000);
+  assert.equal(get('open-analytics').attrs['aria-disabled'],'true');
+  assert.equal(typeof nextPoll,'function');
+
+  await nextPoll();
+  await flush();
+  assert.equal(statusCalls,2);
+  assert.equal(get('fetch-status').textContent,'Готов к работе');
+  assert.equal(get('open-analytics').attrs['aria-disabled'],'false');
+  assert.equal(nextDelay,2500);
+});
