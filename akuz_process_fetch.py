@@ -45,7 +45,7 @@ class ProcessFetch:
     def __init__(self, ctx, target, args, destination: Path,
                  *, poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10,
                  name="akuz-phase11-fetch", require_metrics=False,
-                 expected_listed_bytes=None):
+                 expected_listed_bytes=None, require_kill_job=False):
         self.ctx = ctx
         self.target = target
         self.args = tuple(args)
@@ -56,7 +56,10 @@ class ProcessFetch:
         self.name = name
         self.require_metrics = require_metrics
         self.expected_listed_bytes = expected_listed_bytes
+        self.require_kill_job = require_kill_job
         self.receiver = None
+        self._start_gate = None
+        self._kill_job = None
         self.child = None
         self.started_at = None
         self._success = False
@@ -65,10 +68,23 @@ class ProcessFetch:
         if self.child is not None:
             raise RuntimeError("ProcessFetch already started")
         receiver, sender = self.ctx.Pipe(duplex=False)
-        child = self.ctx.Process(
-            target=self.target,
-            args=(*self.args, str(self.destination), sender),
-            name=self.name)
+        if self.require_kill_job:
+            if os.name != "nt":
+                receiver.close()
+                sender.close()
+                raise ProcessFetchError(
+                    "Kill-on-close Job Object requires Windows")
+            self._start_gate = self.ctx.Event()
+            child = self.ctx.Process(
+                target=_run_after_parent_gate,
+                args=(self.target, self.args, str(self.destination),
+                      sender, self._start_gate),
+                name=self.name)
+        else:
+            child = self.ctx.Process(
+                target=self.target,
+                args=(*self.args, str(self.destination), sender),
+                name=self.name)
         self.receiver = receiver
         self.child = child
         self.started_at = perf_counter()
@@ -85,6 +101,19 @@ class ProcessFetch:
             except OSError:
                 pass
             raise
+        if self.require_kill_job:
+            try:
+                self._kill_job = _create_kill_on_close_job(child)
+                self._start_gate.set()
+            except BaseException:
+                try:
+                    self.abort()
+                finally:
+                    try:
+                        sender.close()
+                    except BaseException:
+                        pass
+                raise
         try:
             sender.close()
         except BaseException:
@@ -203,6 +232,10 @@ class ProcessFetch:
         survivor = False
         try:
             if child is not None:
+                if child.is_alive() and self._kill_job is not None:
+                    _close_windows_handle(self._kill_job)
+                    self._kill_job = None
+                    child.join(timeout=self.kill_timeout_s)
                 if child.is_alive():
                     child.terminate()
                     child.join(timeout=self.kill_timeout_s)
@@ -215,6 +248,10 @@ class ProcessFetch:
                     # zombie/process handle solely because is_alive() was false.
                     child.join(timeout=0)
         finally:
+            if self._kill_job is not None:
+                _close_windows_handle(self._kill_job)
+                self._kill_job = None
+            self._start_gate = None
             if self.receiver is not None:
                 try:
                     self.receiver.close()
@@ -235,12 +272,114 @@ class ProcessFetch:
         if self.receiver is not None:
             self.receiver.close()
             self.receiver = None
+        if self._kill_job is not None:
+            _close_windows_handle(self._kill_job)
+            self._kill_job = None
+        self._start_gate = None
 
     def __enter__(self):
         return self.start()
 
     def __exit__(self, exc_type, exc, tb):
         self.close()
+
+
+def _run_after_parent_gate(target, args, destination, sender, gate):
+    """Do not begin child I/O until the parent has assigned a kill Job Object."""
+    parent = parent_process()
+    while not gate.wait(0.05):
+        if parent is None:
+            sender.close()
+            os._exit(89)
+        try:
+            if not parent.is_alive():
+                sender.close()
+                os._exit(89)
+        except BaseException:
+            sender.close()
+            os._exit(89)
+    target(*args, destination, sender)
+
+
+def _create_kill_on_close_job(child):
+    """Assign a Windows child process tree to JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE."""
+    if os.name != "nt":
+        raise ProcessFetchError("Windows Job Object unavailable")
+    import ctypes
+    from ctypes import wintypes
+
+    class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class IO_COUNTERS(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_ulonglong),
+            ("WriteOperationCount", ctypes.c_ulonglong),
+            ("OtherOperationCount", ctypes.c_ulonglong),
+            ("ReadTransferCount", ctypes.c_ulonglong),
+            ("WriteTransferCount", ctypes.c_ulonglong),
+            ("OtherTransferCount", ctypes.c_ulonglong),
+        ]
+
+    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+            ("IoInfo", IO_COUNTERS),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.AssignProcessToJobObject.argtypes = [
+        wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+
+    handle = kernel32.CreateJobObjectW(None, None)
+    if not handle:
+        raise ProcessFetchError("Could not create Windows kill Job Object")
+    try:
+        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        info.BasicLimitInformation.LimitFlags = 0x00002000
+        if not kernel32.SetInformationJobObject(
+                handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
+            raise ProcessFetchError(
+                "Could not configure Windows kill Job Object")
+        process_handle = wintypes.HANDLE(int(child.sentinel))
+        if not kernel32.AssignProcessToJobObject(handle, process_handle):
+            raise ProcessFetchError(
+                "Could not assign prefetch child to Windows kill Job Object")
+        return int(handle)
+    except BaseException:
+        _close_windows_handle(handle)
+        raise
+
+
+def _close_windows_handle(handle):
+    if handle is None or os.name != "nt":
+        return
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.CloseHandle(wintypes.HANDLE(int(handle)))
 
 
 def _arm_parent_watchdog():
