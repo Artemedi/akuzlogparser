@@ -105,6 +105,29 @@ Live-file change after verification remains possible;
 do not portray the opt-in as an atomic filesystem snapshot.
 Documentation: `PHASE94_NORMAL_APP_SOURCE_IDENTITY.md`.
 
+## Remote SSH identity baseline gate
+
+This gate validates the **existing application/source identity baseline**,
+not either candidate architecture. Synthetic normal-app SSH tests now cover
+same-content distinct remote paths, growth reconciliation from an old browser
+selection, device/inode rotation rejection before fetch, and the same remote
+path under a different configured SSH host. Exact Windows `b3851b9`:
+[Actions #36382720832](https://github.com/Artemedi/akuzlogparser/actions/runs/36382720832),
+203 Python PASS (2 platform skips), Node controls and diff-check PASS.
+
+A separate read-only real SSH metadata probe, exact workflow `7da765e`,
+[Actions #36382815851](https://github.com/Artemedi/akuzlogparser/actions/runs/36382815851),
+confirmed server device/inode availability and repeated stability of
+id/path/size/mtime/device/inode for the 23/24/25 Sep files without fetching
+payload. Current 25-Sep remote size is 644,567,384 B versus 644,034,993 B
+in the frozen benchmark dataset, so current remote data cannot inherit the
+old exact-SHA performance evidence.
+
+Still OPEN: cryptographic detection of remote same-stat in-place rewrites,
+network/process failure of an **integrated candidate**, and any server-side
+full-hash policy. Do not enable remote hashing silently: it adds server I/O
+and CPU and is a separate operational choice.
+
 ## Acceptance gates before an architecture change
 
 1. Real full-size fresh-all A/Tee/B-lite on the same frozen source
