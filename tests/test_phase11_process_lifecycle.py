@@ -135,6 +135,33 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             self.assertTrue(receiver.closed)
             self.assertTrue(ctx.sender.closed)
 
+    def test_pipe_oserror_is_normalized_and_cleans_snapshot(self):
+        with TemporaryDirectory(prefix="akuz_process_fetch_pipe_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            receiver = FakeReceiver(OSError("broken pipe"), ready=True)
+            child = FakeChild(on_start=lambda: dest.write_bytes(b"partial"))
+            op, _ = self.make(root, receiver, child)
+            with self.assertRaisesRegex(ProcessFetchError, "pipe closed or invalid"):
+                with op:
+                    op.finish()
+            self.assertFalse(dest.exists())
+
+    def test_non_hex_digest_is_rejected(self):
+        with TemporaryDirectory(prefix="akuz_process_fetch_digest_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            payload = b"snapshot"
+            receiver = FakeReceiver()
+            child = FakeChild(on_start=lambda: dest.write_bytes(payload))
+            receiver.message = (
+                "ok", str(dest), "Z" * 64, len(payload), .2, .5)
+            op, _ = self.make(root, receiver, child)
+            with self.assertRaisesRegex(ProcessFetchError, "digest invalid"):
+                with op:
+                    op.finish()
+            self.assertFalse(dest.exists())
+
     def test_child_error_removes_partial_snapshot(self):
         with TemporaryDirectory(prefix="akuz_process_fetch_error_") as td:
             root = Path(td)
@@ -285,7 +312,14 @@ class SSHChildContractTests(unittest.TestCase):
             self.assertEqual(Path(message[1]), target)
             self.assertEqual(message[2], "d" * 64)
             self.assertEqual(message[3], len(payload))
-            self.assertEqual(message[6], details)
+            self.assertEqual(message[6], {
+                "active": True,
+                "captured_bytes": len(payload),
+                "stored_bytes": len(payload),
+                "dropped_tail_bytes": 0,
+                "listed_bytes": len(payload),
+            })
+            self.assertNotIn("remote_path", message[6])
 
     def test_child_failure_reports_only_exception_type(self):
         with TemporaryDirectory(prefix="akuz_process_child_fail_") as td:
