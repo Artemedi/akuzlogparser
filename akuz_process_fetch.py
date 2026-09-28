@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+import os
+import threading
 from time import perf_counter
 
 from akuz_fetch import fetch_selected
@@ -151,6 +153,43 @@ class ProcessFetch:
         self.close()
 
 
+def _arm_parent_watchdog():
+    """On Windows, hard-exit this child when its parent process disappears."""
+    if os.name != 'nt':
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.OpenProcess.argtypes = [
+        wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+
+    synchronize = 0x00100000
+    wait_object_0 = 0x00000000
+    wait_timeout = 0x00000102
+    parent_pid = os.getppid()
+    handle = kernel32.OpenProcess(synchronize, False, parent_pid)
+    if not handle:
+        raise ProcessFetchError('Parent process watchdog unavailable')
+
+    def watch():
+        while True:
+            result = kernel32.WaitForSingleObject(handle, 500)
+            if result == wait_timeout:
+                continue
+            if result == wait_object_0:
+                os._exit(86)
+            os._exit(87)
+
+    thread = threading.Thread(
+        target=watch, name='akuz-prefetch-parent-watch', daemon=True)
+    thread.start()
+    return thread
+
+
 def ssh_fetch_child(cfg, remote: dict, destination: str, sender) -> None:
     """Spawn-safe SSH fetch into an owned temporary destination.
 
@@ -161,6 +200,7 @@ def ssh_fetch_child(cfg, remote: dict, destination: str, sender) -> None:
     target = Path(destination)
     fetched = None
     try:
+        _arm_parent_watchdog()
         started = perf_counter()
         child_cfg = replace(cfg, local_dest=target.parent)
         fetched, digest, details = fetch_selected(
