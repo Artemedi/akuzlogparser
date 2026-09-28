@@ -18,7 +18,7 @@ import akuz_app
 from akuz_app import State
 from akuz_fetch import ConnectConfig, selected_snapshot_path
 from akuz_process_fetch import ProcessFetchError, ProcessFetchResult
-from akuz_store import load_store
+from akuz_store import load_store, save_store
 from scripts.bench_phase9_baseline import create_sources, inventory_manifest
 from scripts.phase9_semantic import semantic_exports, semantic_sql
 
@@ -235,6 +235,56 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             self.assertTrue(other.is_dir())
             self.assertEqual((other / "keep.log").read_bytes(), b"keep")
             self.assertEqual(normal.read_bytes(), b"normal")
+
+    def test_restart_recovers_inventory_committed_before_prefetch_promotion(self):
+        with TemporaryDirectory(prefix="akuz_p11_inventory_before_promote_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+            self.build(root, rows, process=False, subset=[0])
+
+            cfg = self.config(root)
+            second = rows[1]
+            final = selected_snapshot_path(cfg, second)
+            self.assertFalse(final.exists())
+
+            # Equivalent persistent state to a hard parent exit after the
+            # prefetch inventory commit but before temp -> final promotion.
+            store = load_store(root)
+            payload = second["_payload"]
+            store["downloads"][second["id"]] = dict(
+                path=str(final),
+                sha256=hashlib.sha256(payload).hexdigest(),
+                size=len(payload),
+                host=cfg.host,
+                remote=second["path"],
+                mtime=second["mtime"],
+                snapshot={
+                    "active": False,
+                    "captured_bytes": len(payload),
+                    "stored_bytes": len(payload),
+                    "dropped_tail_bytes": 0,
+                    "listed_bytes": len(payload),
+                    "remote_path": second["path"],
+                })
+            save_store(root, store)
+
+            orphan = cfg.local_dest / (
+                akuz_app._phase11_prefetch_prefix(root) + "hard-exit")
+            orphan.mkdir(parents=True)
+            (orphan / "0001_partial.log").write_bytes(b"partial")
+
+            FakeProcessFetch.reset()
+            result, calls = self.build(root, rows, process=True)
+
+            self.assertFalse(orphan.exists())
+            self.assertEqual(calls, [rows[1]["name"]])
+            self.assertEqual(FakeProcessFetch.starts, [rows[2]["name"]])
+            self.assertTrue(final.is_file())
+            self.assertEqual(final.read_bytes(), payload)
+            self.assertEqual(len(load_store(root)["downloads"]), 3)
+            self.assertTrue(result["reports"][0]["reused"])
+            self.assertIsNotNone(result["combined"])
 
     def test_prefetch_inventory_save_failure_rolls_back_promoted_snapshot(self):
         with TemporaryDirectory(prefix="akuz_p11_inventory_rollback_") as td:
