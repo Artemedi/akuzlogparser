@@ -90,6 +90,16 @@ class TimeoutProcessFetch(FakeProcessFetch):
         raise TimeoutError("injected child timeout")
 
 
+class ValueErrorProcessFetch(FakeProcessFetch):
+    def finish(self):
+        self.destination.parent.mkdir(parents=True, exist_ok=True)
+        self.destination.write_bytes(b"partial")
+        type(self).active -= 1
+        self.finished = True
+        self.destination.unlink(missing_ok=True)
+        raise ValueError("injected IPC validation failure")
+
+
 class NormalAppProcessPrefetchTests(unittest.TestCase):
     def make_remote(self, home):
         source_dir = home / "source_payloads"
@@ -218,6 +228,27 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             self.assertFalse(result["reports"][2]["reused"])
             self.assertIsNotNone(result["combined"])
             self.assertEqual(len(load_store(root)["downloads"]), 3)
+
+    def test_prefetch_orphans_are_cleaned_even_when_feature_disabled(self):
+        with TemporaryDirectory(prefix="akuz_p11_orphan_off_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+            cfg = self.config(root)
+            cfg.local_dest.mkdir(parents=True, exist_ok=True)
+            orphan = cfg.local_dest / (
+                akuz_app._phase11_prefetch_prefix(root) + "disabled")
+            orphan.mkdir()
+            (orphan / "partial.log").write_bytes(b"partial")
+
+            FakeProcessFetch.reset()
+            result, calls = self.build(
+                root, rows, process=False, subset=[0])
+
+            self.assertFalse(orphan.exists())
+            self.assertEqual(FakeProcessFetch.starts, [])
+            self.assertEqual(calls, [rows[0]["name"]])
+            self.assertEqual(len(result["reports"]), 1)
 
     def test_orphan_cleanup_is_scoped_to_one_app_root(self):
         with TemporaryDirectory(prefix="akuz_p11_orphan_") as td:
@@ -382,6 +413,24 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             self.assertIsNotNone(result["combined"])
             self.assertFalse(list((root / "downloads").glob(
                 ".akuz-phase11-prefetch-*")))
+    def test_unexpected_prefetch_validation_error_falls_back_to_serial(self):
+        with TemporaryDirectory(prefix="akuz_p11_app_valueerror_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+
+            ValueErrorProcessFetch.reset()
+            result, calls = self.build(
+                root, rows, process=True,
+                process_class=ValueErrorProcessFetch)
+
+            self.assertEqual(
+                calls, [rows[0]["name"], rows[1]["name"], rows[2]["name"]])
+            self.assertIsNotNone(result["combined"])
+            self.assertEqual(len(load_store(root)["downloads"]), 3)
+            self.assertFalse(list((root / "downloads").glob(
+                ".akuz-phase11-prefetch-*")))
+
 
 
 if __name__ == "__main__":
