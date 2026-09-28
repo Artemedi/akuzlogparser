@@ -264,11 +264,8 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             op = ProcessFetch(
                 ctx, lambda *args: None, (), dest,
                 poll_timeout_s=2.0, join_timeout_s=.01, kill_timeout_s=.01)
-            with patch(
-                    "akuz_process_fetch.wait_connections",
-                    return_value=[child.sentinel]):
-                with op:
-                    result = op.finish()
+            with op:
+                result = op.finish()
             self.assertEqual(result.digest, digest)
             self.assertTrue(dest.is_file())
 
@@ -357,6 +354,41 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                 result = op.finish()
             self.assertEqual(result.digest, digest)
             self.assertTrue(dest.is_file())
+
+    def test_owned_snapshot_cleanup_failure_is_unsafe(self):
+        with TemporaryDirectory(prefix="akuz_process_cleanup_unsafe_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            dest.write_bytes(b"partial")
+            with patch.object(
+                    Path, "unlink",
+                    side_effect=PermissionError("simulated persistent lock")), \
+                 patch("akuz_process_fetch.sleep"):
+                with self.assertRaisesRegex(
+                        ProcessFetchUnsafeError, "could not be removed"):
+                    remove_owned_snapshot(dest, attempts=3, delay_s=.01)
+            self.assertTrue(dest.exists())
+
+    def test_job_close_failure_after_validation_is_not_double_closed(self):
+        with TemporaryDirectory(prefix="akuz_process_job_close_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            payload = b"validated snapshot"
+            digest = hashlib.sha256(payload).hexdigest()
+            receiver = FakeReceiver(
+                ("ok", str(dest), digest, len(payload), .2, .5))
+            child = FakeChild(on_start=lambda: dest.write_bytes(payload))
+            op, _ = self.make(root, receiver, child)
+            op._kill_job = 123
+            with patch(
+                    "akuz_process_fetch._close_windows_handle",
+                    side_effect=ProcessFetchUnsafeError("close failed")) as close_handle:
+                op.start()
+                with self.assertRaisesRegex(
+                        ProcessFetchUnsafeError, "close failed"):
+                    op.finish()
+            close_handle.assert_called_once_with(123)
+            self.assertIsNone(op._kill_job)
 
     def test_owned_snapshot_cleanup_retries_transient_windows_lock(self):
         with TemporaryDirectory(prefix="akuz_process_cleanup_retry_") as td:
@@ -708,6 +740,30 @@ class WatchdogStartupFailureTests(unittest.TestCase):
                 timeout=20, check=False)
             self.assertEqual(proc.returncode, 88)
             self.assertFalse((root / "never.log").exists())
+
+
+class PreGateParentDeathTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows parent sentinel watchdog")
+    def test_hard_parent_exit_before_gate_kills_child(self):
+        from scripts.phase9_memory import sample
+
+        with TemporaryDirectory(prefix="akuz_process_pregate_") as td:
+            root = Path(td)
+            helper = Path(__file__).with_name(
+                "phase11_pregate_parent_exit_helper.py")
+            proc = subprocess.run(
+                [sys.executable, str(helper), str(root)],
+                cwd=Path(__file__).resolve().parents[1],
+                timeout=30, check=False)
+            self.assertEqual(proc.returncode, 79)
+            child_pid = int((root / "child.pid").read_text("ascii"))
+            deadline = time.time() + 10
+            while sample(child_pid) is not None and time.time() < deadline:
+                time.sleep(.05)
+            self.assertIsNone(
+                sample(child_pid),
+                "pre-gate child survived hard parent termination")
+            self.assertFalse((root / "owned.log").exists())
 
 
 class ParentWatchdogTests(unittest.TestCase):
