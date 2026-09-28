@@ -96,10 +96,7 @@ class ProcessFetch:
             self.receiver = None
             self.child = None
             self.started_at = None
-            try:
-                self.destination.unlink(missing_ok=True)
-            except OSError:
-                pass
+            remove_owned_snapshot(self.destination)
             raise
         if self.require_kill_job:
             try:
@@ -142,9 +139,26 @@ class ProcessFetch:
                 if not ready:
                     raise TimeoutError("Process fetch did not return")
                 if self.receiver not in ready:
-                    self.child.join(timeout=self.join_timeout_s)
-                    raise ProcessFetchError(
-                        "Process fetch child exited before IPC result")
+                    # A child may send a small result and exit quickly enough
+                    # for the sentinel to win the Windows wait race. Drain a
+                    # buffered pipe before classifying this as "exited before
+                    # IPC"; otherwise a valid snapshot can spuriously fall
+                    # back to the serial path.
+                    try:
+                        buffered = self.receiver.poll(0)
+                    except (EOFError, OSError) as exc:
+                        raise ProcessFetchError(
+                            "Process fetch pipe closed or invalid") from exc
+                    if not buffered:
+                        self.child.join(timeout=self.join_timeout_s)
+                        try:
+                            buffered = self.receiver.poll(0)
+                        except (EOFError, OSError) as exc:
+                            raise ProcessFetchError(
+                                "Process fetch pipe closed or invalid") from exc
+                    if not buffered:
+                        raise ProcessFetchError(
+                            "Process fetch child exited before IPC result")
             try:
                 message = self.receiver.recv()
             except (EOFError, OSError, pickle.UnpicklingError) as exc:
@@ -257,14 +271,13 @@ class ProcessFetch:
                     self.receiver.close()
                 finally:
                     self.receiver = None
-            try:
-                self.destination.unlink(missing_ok=True)
-            except OSError:
-                # Do not mask the original timeout/crash/kill failure on
-                # Windows when another process still has the file open.
-                pass
         if survivor:
             raise ProcessFetchError("Process fetch child could not be terminated")
+        # Only remove the owned file after the child/tree has been reaped and
+        # the kill Job Object handle has been closed. On Windows an exiting
+        # process may release its file handle a few milliseconds after join;
+        # retry rather than silently leaving a partial snapshot behind.
+        remove_owned_snapshot(self.destination)
 
     def close(self):
         if not self._success:
@@ -282,6 +295,24 @@ class ProcessFetch:
 
     def __exit__(self, exc_type, exc, tb):
         self.close()
+
+
+def remove_owned_snapshot(path: Path, *, attempts=20, delay_s=0.05):
+    """Remove one owned temporary snapshot or fail closed if it survives."""
+    target = Path(path)
+    last_error = None
+    for attempt in range(max(1, attempts)):
+        try:
+            target.unlink(missing_ok=True)
+            if not target.exists():
+                return
+        except OSError as exc:
+            last_error = exc
+        if attempt + 1 < max(1, attempts):
+            sleep(delay_s)
+    if target.exists():
+        raise ProcessFetchError(
+            "Owned process snapshot could not be removed") from last_error
 
 
 def _run_after_parent_gate(target, args, destination, sender, gate):
