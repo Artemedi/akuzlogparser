@@ -214,10 +214,20 @@ jobs:
           - a parent-process watchdog remains defense-in-depth;
           - pipe EOF/OSError/crash paths fail fast and direct abort reaps child.
 
-          Evidence: exact Windows suite eec56d0 ran 267 Python tests PASS
-          (2 skips), browser/diff PASS, including real spawn under required
-          Job Object and hard-parent-exit child termination. Treat tests as
-          evidence, not proof.
+          Previous Fable review BLOCKed the candidate on cleanup,
+          Job/handle lifetime and buffered-IPC races. The current candidate
+          additionally:
+          - retries owned temp deletion only after child/Job reaping;
+          - fails closed and leaves only app-scoped temp if a child survives
+            both terminate and kill;
+          - drains an already-buffered receiver before treating a signaled
+            child sentinel as "exited before IPC";
+          - has explicit Job assignment failure and cleanup-retry tests;
+          - production prefetch refuses an unbound/missing listed size.
+
+          Evidence: exact Windows suite b9ea0e3 ran 274 Python tests PASS
+          (2 skips), browser/diff PASS. Treat tests as evidence, not proof
+          and re-check the implementation rather than trusting this summary.
 
           Return <=500 words:
           BLOCKERS
@@ -261,12 +271,28 @@ jobs:
           - owned prefetch workspaces are purged for every Linux build even when
             AKUZ_PHASE11_PROCESS_PREFETCH=0.
 
-          Current evidence: exact Windows suite eec56d0: 267 Python tests
-          PASS (2 skips), browser/diff PASS. Real normal-app A/B has
-          inventory/analytics parity; portable spawn/smoke previously passed.
-          Missing/corrupt derived spool now deliberately falls back to raw
-          event_stream parsing; Linux owned prefetch workspaces are purged
-          even when the feature rollback switch disables new prefetch.
+          Previous Fable transaction review returned MODIFY for the
+          exists()->replace overwrite race and weak rollback observability.
+          The current candidate now:
+          - commits the inventory intent first;
+          - promotes temp->final with os.link(), an atomic no-overwrite
+            operation on the same downloads volume;
+          - preserves an external final and fails closed on FileExistsError;
+          - rolls inventory back and uses the historical serial path when
+            hard-link promotion is unsupported;
+          - logs rollback persistence failure;
+          - tests the exact race where an external final appears between the
+            early check and atomic promotion.
+
+          Intentional contract: an unindexed external final remains a hard
+          failure because the historical serial fetch also refuses to
+          overwrite it; silently trusting or replacing it would weaken source
+          integrity.
+
+          Current evidence: exact Windows suite b9ea0e3: 274 Python tests
+          PASS (2 skips), browser/diff PASS. Earlier real normal-app A/B has
+          inventory/analytics parity and portable spawn/smoke passed; both
+          will be repeated after this review on the final candidate.
           Persistent B-lite is not used and SSH compression remains default OFF.
 
           Return <=700 words:
@@ -284,8 +310,8 @@ jobs:
           """ + app_tests
 
           verdicts = [
-              call_fable('LIFECYCLE', lifecycle_prompt, 7000),
-              call_fable('TRANSACTION', transaction_prompt, 9000),
+              call_fable('LIFECYCLE', lifecycle_prompt, 6500),
+              call_fable('TRANSACTION', transaction_prompt, 7500),
           ]
           rank = {'ACCEPT': 0, 'MODIFY': 1, 'BLOCK': 2}
           overall = max(verdicts, key=lambda value: rank[value])
