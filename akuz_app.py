@@ -970,4 +970,5 @@ def main():
         owner.__exit__(None, None, None)
 
 if __name__=='__main__':
+    multiprocessing.freeze_support()
     main()
