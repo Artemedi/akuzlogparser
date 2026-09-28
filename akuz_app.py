@@ -343,18 +343,25 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
             spool_root = Path(folder)
 
         process_prefetch_root = None
-        if process_allowed:
-            cfg = source_config(root, source, local_path)
+        phase11_cfg = None
+        phase11_cleanup_ok = True
+        if source == 'linux':
+            phase11_cfg = source_config(root, source, local_path)
             try:
-                cfg.local_dest.mkdir(parents=True, exist_ok=True)
+                phase11_cfg.local_dest.mkdir(parents=True, exist_ok=True)
                 orphan_count = _cleanup_phase11_prefetch_orphans(
-                    root, cfg.local_dest)
+                    root, phase11_cfg.local_dest)
                 if orphan_count:
                     perf_event(root, 'process.prefetch', 'orphan_cleanup',
                                removed=orphan_count)
+            except OSError:
+                phase11_cleanup_ok = False
+                perf_event(root, 'process.prefetch', 'cleanup_failed', enabled=0)
+        if process_allowed and phase11_cfg is not None and phase11_cleanup_ok:
+            try:
                 folder = stack.enter_context(tempfile.TemporaryDirectory(
                     prefix=_phase11_prefetch_prefix(root),
-                    dir=cfg.local_dest))
+                    dir=phase11_cfg.local_dest))
                 process_prefetch_root = Path(folder)
             except OSError:
                 perf_event(root, 'process.prefetch', 'setup_fallback', enabled=0)
@@ -494,10 +501,11 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         next_fid, next_remote, operation = prefetch
         try:
             result = operation.finish()
-        except (ProcessFetchError, TimeoutError, OSError):
-            # Prefetch is an optimization only. A child/IPC/timeout failure
-            # must not make the default path less reliable than the historical
-            # serial scheduler. The next loop iteration performs the ordinary
+        except Exception:
+            # Prefetch is an optimization only. Any ordinary child/IPC/
+            # validation failure must not make the default path less reliable
+            # than the historical serial scheduler. The next loop iteration
+            # performs the ordinary
             # fetch, which re-applies all rotation/truncation/stat checks.
             operation.close()
             perf_event(root, 'process.prefetch', 'finish_fallback',
