@@ -464,7 +464,8 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             owner = FailingOwner()
             op._kill_job = owner
             with self.assertRaisesRegex(
-                    ProcessFetchUnsafeError, "close failed"):
+                    ProcessFetchUnsafeError,
+                    "Could not close Windows kill Job Object"):
                 op.finish()
             self.assertEqual(owner.calls, 1)
             self.assertIsNone(op._kill_job)
