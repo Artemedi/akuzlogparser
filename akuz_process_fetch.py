@@ -181,6 +181,9 @@ def ssh_fetch_child(cfg, remote: dict, destination: str, sender) -> None:
             sender.send(("error", type(exc).__name__))
         except BaseException:
             pass
-        raise
+        # Do not re-raise in the child: multiprocessing would print the full
+        # exception message/remote path to stderr. The parent fails closed on
+        # the sanitized IPC tuple.
+        return
     finally:
         sender.close()
