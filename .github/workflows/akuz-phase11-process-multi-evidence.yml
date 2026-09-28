@@ -1,0 +1,106 @@
+name: AKUZ Phase 11 three-source process evidence audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/akuz-phase11-process-multi-evidence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Audit Phase 11 23+24+25 process evidence on DBA-008D
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Audit private numeric JSON without source identifiers
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
+            throw 'DBA-008D only'
+          }
+          @'
+          import json
+          from pathlib import Path
+          import statistics
+          import sys
+
+          path = Path(r'E:\Software\Project\LogAkusExplorer\akuzlogparser\diagnostics\phase11_process_overlap_23_24_25_20260928.json')
+          try:
+              data = json.loads(path.read_text(encoding='utf-8'))
+              if data['status'] != 'PHASE11_PROCESS_ISOLATION_MULTI_EXPERIMENT_NOT_PRODUCTION':
+                  raise AssertionError('unexpected status')
+              if data['order'] != ['serial','process','process','serial']:
+                  raise AssertionError('unexpected order')
+              if data['days'] != ['20260923','20260924','20260925']:
+                  raise AssertionError('unexpected days')
+              prefixes = data.get('fixed_prefix_bytes', {})
+              if prefixes.get('20260923') != 171378567 or prefixes.get('20260924') != 140361291:
+                  raise AssertionError('unexpected small prefixes')
+              if prefixes.get('20260925', 0) < 640_000_000:
+                  raise AssertionError('large prefix unexpectedly small')
+              if data.get('compression') is not False:
+                  raise AssertionError('compression not isolated')
+              if not data.get('source_sha_equal') or not data.get('report_manifest_equal'):
+                  raise AssertionError('parity failed')
+              if not data.get('workspace_cleaned') or data.get('raw_payload_saved'):
+                  raise AssertionError('cleanup/privacy failed')
+              if data.get('app_cache_changed') or data.get('release_changed'):
+                  raise AssertionError('scope failed')
+              trials=data['trials']
+              if len(trials)!=4:
+                  raise AssertionError('trial count')
+              for row,mode in zip(trials,data['order']):
+                  if row['mode']!=mode or row['fetched']!=3 or row['parsed']!=3:
+                      raise AssertionError('operation contract failed')
+                  if row['memory_samples']<10 or row['unreadable_memory_samples']!=0:
+                      raise AssertionError('memory evidence invalid')
+                  if row['sampled_peak_ws_bytes']<=0 or row['sampled_peak_private_bytes']<=0:
+                      raise AssertionError('memory peak invalid')
+                  if mode=='process':
+                      if row.get('max_sampled_processes',0)<2:
+                          raise AssertionError('child not represented')
+                      if row.get('child_cpu_s',0)<=0 or row.get('parent_cpu_s',0)<=0:
+                          raise AssertionError('CPU split invalid')
+                      for day in ('20260924','20260925'):
+                          pure=row.get('fetch',{}).get(day,0)
+                          ready=row.get('fetch_ready_latency',{}).get(day,0)
+                          if pure<=0 or ready<=0 or ready<pure:
+                              raise AssertionError('fetch/readiness timing invalid')
+              for mode in ('serial','process'):
+                  rows=[x for x in trials if x['mode']==mode]
+                  walls=[x['wall_s'] for x in rows]
+                  cpu=[x['process_cpu_s'] for x in rows]
+                  private=[x['sampled_peak_private_bytes'] for x in rows]
+                  print('PHASE11_MULTI',mode,
+                        'wall_s='+','.join(f'{v:.6f}' for v in walls),
+                        f'wall_median={statistics.median(walls):.6f}',
+                        f'cpu_median={statistics.median(cpu):.6f}',
+                        f'private_median={int(statistics.median(private))}')
+                  for day in ('20260924','20260925'):
+                      pure=[x['fetch'][day] for x in rows]
+                      ready=[x.get('fetch_ready_latency',x['fetch'])[day] for x in rows]
+                      print('PHASE11_MULTI_STAGE',mode,day,
+                            'fetch_s='+','.join(f'{v:.6f}' for v in pure),
+                            'ready_s='+','.join(f'{v:.6f}' for v in ready))
+              print('PHASE11_MULTI_PREFIX_BYTES',
+                    prefixes['20260923'],prefixes['20260924'],prefixes['20260925'])
+              print('PHASE11_MULTI_SOURCE_SHA_EQUAL=PASS')
+              print('PHASE11_MULTI_REPORT_MANIFEST_EQUAL=PASS')
+              print('PHASE11_MULTI_WORKSPACE_CLEANED=PASS')
+              print('NO_SHA_PATH_HOST_OR_PAYLOAD_PRINTED=PASS')
+          except BaseException as exc:
+              print('PHASE11_MULTI_EVIDENCE_FAILED', type(exc).__name__)
+              sys.exit(1)
+          '@ | python -B -
+          if ($LASTEXITCODE -ne 0) { throw 'Phase 11 multi evidence audit failed' }
