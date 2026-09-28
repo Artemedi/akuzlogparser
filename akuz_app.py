@@ -508,7 +508,14 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         if prior:
             reports.append(dict(prior, url='/reports/'+prior['id']+'/index.html', reused=True))
             singles_reused += 1
-            cached = cached_download(store, fid)
+            prefetched = prefetched_downloads.pop(fid, None)
+            if prefetched is not None:
+                restored_path, restored_sha, details = prefetched
+                restore_downloads += 1
+                cached = (restored_path, restored_sha)
+                state.set_stage('Предзагружен для общей выборки: ' + remote['name'])
+            else:
+                cached = cached_download(store, fid)
             if cached is None and len(ids) > 1:
                 state.set_stage('Для общей выборки восстанавливаю исходный файл: '+remote['name'])
                 restored_path, restored_sha, details = download(remote)
@@ -523,18 +530,24 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                 files.append(dict(remote=remote, local=cached[0], sha=cached[1], date=chosen))
                 source_seen.add(source_mark)
             continue
-        cached = cached_download(store, fid)
-        if cached:
-            path, digest = cached
-            state.set_stage('Уже загружен: ' + remote['name'])
-        else:
-            state.set_stage(f'{idx}/{len(ids)} · загружаю {remote["name"]}…')
-            path, digest, details = download(remote)
+        prefetched = prefetched_downloads.pop(fid, None)
+        if prefetched is not None:
+            path, digest, details = prefetched
             fresh_downloads += 1
-            store['downloads'][fid] = dict(path=str(path), sha256=digest,
-                size=path.stat().st_size, host=cfg.host, remote=remote['path'],
-                mtime=remote['mtime'], snapshot=details)
-            save_store(root, store)
+            state.set_stage('Предзагружен: ' + remote['name'])
+        else:
+            cached = cached_download(store, fid)
+            if cached:
+                path, digest = cached
+                state.set_stage('Уже загружен: ' + remote['name'])
+            else:
+                state.set_stage(f'{idx}/{len(ids)} · загружаю {remote["name"]}…')
+                path, digest, details = download(remote)
+                fresh_downloads += 1
+                store['downloads'][fid] = dict(path=str(path), sha256=digest,
+                    size=path.stat().st_size, host=cfg.host, remote=remote['path'],
+                    mtime=remote['mtime'], snapshot=details)
+                save_store(root, store)
         # Same bytes from different server paths may be independent events.
         # Deduplicate only a repeat of one identified source in this batch.
         source_mark=(cfg.host,remote['path'],digest)
