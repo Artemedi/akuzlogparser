@@ -1,5 +1,8 @@
 from pathlib import Path
 import multiprocessing
+import os
+import subprocess
+import sys
 import time
 from tempfile import TemporaryDirectory
 import unittest
@@ -301,6 +304,30 @@ class SSHChildContractTests(unittest.TestCase):
             self.assertEqual(sender.messages, [("error", "RuntimeError")])
             self.assertFalse(target.exists())
 
+
+
+class ParentWatchdogTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows process-handle watchdog")
+    def test_hard_parent_exit_terminates_spawned_child(self):
+        from scripts.phase9_memory import sample
+
+        with TemporaryDirectory(prefix="akuz_process_watchdog_") as td:
+            root = Path(td)
+            pid_file = root / "child.pid"
+            helper = Path(__file__).with_name("phase11_watchdog_helper.py")
+            proc = subprocess.run(
+                [sys.executable, str(helper), str(pid_file)],
+                cwd=Path(__file__).resolve().parents[1],
+                timeout=30, check=False)
+            self.assertEqual(proc.returncode, 79)
+            self.assertTrue(pid_file.is_file())
+            child_pid = int(pid_file.read_text("ascii"))
+            deadline = time.time() + 10
+            while sample(child_pid) is not None and time.time() < deadline:
+                time.sleep(.05)
+            self.assertIsNone(
+                sample(child_pid),
+                "spawned prefetch child survived hard parent termination")
 
 
 class RealSpawnLifecycleTests(unittest.TestCase):
