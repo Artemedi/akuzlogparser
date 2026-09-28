@@ -468,6 +468,31 @@ class ParentWatchdogTests(unittest.TestCase):
                 "spawned prefetch child survived hard parent termination")
 
 
+class WindowsKillJobTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
+    def test_hard_parent_exit_kills_job_assigned_child(self):
+        from scripts.phase9_memory import sample
+
+        with TemporaryDirectory(prefix="akuz_process_job_") as td:
+            root = Path(td)
+            helper = Path(__file__).with_name(
+                "phase11_job_object_helper.py")
+            proc = subprocess.run(
+                [sys.executable, str(helper), str(root)],
+                cwd=Path(__file__).resolve().parents[1],
+                timeout=30, check=False)
+            self.assertEqual(proc.returncode, 79)
+            pid_file = root / "child.pid"
+            self.assertTrue(pid_file.is_file())
+            child_pid = int(pid_file.read_text("ascii"))
+            deadline = time.time() + 10
+            while sample(child_pid) is not None and time.time() < deadline:
+                time.sleep(.05)
+            self.assertIsNone(
+                sample(child_pid),
+                "Job Object child survived hard parent termination")
+
+
 class RealSpawnLifecycleTests(unittest.TestCase):
     def test_real_spawn_returns_completed_snapshot(self):
         with TemporaryDirectory(prefix="akuz_process_real_spawn_") as td:
@@ -485,6 +510,24 @@ class RealSpawnLifecycleTests(unittest.TestCase):
                 hashlib.sha256(b"real windows spawned snapshot").hexdigest())
             self.assertEqual(result.metadata["active"], False)
             self.assertEqual(target.read_bytes(), b"real windows spawned snapshot")
+
+    @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
+    def test_real_spawn_required_kill_job_completes_successfully(self):
+        with TemporaryDirectory(prefix="akuz_process_real_job_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            payload = b"real windows spawned snapshot"
+            op = ProcessFetch(
+                multiprocessing.get_context("spawn"),
+                real_spawn_success_child, (), target,
+                poll_timeout_s=20, join_timeout_s=10, kill_timeout_s=5,
+                require_kill_job=True)
+            with op:
+                result = op.finish()
+            self.assertEqual(
+                result.digest, hashlib.sha256(payload).hexdigest())
+            self.assertEqual(target.read_bytes(), payload)
+            self.assertFalse(op.child.is_alive())
 
     def test_real_spawn_child_crash_fails_fast_and_cleans_partial(self):
         with TemporaryDirectory(prefix="akuz_process_real_crash_") as td:
