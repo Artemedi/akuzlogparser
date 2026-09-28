@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 import hashlib
+import json
 import os
 import pickle
 import re
@@ -45,7 +46,8 @@ class ProcessFetch:
     def __init__(self, ctx, target, args, destination: Path,
                  *, poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10,
                  name="akuz-phase11-fetch", require_metrics=False,
-                 expected_listed_bytes=None, require_kill_job=False):
+                 expected_listed_bytes=None, require_kill_job=False,
+                 safe_ipc=False):
         self.ctx = ctx
         self.target = target
         self.args = tuple(args)
@@ -57,6 +59,16 @@ class ProcessFetch:
         self.require_metrics = require_metrics
         self.expected_listed_bytes = expected_listed_bytes
         self.require_kill_job = require_kill_job
+        self.safe_ipc = safe_ipc
+        if require_kill_job:
+            if (not isinstance(expected_listed_bytes, int)
+                    or isinstance(expected_listed_bytes, bool)
+                    or expected_listed_bytes < 0):
+                raise ProcessFetchError(
+                    "Production Job prefetch requires listed-size binding")
+            if not safe_ipc:
+                raise ProcessFetchError(
+                    "Production Job prefetch requires safe IPC")
         self.receiver = None
         self._start_gate = None
         self._kill_job = None
@@ -160,9 +172,15 @@ class ProcessFetch:
                         raise ProcessFetchError(
                             "Process fetch child exited before IPC result")
             try:
-                message = self.receiver.recv()
-            except (EOFError, OSError, pickle.UnpicklingError) as exc:
-                raise ProcessFetchError("Process fetch pipe closed or invalid") from exc
+                if self.safe_ipc:
+                    raw = self.receiver.recv_bytes(maxlength=8192)
+                    message = json.loads(raw.decode("utf-8"))
+                else:
+                    message = self.receiver.recv()
+            except (EOFError, OSError, pickle.UnpicklingError,
+                    UnicodeDecodeError, ValueError) as exc:
+                raise ProcessFetchError(
+                    "Process fetch pipe closed or invalid") from exc
             self.child.join(timeout=self.join_timeout_s)
             if self.child.is_alive():
                 raise TimeoutError("Process fetch did not exit")
@@ -492,12 +510,16 @@ def ssh_fetch_child(cfg, remote: dict, destination: str, sender) -> None:
                 "dropped_tail_bytes", "listed_bytes")
             if key in details
         }
-        sender.send((
+        sender.send_bytes(json.dumps([
             "ok", str(target), digest, target.stat().st_size,
-            cpu, perf_counter() - started, safe_details))
+            cpu, perf_counter() - started, safe_details
+        ], ensure_ascii=True, separators=(",", ":")).encode("utf-8"))
     except BaseException as exc:
         try:
-            sender.send(("error", type(exc).__name__))
+            sender.send_bytes(json.dumps(
+                ["error", type(exc).__name__],
+                ensure_ascii=True, separators=(",", ":")
+            ).encode("utf-8"))
         except BaseException:
             pass
         # Do not re-raise in the child: multiprocessing would print the full
