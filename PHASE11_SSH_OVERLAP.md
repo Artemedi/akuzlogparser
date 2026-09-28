@@ -240,17 +240,30 @@ about **24.6%**, while total measured CPU increased about **12.2%**.
 Process-tree private-memory median was about 10.6% lower in this series, but
 that direction should not be generalized from two trials.
 
-The next fetch still slows under concurrent report generation:
+### Instrumentation correction before large-source escalation
 
-| Mode | 24-Sep fetch values, s | Mean, s |
-|---|---|---:|
-| serial | 19.356464, 18.350266 | 18.853365 |
-| process | 30.071016, 29.367467 | 29.719242 |
+The first process benchmark stored `fetch["20260924"]` as elapsed time from
+`Process.start()` until the parent consumed the IPC result **after parse(A)**.
+If the child fetch had already completed, that value included parent-side
+waiting and was therefore a **snapshot-readiness latency**, not pure child
+fetch wall time. The 30.071016 / 29.367467 s values must not be compared to
+serial 19.356464 / 18.350266 s as evidence that the fetch itself slowed by
+57.6%.
 
-That is about **57.6% slower** for the fetch itself. First 23-Sep parse mean
-also rises from 25.657197 s to 26.271071 s (~2.4%). Process isolation therefore
-does not remove resource contention; it makes the overlap useful enough that
-the hidden time exceeds the contention/launch cost on this pair.
+This does **not** invalidate pair wall, total CPU, process-tree memory,
+source-SHA parity, report-manifest parity or cleanup above. It invalidates
+only the causal statement based on the process candidate's old per-fetch
+wall field.
+
+Commits `be7b332` + `57e482f` separate:
+- child-measured pure fetch wall;
+- parent spawn-to-readiness latency;
+and add regression coverage. A corrected pair rerun is required before the
+25-Sep large-source/multi-source escalation.
+
+First 23-Sep parse mean in the original run rose from 25.657197 s to
+26.271071 s (~2.4%), which remains valid because parse timing is measured
+inside the parent generate call.
 
 Child OS CPU evidence was 3.906250 / 3.875000 s; parent CPU was
 61.578125 / 62.390625 s for the two process trials. Thus the candidate's
@@ -258,8 +271,7 @@ CPU figure is not a parent-only undercount.
 
 ### Decision for the process candidate
 
-The process-isolated pair result is **promising enough for a bounded
-large-source/multi-source gate**, but it is not production acceptance.
+The process-isolated pair wall result is **promising**, but corrected per-fetch instrumentation must pass a repeated 23+24 pair gate before any large-source/multi-source escalation. It is not production acceptance.
 The next experiment should include the current 25-Sep ~644.6 MB fixed
 prefix in a realistic one-ahead sequence and retain balanced serial/process
 ordering, process-tree RSS/private sampling, full source/report parity and
