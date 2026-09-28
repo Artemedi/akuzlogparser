@@ -280,6 +280,63 @@ raw payloads outside owned temporary workspaces.
 
 No normal application integration is authorized yet.
 
+## Corrected process-isolation pair rerun
+
+The fetch-timing correction in `be7b332` + `57e482f` was regression-tested
+on DBA-008D before another real run:
+[Actions #36397172147](https://github.com/Artemedi/akuzlogparser/actions/runs/36397172147),
+exact `57e482f8670e8ba8d4220ece6712e563b07e140a`:
+**231 Python tests PASS, 2 Windows skips, 109.684 s**, Node controls and
+`git diff --check` PASS.
+
+The corrected real benchmark used a new evidence file and did not overwrite
+the earlier experiment:
+[Actions #36403656948](https://github.com/Artemedi/akuzlogparser/actions/runs/36403656948),
+exact workflow commit `27ef63f`.
+Independent read-only audit:
+[Actions #36403687747](https://github.com/Artemedi/akuzlogparser/actions/runs/36403687747),
+exact audit commit `c1e8512`. Both completed SUCCESS.
+
+Order remained `serial, process, process, serial` on the same fixed 23+24
+source prefixes, compression OFF. All four trials retained source-SHA and
+deterministic report-manifest parity; workspace cleanup PASS; raw payload was
+not retained; app cache and Release were not changed.
+
+| Mode | Wall trials, s | Median wall, s | Median total CPU, s | Median process-tree private, B |
+|---|---|---:|---:|---:|
+| serial | 100.777862, 101.672542 | 101.225202 | 61.351562 | 367,276,032 |
+| process | 88.732724, 92.426783 | 90.579754 | 70.390625 | 318,515,200 |
+
+The process candidate is **~10.5% faster by median wall** in this corrected
+replication; both process trials are faster than both serial trials. Total
+parent+child CPU is **~14.7% higher**. The process-tree private-memory median
+is ~13.3% lower in this particular run, but two samples per mode are not
+enough to generalize memory direction.
+
+Most importantly, corrected timing separates the next source's child fetch
+from parent readiness:
+
+| Metric for 24-Sep next source | Process trial 1, s | Process trial 2, s |
+|---|---:|---:|
+| pure child fetch wall | 19.953724 | 18.679295 |
+| spawn-to-parent-readiness latency | 32.732658 | 31.004642 |
+
+Serial 24-Sep fetch values were 16.589666 / 22.345354 s. Therefore the
+corrected evidence **does not show the previously claimed 57.6% fetch
+slowdown**. The pure fetch is broadly in the same range as serial; readiness
+is later because parse(A) intentionally overlaps it. The old per-fetch causal
+claim remains retracted.
+
+### Corrected decision
+
+The process-isolated candidate remains benchmark-only, but the corrected
+pair gate confirms a repeatable wall benefit sufficient to proceed to the
+already defined **23+24+25 large-source/multi-source experiment**. That next
+gate must keep one child maximum, fixed-prefix source identity, full
+source/report parity, process-tree memory + parent/child CPU, separate pure
+fetch/readiness timing, cleanup and compression OFF. It still does not
+authorize `perform_build` integration.
+
 ## Production gates still open
 
 Before integrating one-ahead fetch into `perform_build`:
