@@ -1,8 +1,10 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
-from akuz_process_fetch import ProcessFetch, ProcessFetchError
+from akuz_process_fetch import ProcessFetch, ProcessFetchError, ssh_fetch_child
+from akuz_fetch import ConnectConfig
 
 
 class FakeReceiver:
@@ -204,6 +206,80 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                 with op:
                     op.finish()
             self.assertFalse(dest.exists())
+
+
+
+class CaptureSender:
+    def __init__(self):
+        self.messages = []
+        self.closed = False
+
+    def send(self, message):
+        self.messages.append(message)
+
+    def close(self):
+        self.closed = True
+
+
+class SSHChildContractTests(unittest.TestCase):
+    def cfg(self, root):
+        return ConnectConfig(
+            "host", 22, "user", "", "", "", "/srv/akuz",
+            root / "downloads", "*.log", "", False)
+
+    def test_child_renames_owned_fetch_and_returns_capture_metadata(self):
+        with TemporaryDirectory(prefix="akuz_process_child_") as td:
+            root = Path(td)
+            target = root / "prefetch" / "next.log"
+            target.parent.mkdir()
+            produced = target.parent / "akuz_v4_internal.log"
+            payload = b"snapshot bytes"
+            details = {
+                "active": True, "captured_bytes": len(payload),
+                "stored_bytes": len(payload), "dropped_tail_bytes": 0,
+                "listed_bytes": len(payload), "remote_path": "/srv/akuz/a.log"}
+            sender = CaptureSender()
+
+            def fake_fetch(cfg, remote, notify):
+                self.assertEqual(cfg.local_dest, target.parent)
+                produced.write_bytes(payload)
+                return produced, "d" * 64, details
+
+            with patch("akuz_process_fetch.fetch_selected", side_effect=fake_fetch),                  patch("scripts.phase9_memory.sample",
+                       return_value={"cpu_time_s": .5,
+                                     "working_set_bytes": 1,
+                                     "private_bytes": 1}):
+                ssh_fetch_child(
+                    self.cfg(root), {"path": "/srv/akuz/a.log"},
+                    str(target), sender)
+
+            self.assertTrue(sender.closed)
+            self.assertFalse(produced.exists())
+            self.assertEqual(target.read_bytes(), payload)
+            self.assertEqual(len(sender.messages), 1)
+            message = sender.messages[0]
+            self.assertEqual(message[0], "ok")
+            self.assertEqual(Path(message[1]), target)
+            self.assertEqual(message[2], "d" * 64)
+            self.assertEqual(message[3], len(payload))
+            self.assertEqual(message[6], details)
+
+    def test_child_failure_reports_only_exception_type(self):
+        with TemporaryDirectory(prefix="akuz_process_child_fail_") as td:
+            root = Path(td)
+            target = root / "prefetch" / "next.log"
+            target.parent.mkdir()
+            sender = CaptureSender()
+            with patch(
+                    "akuz_process_fetch.fetch_selected",
+                    side_effect=RuntimeError("secret payload text")):
+                with self.assertRaisesRegex(RuntimeError, "secret payload text"):
+                    ssh_fetch_child(
+                        self.cfg(root), {"path": "/srv/akuz/a.log"},
+                        str(target), sender)
+            self.assertTrue(sender.closed)
+            self.assertEqual(sender.messages, [("error", "RuntimeError")])
+            self.assertFalse(target.exists())
 
 
 if __name__ == "__main__":
