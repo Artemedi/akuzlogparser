@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from akuz_fetch import list_remote, load_config
+from akuz_process_fetch import ProcessFetch
 from scripts.bench_phase11_process_overlap import (
     _TreeMemorySampler, _child_fetch, _parse_snapshot, _sanitize)
 from scripts.bench_phase11_ssh_overlap import SourceSpec, _fetch_fixed, _run_mode
@@ -50,50 +51,18 @@ def _discover_three(cfg) -> tuple[SourceSpec, ...]:
 def _recv_child(ctx, cfg, spec: SourceSpec, destination: Path,
                 parse_current, fetch_metrics: dict, ready_metrics: dict,
                 source_sha: dict):
-    receiver, sender = ctx.Pipe(duplex=False)
-    child = ctx.Process(
-        target=_child_fetch,
-        args=(cfg, spec, str(destination), sender),
-        name="akuz-phase11-fetch")
-    started = perf_counter()
-    child.start()
-    sender.close()
-    message = None
-    try:
+    with ProcessFetch(
+            ctx, _child_fetch, (cfg, spec), destination,
+            poll_timeout_s=900, join_timeout_s=30, kill_timeout_s=10
+    ) as prefetch:
         parse_current()
-        if not receiver.poll(900):
-            raise TimeoutError("Phase 11 multi process fetch did not return")
-        message = receiver.recv()
-        child.join(timeout=30)
-        if child.is_alive():
-            raise TimeoutError("Phase 11 multi process fetch did not exit")
-        if child.exitcode != 0 or not message or message[0] != "ok":
-            kind = message[1] if message and message[0] == "error" else "ChildExit"
-            raise RuntimeError("Phase 11 multi process fetch failed: " + kind)
-        _, returned_path, digest, count, child_cpu, child_fetch_wall = message
-        if Path(returned_path).resolve() != destination.resolve():
-            raise AssertionError("Phase 11 multi child returned unexpected path")
-        snap = CompletedSnapshot(
-            item=spec, path=destination, digest=digest, bytes=count)
-        if not snap.path.is_file() or snap.path.stat().st_size != snap.bytes:
-            raise AssertionError("Phase 11 multi child snapshot incomplete")
-        if child_cpu is None or child_cpu <= 0:
-            raise AssertionError("Phase 11 multi child CPU unavailable")
-        if child_fetch_wall is None or child_fetch_wall <= 0:
-            raise AssertionError("Phase 11 multi child fetch wall unavailable")
-        fetch_metrics[spec.day] = round(child_fetch_wall, 6)
-        ready_metrics[spec.day] = round(perf_counter() - started, 6)
-        source_sha[spec.day] = digest
-        return snap, child_cpu
-    finally:
-        receiver.close()
-        if child.is_alive():
-            child.terminate()
-            child.join(timeout=10)
-            if child.is_alive():
-                child.kill()
-                child.join(timeout=10)
-            destination.unlink(missing_ok=True)
+        result = prefetch.finish()
+    snap = CompletedSnapshot(
+        item=spec, path=result.path, digest=result.digest, bytes=result.bytes)
+    fetch_metrics[spec.day] = round(result.child_fetch_wall_s, 6)
+    ready_metrics[spec.day] = round(result.ready_latency_s, 6)
+    source_sha[spec.day] = result.digest
+    return snap, result.child_cpu_s
 
 
 def _process_multi_mode(cfg, specs: tuple[SourceSpec, ...], root: Path) -> dict:
