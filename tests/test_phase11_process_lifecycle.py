@@ -1,5 +1,6 @@
 from pathlib import Path
 import hashlib
+import json
 import multiprocessing
 import os
 import subprocess
@@ -27,6 +28,18 @@ class FakeReceiver:
         if isinstance(self.message, BaseException):
             raise self.message
         return self.message
+
+    def recv_bytes(self, maxlength=None):
+        if isinstance(self.message, BaseException):
+            raise self.message
+        if isinstance(self.message, bytes):
+            data = self.message
+        else:
+            data = json.dumps(
+                self.message, separators=(",", ":")).encode("utf-8")
+        if maxlength is not None and len(data) > maxlength:
+            raise OSError("bad message length")
+        return data
 
     def close(self):
         self.closed = True
@@ -111,6 +124,23 @@ def real_spawn_success_child(destination, sender):
     sender.close()
 
 
+def real_spawn_safe_child(destination, sender):
+    path = Path(destination)
+    payload = b"real windows spawned snapshot"
+    path.write_bytes(payload)
+    sender.send_bytes(json.dumps([
+        "ok", str(path), hashlib.sha256(payload).hexdigest(),
+        len(payload), .01, .01, {
+            "active": False,
+            "captured_bytes": len(payload),
+            "stored_bytes": len(payload),
+            "dropped_tail_bytes": 0,
+            "listed_bytes": len(payload),
+        }
+    ], separators=(",", ":")).encode("utf-8"))
+    sender.close()
+
+
 def real_spawn_crash_child(destination, sender):
     Path(destination).write_bytes(b"partial before crash")
     os._exit(91)
@@ -130,6 +160,56 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             root / "snapshot.log",
             poll_timeout_s=.01, join_timeout_s=.01, kill_timeout_s=.01)
         return op, ctx
+
+    def test_production_job_requires_listed_size_and_safe_ipc(self):
+        with TemporaryDirectory(prefix="akuz_process_prod_contract_") as td:
+            root = Path(td)
+            receiver = FakeReceiver(ready=False)
+            child = FakeChild()
+            ctx = FakeContext(receiver, child)
+            with self.assertRaisesRegex(
+                    ProcessFetchError, "listed-size binding"):
+                ProcessFetch(
+                    ctx, lambda *args: None, (), root / "x.log",
+                    require_kill_job=True, safe_ipc=True)
+            with self.assertRaisesRegex(ProcessFetchError, "safe IPC"):
+                ProcessFetch(
+                    ctx, lambda *args: None, (), root / "x.log",
+                    expected_listed_bytes=1, require_kill_job=True)
+
+    def test_safe_ipc_rejects_malformed_json_and_cleans_snapshot(self):
+        with TemporaryDirectory(prefix="akuz_process_json_bad_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            receiver = FakeReceiver(b"{not-json", ready=True)
+            child = FakeChild(on_start=lambda: dest.write_bytes(b"partial"))
+            ctx = FakeContext(receiver, child)
+            op = ProcessFetch(
+                ctx, lambda *args: None, (), dest,
+                poll_timeout_s=.01, join_timeout_s=.01, kill_timeout_s=.01,
+                safe_ipc=True)
+            with self.assertRaisesRegex(
+                    ProcessFetchError, "pipe closed or invalid"):
+                with op:
+                    op.finish()
+            self.assertFalse(dest.exists())
+
+    def test_safe_ipc_rejects_oversized_message(self):
+        with TemporaryDirectory(prefix="akuz_process_json_large_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            receiver = FakeReceiver(b"x" * 9000, ready=True)
+            child = FakeChild(on_start=lambda: dest.write_bytes(b"partial"))
+            ctx = FakeContext(receiver, child)
+            op = ProcessFetch(
+                ctx, lambda *args: None, (), dest,
+                poll_timeout_s=.01, join_timeout_s=.01, kill_timeout_s=.01,
+                safe_ipc=True)
+            with self.assertRaisesRegex(
+                    ProcessFetchError, "pipe closed or invalid"):
+                with op:
+                    op.finish()
+            self.assertFalse(dest.exists())
 
     def test_success_transfers_completed_snapshot_ownership(self):
         with TemporaryDirectory(prefix="akuz_process_fetch_ok_") as td:
@@ -419,6 +499,9 @@ class CaptureSender:
     def send(self, message):
         self.messages.append(message)
 
+    def send_bytes(self, payload):
+        self.messages.append(json.loads(bytes(payload).decode("utf-8")))
+
     def close(self):
         self.closed = True
 
@@ -585,7 +668,8 @@ class RealSpawnLifecycleTests(unittest.TestCase):
                 multiprocessing.get_context("spawn"),
                 real_spawn_hanging_child, (), target,
                 poll_timeout_s=5, join_timeout_s=2, kill_timeout_s=2,
-                require_kill_job=True)
+                expected_listed_bytes=1,
+                require_kill_job=True, safe_ipc=True)
             with patch(
                     "akuz_process_fetch._create_kill_on_close_job",
                     side_effect=ProcessFetchError("injected job assign failure")):
@@ -603,9 +687,10 @@ class RealSpawnLifecycleTests(unittest.TestCase):
             payload = b"real windows spawned snapshot"
             op = ProcessFetch(
                 multiprocessing.get_context("spawn"),
-                real_spawn_success_child, (), target,
+                real_spawn_safe_child, (), target,
                 poll_timeout_s=20, join_timeout_s=10, kill_timeout_s=5,
-                require_kill_job=True)
+                expected_listed_bytes=len(payload),
+                require_kill_job=True, safe_ipc=True)
             with op:
                 result = op.finish()
             self.assertEqual(
