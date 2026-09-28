@@ -305,7 +305,8 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
     process_requested = process_flag in ('1', 'true', 'yes', 'on')
     process_allowed = (
         process_requested and source == 'linux' and len(selections) > 1
-        and fetch_fn is fetch_selected and gen_fn is generate)
+        and getattr(fetch_fn, '_akuz_process_prefetch_compatible', False)
+        and gen_fn is generate)
 
     (root/'cache').mkdir(parents=True, exist_ok=True)
     with ExitStack() as stack:
@@ -416,7 +417,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                 # Only our built-in SSH adapter accepts the optional trace_root.
                 # Preserve the signature of caller-injected fetch functions.
                 result = (fetch_fn(cfg, remote, state.set_stage, trace_root=root)
-                          if fetch_fn is fetch_selected
+                          if getattr(fetch_fn, '_akuz_process_prefetch_compatible', False)
                           else fetch_fn(cfg, remote, state.set_stage))
             else:
                 result = source_fetch(cfg, source, remote, state.set_stage)
