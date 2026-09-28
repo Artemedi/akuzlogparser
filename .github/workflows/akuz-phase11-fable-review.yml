@@ -285,6 +285,24 @@ jobs:
             the remaining overall poll_timeout deadline;
           - supported portable target is Windows x64 only.
 
+          Since the latest lifecycle BLOCK, the current code also:
+          - carries the exact Windows file identity obtained while hashing the
+            validated snapshot into ProcessFetchResult and requires that same
+            identity for every post-validation temp cleanup;
+          - a pathname/file swap after hash therefore fails unsafe before any
+            DELETE handle is marked for deletion;
+          - JobBoundPopen.close() now cancels the quiet GC finalizer and closes
+            Job + process + spawn-pipe handles synchronously, propagating any
+            close failure as JobBoundSpawnError;
+          - ProcessFetch calls child.close() immediately after a reaped
+            production child, so rhandle lifetime ends per prefetch rather
+            than waiting for GC;
+          - if that strict handle close fails after size/SHA/metadata
+            validation, the validated temp is preserved fail-closed instead
+            of being deleted by the generic abort finally path.
+          Review the actual implementation and tests; do not accept these
+          claims without checking ownership/double-close/error paths.
+
           Since the previous Fable BLOCK, the current code additionally:
           - tracks CreatePipe -> CRT fd ownership explicitly and resumes the
             already Job-bound suspended child before writing the spawn payload,
