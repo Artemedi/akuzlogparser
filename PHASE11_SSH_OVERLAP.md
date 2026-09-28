@@ -1,6 +1,6 @@
 # Phase 11 — overlap SSH download and single-report generation
 
-Status: **ISOLATED SCHEDULER + REAL-HARNESS CONTRACT PASS; REAL 23+24 SMOKE RUNNING; NOT PRODUCTION INTEGRATED**.
+Status: **ISOLATED CONTRACTS PASS; REAL 23+24 SMOKE PASS WITH SMALL WALL GAIN + HIGHER RAM; BALANCED REPLICATION IN PREPARATION; NOT PRODUCTION INTEGRATED**.
 
 No normal application scheduler, cache schema, compression default, Phase 9
 architecture, or GitHub Release is changed by this phase.
@@ -95,6 +95,52 @@ Because mode order is serial then overlap and there is only one observation
 per mode, a successful smoke is **not acceptance evidence**. It may justify
 a balanced replicated benchmark; it cannot justify production scheduler
 changes by itself.
+
+## Real 23+24 smoke result
+
+[Actions #36389149340](https://github.com/Artemedi/akuzlogparser/actions/runs/36389149340)
+completed SUCCESS using exact workflow commit `83fb9b9`. Independent
+numeric/private-JSON audit
+[Actions #36389588713](https://github.com/Artemedi/akuzlogparser/actions/runs/36389588713)
+also completed SUCCESS.
+
+| Metric | Serial | One-ahead overlap |
+|---|---:|---:|
+| Whole pair wall, s | 89.588491 | 87.336109 |
+| Process CPU, s | 56.578125 | 56.125000 |
+| Sampled peak private, B | 328,351,744 | 384,077,824 |
+| Sampled peak working set, B | 349,724,672 | 405,282,816 |
+| Workspace bytes | 735,118,485 | 735,118,482 |
+
+Wall improved only about **2.5%** while sampled peak private bytes increased
+about **17.0%**.
+
+Stage detail explains the weak result:
+
+| Mode / day | Fetch, s | Generate wall, s | Generate CPU, s |
+|---|---:|---:|---:|
+| serial 23 | 18.500365 | 24.739814 | 24.671875 |
+| serial 24 | 16.139880 | 23.781949 | 23.562500 |
+| overlap 23 | 22.274164 | 26.092944 | 26.328125 |
+| overlap 24 | 38.221289 | 23.563355 | 23.375000 |
+
+The second fetch, which is the operation meant to be hidden by parse(A),
+became **more than twice as slow** under concurrent generation (16.14 s
+serial versus 38.22 s in the overlap observation). Parse(A) also slowed.
+That resource contention consumed most of the theoretical overlap benefit.
+
+Correctness/privacy gates PASS: identical fixed source SHA between modes,
+identical deterministic report manifests, 211,117 + 221,082 events and
+297,803 + 293,882 physical lines respectively, zero unreadable memory
+samples, owned workspace deleted, no raw payload retained, no app cache
+mutation.
+
+This is still one serial then one overlap observation. It does not prove
+the 2.5% gain is stable. The next step is a balanced 2x2 order
+`serial, overlap, overlap, serial` on the same fixed 23+24 prefixes.
+Do **not** escalate to the 644.6 MB source or production integration unless
+that replication shows a material and repeatable net benefit after memory
+cost.
 
 ## Production gates still open
 
