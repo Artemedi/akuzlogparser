@@ -352,14 +352,23 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
                   use_derived_spool=None):
     if use_derived_spool is None:
         use_derived_spool = os.environ.get('AKUZ_PHASE9_DERIVED_SPOOL', '1').strip().lower() not in ('0', 'false', 'no', 'off')
-    process_flag = os.environ.get('AKUZ_PHASE11_PROCESS_PREFETCH', '1').strip().lower()
-    valid_flags = ('0', 'false', 'no', 'off', '', '1', 'true', 'yes', 'on')
-    if process_flag not in valid_flags:
-        raise FetchError('Неверное значение AKUZ_PHASE11_PROCESS_PREFETCH')
+    process_env = 'AKUZ_PHASE11_PROCESS_PREFETCH'
+    if process_env in os.environ:
+        process_flag = os.environ[process_env].strip().lower()
+        valid_flags = ('0', 'false', 'no', 'off', '1', 'true', 'yes', 'on')
+        if process_flag not in valid_flags:
+            raise FetchError('Неверное значение AKUZ_PHASE11_PROCESS_PREFETCH')
+    else:
+        process_flag = '1'
     with state.lock:
         source = state.source
         local_path = state.local_path
     process_requested = process_flag in ('1', 'true', 'yes', 'on')
+    # state.source == 'linux' names the SSH-to-Linux-server adapter; it is
+    # NOT the client operating system. Phase 11 production acceptance is for
+    # the Windows portable runtime only because its hard-exit guarantee uses
+    # a mandatory KILL_ON_JOB_CLOSE Job Object. Linux/macOS clients retain
+    # the historical serial SSH scheduler.
     process_allowed = (
         process_requested and os.name == 'nt'
         and source == 'linux' and len(selections) > 1
@@ -776,9 +785,24 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             save_store(root, store)
             reports.append(report)
             singles_new += 1
-        except BaseException:
+        except BaseException as primary:
             if prefetch is not None:
-                prefetch[2].close()
+                try:
+                    prefetch[2].close()
+                except ProcessFetchUnsafeError as cleanup_exc:
+                    # Cleanup safety wins because a surviving writer makes any
+                    # retry unsafe, but preserve the original publication
+                    # failure as explicit exception context.
+                    raise cleanup_exc from primary
+                except Exception as cleanup_exc:
+                    # Child is known stopped: keep the original report error
+                    # and attach secondary cleanup diagnostics.
+                    try:
+                        primary.add_note(
+                            'Phase 11 prefetch cleanup also failed: ' +
+                            type(cleanup_exc).__name__)
+                    except BaseException:
+                        pass
             raise
         finish_prefetch(prefetch)
     combined = None
