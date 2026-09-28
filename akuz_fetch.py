@@ -502,6 +502,9 @@ def fetch_selected(cfg: ConnectConfig, selected: dict,
         client.close()
 
 
+# Explicit capability marker: only compatible fetch adapters may be overlapped.
+fetch_selected._akuz_process_prefetch_compatible = True
+
 def _sha_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open('rb') as stream:
