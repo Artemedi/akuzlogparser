@@ -370,6 +370,12 @@ def _discard_incomplete_tail(path: Path) -> int:
     raise FetchError('В активном снимке нет завершённой строки: повторите получение позже')
 
 
+def selected_snapshot_path(cfg: ConnectConfig, selected: dict) -> Path:
+    """Deterministic final path for one trusted inventory selection."""
+    safe = re.sub(r'[^\w.\-]+', '_', selected['name']).lstrip('.').strip('_')[:100] or 'akuz.log'
+    return cfg.local_dest / ('akuz_v4_' + selected['id'][:18] + '_' + safe)
+
+
 def fetch_selected(cfg: ConnectConfig, selected: dict,
                    notify=lambda msg: None, client_factory=None,
                    *, trace_root: Path | None = None) -> tuple[Path, str, dict]:
@@ -409,9 +415,8 @@ def fetch_selected(cfg: ConnectConfig, selected: dict,
         if bound <= 0:
             raise FetchError('Файл пустой; завершённых событий пока нет')
         cfg.local_dest.mkdir(parents=True, exist_ok=True)
-        safe = re.sub(r'[^\w.\-]+', '_', current['name']).lstrip('.').strip('_')[:100] or 'akuz.log'
         # Local inventory still uses the trusted selection id; actual bytes are deduped by SHA.
-        dest = cfg.local_dest / ('akuz_v4_' + selected['id'][:18] + '_' + safe)
+        dest = selected_snapshot_path(cfg, current)
         part = cfg.local_dest / (dest.name + '.part')
         if dest.exists():
             raise FetchError('Снимок с таким именем уже существует вне индекса. Проверьте downloads.')
