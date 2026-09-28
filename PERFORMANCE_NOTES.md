@@ -2830,3 +2830,47 @@ cryptographically detected by metadata identity; server-side full SHA
 would impose remote I/O/CPU and has NOT been enabled. Network-loss,
 process-kill/power-loss and integrated Tee/B-lite publication remain
 separate acceptance gates. Release unchanged.
+
+## Phase 10 replicated SSH compression conclusion (2026-09-28)
+
+Three production-safe, fixed-prefix replicated A/B series completed on the
+real SSH source using balanced order control/compressed/compressed/control/
+control/compressed. Per date every 6/6 transfer produced identical client
+SHA for the fixed prefix; source identity remained device/inode stable and
+non-truncated. Raw payloads were not retained by the benchmark results.
+
+Evidence:
+- 23 Sep / 171,378,567 B / Actions #36384569840.
+  Wall median 19.617381 -> 5.681805 s; client CPU 4.281250 -> 2.125000 s;
+  parent sshd CPU 0.730 -> 4.100 s; socket RX
+  171,726,336 -> 42,752,000 B.
+- 24 Sep / 140,361,291 B / Actions #36387434198.
+  Wall median 14.628869 -> 4.735882 s; client CPU 3.296875 -> 1.781250 s;
+  parent sshd CPU 0.630 -> 3.280 s; socket RX
+  140,646,080 -> 39,288,928 B.
+- 25 Sep / 644,567,384 B / Actions #36384825633.
+  Wall median 66.505320 -> 19.265598 s; client CPU 16.281250 -> 8.312500 s;
+  parent sshd CPU 2.720 -> 16.590 s; socket RX
+  645,866,512 -> 149,470,912 B.
+
+Read-only private evidence audit across all three JSON files:
+Actions #36387735730 PASS; exact audit workflow commit `9ddb6d0`.
+No source SHA/path/host/inode or payload printed.
+
+Across date-level medians compression reduced wall by 67.6–71.0% and
+socket RX by 72.1–76.9%; client CPU fell by 46.0–50.4%. Parent sshd CPU
+rose about 5.2–6.1x. Approximate sshd CPU / transfer-wall ratio in the
+compressed medians was 69% (24 Sep), 72% (23 Sep), and 86% (25 Sep), i.e.
+a substantial fraction of one core while a transfer is active.
+
+Decision: keep `compression=false` default. The transport benefit is
+reproducible and `compression=true` remains a justified explicit opt-in
+when transfer is the bottleneck AND server CPU headroom has been observed.
+Do not auto-enable based on file size alone. Server filesystem page cache
+was not controlled/dropped; measurements are alternating natural-cache
+trials, not cold-cache benchmarks. Forcing production cache eviction solely
+to strengthen the benchmark is intentionally rejected as operationally
+intrusive.
+
+No report/parser/cache-schema/Phase9 architecture/Release behavior changed.
+See PHASE10_SSH_COMPRESSION.md.
