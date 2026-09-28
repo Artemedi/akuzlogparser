@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from akuz_process_fetch import ProcessFetch
+from akuz_win_job_spawn import get_job_bound_spawn_context
 
 
 def job_child(pid_file, destination, sender):
@@ -26,7 +27,7 @@ def main():
     pid_file = root / "child.pid"
     destination = root / "owned.log"
     op = ProcessFetch(
-        multiprocessing.get_context("spawn"),
+        get_job_bound_spawn_context(),
         job_child, (str(pid_file),), destination,
         poll_timeout_s=30, join_timeout_s=5, kill_timeout_s=5,
         expected_listed_bytes=len(b"owned partial"),
