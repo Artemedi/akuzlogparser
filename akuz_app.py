@@ -512,7 +512,8 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         operation = ProcessFetch(
             process_ctx, ssh_fetch_child, (cfg, next_remote), target,
             poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10,
-            expected_listed_bytes=next_remote.get('size'))
+            expected_listed_bytes=next_remote.get('size'),
+            require_kill_job=(os.name == 'nt'))
         try:
             operation.start()
         except Exception:
