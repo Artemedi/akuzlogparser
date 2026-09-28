@@ -569,37 +569,44 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         label = remote['name'] + (' · ' + chosen if chosen else ' · дата не задана')
         source_meta = [dict(name=remote['name'], date=chosen, sha256=digest,
                             remote_path=remote['path'], host=cfg.host)]
-        if spool_root is not None and all(dates.values()):
-            # Stable per-selection slot: a recovered single may create an
-            # empty writer but must not collide with the next source spool.
-            spool_path = spool_root / f'{idx-1:04d}.jsonl'
-            with SpoolWriter(spool_path) as sink:
-                def single_gen(raw, out, base, chunk_size, top):
-                    meta = generate(raw, out, base, chunk_size, top,
-                                    derived_sink=sink)
-                    if sink.count != meta['events']:
-                        raise ValueError('Derived spool event count mismatch')
-                    return meta
-                single_gen._akuz_builtin_generator = True
+        prefetch = start_next_prefetch(idx)
+        try:
+            if spool_root is not None and all(dates.values()):
+                # Stable per-selection slot: a recovered single may create an
+                # empty writer but must not collide with the next source spool.
+                spool_path = spool_root / f'{idx-1:04d}.jsonl'
+                with SpoolWriter(spool_path) as sink:
+                    def single_gen(raw, out, base, chunk_size, top):
+                        meta = generate(raw, out, base, chunk_size, top,
+                                        derived_sink=sink)
+                        if sink.count != meta['events']:
+                            raise ValueError('Derived spool event count mismatch')
+                        return meta
+                    single_gen._akuz_builtin_generator = True
+                    report = _publish(root, store, content_key, path,
+                                      date.fromisoformat(chosen) if chosen else None,
+                                      source_meta, label, 'single', single_gen)
+                # A crash-recovered report did not execute single_gen: its empty
+                # writer must never be replayed as a sidecar for combined.
+                if not report['reused']:
+                    spools[(remote['path'], digest, chosen)] = (spool_path, sink.sha256)
+                    perf_event(root, 'derived.spool', 'summary', events=sink.count,
+                               bytes_saved=sink.bytes_written)
+            else:
                 report = _publish(root, store, content_key, path,
                                   date.fromisoformat(chosen) if chosen else None,
-                                  source_meta, label, 'single', single_gen)
-            # A crash-recovered report did not execute single_gen: its empty
-            # writer must never be replayed as a sidecar for combined.
-            if not report['reused']:
-                spools[(remote['path'], digest, chosen)] = (spool_path, sink.sha256)
-                perf_event(root, 'derived.spool', 'summary', events=sink.count,
-                           bytes_saved=sink.bytes_written)
-        else:
-            report = _publish(root, store, content_key, path,
-                              date.fromisoformat(chosen) if chosen else None,
-                              source_meta, label, 'single', gen_fn)
-        # Store remote alias too, while preserving content-based de-duplication.
-        store['reports'][report['id']]['aliases'] = list(set(
-            store['reports'][report['id']].get('aliases', []) + [remote_key]))
-        save_store(root, store)
-        reports.append(report)
-        singles_new += 1
+                                  source_meta, label, 'single', gen_fn)
+            # Store remote alias too, while preserving content-based de-duplication.
+            store['reports'][report['id']]['aliases'] = list(set(
+                store['reports'][report['id']].get('aliases', []) + [remote_key]))
+            save_store(root, store)
+            reports.append(report)
+            singles_new += 1
+        except BaseException:
+            if prefetch is not None:
+                prefetch[2].close()
+            raise
+        finish_prefetch(prefetch)
     combined = None
     if len(files) > 1 and all(f['date'] for f in files):
         files.sort(key=lambda f:(f['date'], f['remote']['mtime'], f['remote']['name']))
@@ -657,6 +664,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                fresh_downloads=fresh_downloads, restore_downloads=restore_downloads,
                singles_new=singles_new, singles_reused=singles_reused,
                skipped_identical=len(skipped), active_snapshots=active_count,
+               process_prefetch_downloads=process_prefetch_downloads,
                combined_status=(0 if combined is None else (1 if combined['reused'] else 2)),
                analytics_warning=bool(analytics_warning),
                elapsed_s=round(perf_counter() - build_started, 3))
