@@ -36,6 +36,7 @@ class ProcessFetchResult:
     child_fetch_wall_s: float | None
     ready_latency_s: float
     metadata: dict
+    cleanup_identity: tuple | None = None
 
 
 class ProcessFetch:
@@ -77,6 +78,8 @@ class ProcessFetch:
         self.child = None
         self.started_at = None
         self._success = False
+        self._validated_cleanup_identity = None
+        self._preserve_validated_snapshot = False
 
     def start(self):
         if self.child is not None:
@@ -232,7 +235,8 @@ class ProcessFetch:
             if (not isinstance(digest, str) or
                     re.fullmatch(r"[0-9a-f]{64}", digest) is None):
                 raise ProcessFetchError("Process fetch digest invalid")
-            actual_digest = _sha256_owned_snapshot(returned, st)
+            actual_digest, cleanup_identity = _sha256_owned_snapshot(
+                returned, st, return_cleanup_identity=True)
             if actual_digest != digest:
                 raise ProcessFetchError(
                     "Process fetch snapshot checksum mismatch")
@@ -289,13 +293,19 @@ class ProcessFetch:
                     None if child_fetch_wall is None
                     else float(child_fetch_wall)),
                 ready_latency_s=perf_counter() - self.started_at,
-                metadata=dict(metadata))
+                metadata=dict(metadata),
+                cleanup_identity=cleanup_identity)
 
-            # Direct start()/finish() is a supported lifecycle. Do not rely on
-            # caller close()/context-manager exit to release the Job handle.
-            self._release_kill_job()
+            # From this point the snapshot is fully validated and bound to one
+            # exact Windows file identity. If process/Job handle cleanup fails,
+            # preserve this temp snapshot rather than deleting trusted evidence
+            # in the generic failure-finally path.
+            self._validated_cleanup_identity = cleanup_identity
+            self._preserve_validated_snapshot = True
+            self._close_reaped_child_resources()
             self._start_gate = None
             self._success = True
+            self._preserve_validated_snapshot = False
             return result
         except BaseException as exc:
             primary_error = exc
@@ -332,6 +342,28 @@ class ProcessFetch:
                             str(cleanup_exc))
                     except BaseException:
                         pass
+
+    def _close_reaped_child_resources(self):
+        """Synchronously close process/pipe/Job handles after child exit."""
+        child = self.child
+        if child is None:
+            self._release_kill_job()
+            return
+
+        close = getattr(child, "close", None)
+        if self.require_kill_job and callable(close):
+            try:
+                close()
+            except BaseException as exc:
+                raise ProcessFetchUnsafeError(
+                    "Could not close spawned child process handles") from exc
+            finally:
+                # Atomic JobBoundPopen owns this same _JobOwner instance.
+                self._kill_job = None
+            return
+
+        # Unit/benchmark callers without the production JobBound context.
+        self._release_kill_job()
 
     def abort(self):
         child = self.child
@@ -379,8 +411,13 @@ class ProcessFetch:
                 "Process fetch Windows Job handle could not be closed"
             ) from unsafe_error
 
-        # Only remove the owned file after the child/tree has been reaped.
-        remove_owned_snapshot(self.destination)
+        # A fully validated snapshot is preserved if later handle teardown was
+        # unsafe. It was never promoted/indexed, and app-scoped orphan cleanup
+        # can handle it on the next run without destroying diagnostic evidence.
+        if not self._preserve_validated_snapshot:
+            remove_owned_snapshot(
+                self.destination,
+                expected_identity=self._validated_cleanup_identity)
         if pipe_error is not None:
             raise ProcessFetchError(
                 "Process fetch pipe could not be closed") from pipe_error
@@ -521,7 +558,8 @@ def _windows_open_cleanup_handle(path: Path, access: int):
 
 
 def _remove_owned_snapshot_windows(
-        target: Path, *, attempts=100, delay_s=0.10):
+        target: Path, *, attempts=100, delay_s=0.10,
+        expected_identity=None):
     import ctypes
     from ctypes import wintypes
 
@@ -532,6 +570,10 @@ def _remove_owned_snapshot_windows(
         return
     try:
         owned_identity = _windows_cleanup_identity(anchor)
+        if (expected_identity is not None
+                and owned_identity != expected_identity):
+            raise ProcessFetchUnsafeError(
+                "Owned process snapshot identity changed before cleanup")
         last_error = None
 
         class FILE_DISPOSITION_INFO(ctypes.Structure):
@@ -579,12 +621,15 @@ def _remove_owned_snapshot_windows(
         _close_windows_handle(anchor)
 
 
-def remove_owned_snapshot(path: Path, *, attempts=100, delay_s=0.10):
+def remove_owned_snapshot(
+        path: Path, *, attempts=100, delay_s=0.10,
+        expected_identity=None):
     """Remove one owned temp file without ever deleting a replacement."""
     target = Path(path)
     if os.name == "nt":
         return _remove_owned_snapshot_windows(
-            target, attempts=attempts, delay_s=delay_s)
+            target, attempts=attempts, delay_s=delay_s,
+            expected_identity=expected_identity)
 
     # Non-production fallback for POSIX test/benchmark callers.
     last_error = None
@@ -809,7 +854,8 @@ def _snapshot_identity(st):
         getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000)))
 
 
-def _sha256_owned_snapshot(path: Path, expected_stat) -> str:
+def _sha256_owned_snapshot(
+        path: Path, expected_stat, *, return_cleanup_identity=False):
     """Hash the exact regular file identity validated by lstat.
 
     The descriptor identity must match the pre-open lstat and remain stable
@@ -830,11 +876,16 @@ def _sha256_owned_snapshot(path: Path, expected_stat) -> str:
         raise ProcessFetchError(
             "Process fetch snapshot could not be opened safely") from exc
 
+    cleanup_identity = None
     try:
         opened = os.fstat(fd)
         if _snapshot_identity(opened) != _snapshot_identity(expected_stat):
             raise ProcessFetchError(
                 "Process fetch snapshot identity changed before hashing")
+        if os.name == "nt":
+            import msvcrt
+            cleanup_identity = _windows_cleanup_identity(
+                msvcrt.get_osfhandle(fd))
 
         digest = hashlib.sha256()
         while True:
@@ -847,6 +898,13 @@ def _sha256_owned_snapshot(path: Path, expected_stat) -> str:
         if _snapshot_identity(after) != _snapshot_identity(opened):
             raise ProcessFetchError(
                 "Process fetch snapshot changed while hashing")
+        if os.name == "nt":
+            import msvcrt
+            cleanup_after = _windows_cleanup_identity(
+                msvcrt.get_osfhandle(fd))
+            if cleanup_after != cleanup_identity:
+                raise ProcessFetchError(
+                    "Process fetch Windows identity changed while hashing")
     finally:
         os.close(fd)
 
@@ -854,7 +912,10 @@ def _sha256_owned_snapshot(path: Path, expected_stat) -> str:
     if _snapshot_identity(visible) != _snapshot_identity(after):
         raise ProcessFetchError(
             "Process fetch snapshot path changed while hashing")
-    return digest.hexdigest()
+    value = digest.hexdigest()
+    if return_cleanup_identity:
+        return value, cleanup_identity
+    return value
 
 
 def ssh_fetch_child(cfg, remote: dict, destination: str, sender) -> None:
