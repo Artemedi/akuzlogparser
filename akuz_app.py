@@ -521,7 +521,8 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             process_ctx, ssh_fetch_child, (cfg, next_remote), target,
             poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10,
             expected_listed_bytes=expected_size,
-            require_kill_job=(os.name == 'nt'))
+            require_kill_job=(os.name == 'nt'),
+            safe_ipc=True)
         try:
             operation.start()
         except Exception:
