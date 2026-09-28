@@ -102,10 +102,10 @@ jobs:
           if not token or not base:
               raise SystemExit('Fable API environment incomplete')
 
-          def call_fable(label, prompt):
+          def call_fable(label, prompt, max_tokens):
               payload = json.dumps({
                   'model': model,
-                  'max_tokens': 3500,
+                  'max_tokens': max_tokens,
                   'messages': [{'role': 'user', 'content': prompt}]
               }, ensure_ascii=False).encode('utf-8')
               request_path = None
@@ -122,12 +122,12 @@ jobs:
                       'data-binary = "@' + request_path.replace('\\', '/') + '"\n'
                   )
                   proc = subprocess.run(
-                      ['curl', '--silent', '--show-error', '--max-time', '150',
+                      ['curl', '--silent', '--show-error', '--max-time', '300',
                        '--write-out', '\n%{http_code}', '--config', '-'],
                       input=config.encode('utf-8'),
                       stdout=subprocess.PIPE,
                       stderr=subprocess.PIPE,
-                      timeout=160)
+                      timeout=320)
                   raw = proc.stdout.decode('utf-8', 'replace')
                   if '\n' not in raw:
                       raise SystemExit(label + ': malformed curl response')
@@ -198,7 +198,7 @@ jobs:
           Evidence: real Windows spawn + forced abort tests pass; packaged
           PyInstaller spawn self-test passes. Treat tests as evidence, not proof.
 
-          Return <=700 words:
+          Return <=500 words:
           BLOCKERS
           HIGH
           MISSING TESTS
@@ -246,8 +246,8 @@ jobs:
           """ + app_tests
 
           verdicts = [
-              call_fable('LIFECYCLE', lifecycle_prompt),
-              call_fable('TRANSACTION', transaction_prompt),
+              call_fable('LIFECYCLE', lifecycle_prompt, 7000),
+              call_fable('TRANSACTION', transaction_prompt, 9000),
           ]
           rank = {'ACCEPT': 0, 'MODIFY': 1, 'BLOCK': 2}
           overall = max(verdicts, key=lambda value: rank[value])
