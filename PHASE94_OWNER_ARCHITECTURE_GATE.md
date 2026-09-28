@@ -1,8 +1,6 @@
 # Phase 9.4 — architecture evidence and owner gate
 
-Status: **EVIDENCE PARTIAL; no owner architecture selection; normal application
-still uses validated ephemeral derived spool**. Evidence assembled on
-2026-09-28; do not interpret prototype results as deployment authorization.
+Status: **v4.7.0 RELEASE CHOICE: KEEP VALIDATED EPHEMERAL DERIVED SPOOL; Tee/B-lite remain experimental and are not production-selected**. Evidence assembled on 2026-09-28. This release choice is deliberately conservative and does not authorize persistent derived clinical metadata.
 
 ## Decision context
 
@@ -151,18 +149,25 @@ and CPU and is a separate operational choice.
 5. Validate frozen portable on exact accepted source revision.
    No release is approved by benchmark, tests, or documentary review.
 
-## Remaining choices to be made by owner, AFTER evidence
+## Release decision and deferred choices
 
-- Keep ephemeral spool in production and continue studying both
-  candidates without changing the ordinary application.
-- Authorize a bounded Tee integration pilot with the acceptance
-  matrix above (does not authorize B-lite retention).
-- Independently authorize a bounded B-lite integration pilot AND
-  specify if/where/how long derived metadata may be retained.
-- Request a separate hybrid proposal and acceptance matrix.
+For **v4.7.0**, the selected release path is the already validated
+**ephemeral derived spool** used by the normal application. This is a
+release-scoped architecture decision, not a claim that it is globally optimal.
 
-No option is selected here. A successful experiment must not be
-silently promoted into ordinary cache policy or GitHub Release.
+The following remain deferred and are NOT enabled by v4.7.0:
+
+- bounded Tee normal-app integration;
+- any persistent B-lite sidecar;
+- any hybrid architecture.
+
+Persistent B-lite would still require explicit authorization for whether
+derived clinical metadata may persist at all, plus retention/location/cleanup
+policy. No such authorization is inferred from the request to finish a release.
+
+A successful benchmark must not be silently promoted into ordinary cache
+policy. Phase 11 process overlap is likewise benchmark-only unless a separate
+normal-app integration gate is later accepted.
 
 Independent Fable 5.1 initial and follow-up read-only reviews:
 PHASE94_FABLE_REVIEW.md. The later optional nine-trial numeric
