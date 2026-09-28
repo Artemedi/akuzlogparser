@@ -254,7 +254,22 @@ jobs:
             late-IPC, handle-width and oversized JSON coverage;
           - packaged portable self-check exercises the atomic Job-bound spawn
             path rather than only ordinary multiprocessing spawn;
-          - production prefetch refuses an unbound/missing listed size.
+          - production prefetch refuses an unbound/missing listed size;
+          - CreateProcess failure before hp exists now closes the empty Job;
+          - snapshot SHA is computed from one open file descriptor whose
+            fstat identity/size/mtime must equal the pre-open lstat before and
+            after hashing, followed by a second owned-path identity check;
+          - normal-app start_next_prefetch uses listed.get(next_fid) and
+            falls back instead of exposing a raw KeyError.
+
+          CPython 3.11 reference contract to account for during review:
+          multiprocessing.popen_spawn_win32 intentionally calls CreatePipe,
+          passes parent_pid + pipe_handle in spawn.get_command_line(), and
+          calls CreateProcess with bInheritHandles=False. The child duplicates
+          the read handle from the parent; Popen.duplicate_for_child delegates
+          to reduction.duplicate(handle, self.sentinel). Therefore do NOT
+          report bInheritHandles=False itself as a pipe-inheritance blocker;
+          compare JobBoundPopen against that CPython 3.11 duplication contract.
 
           Treat regression evidence as evidence, not proof. Re-check the
           implementation rather than trusting this summary.
