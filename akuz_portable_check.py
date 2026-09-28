@@ -4,6 +4,15 @@ from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import json
+import multiprocessing
+
+
+def _spawn_probe(destination, sender):
+    path = Path(destination)
+    payload = b'AKUZ portable spawned child'
+    path.write_bytes(payload)
+    sender.send(('ok', str(path), 'f' * 64, len(payload), .01, .01, {'active': False}))
+    sender.close()
 
 
 def run():
@@ -14,6 +23,7 @@ def run():
     from akuz_analytics import connect, detail, refresh
     from akuz_runtime import app_root
     from akuz_store import load_store, sha256
+    from akuz_process_fetch import ProcessFetch
 
     key = Ed25519PrivateKey.generate()
     message = b'AKUZ portable offline check'
@@ -22,6 +32,13 @@ def run():
     client.close()
     with TemporaryDirectory(prefix='akuz-portable-check-') as scratch:
         root = Path(scratch)
+        spawn_target = root/'spawn-probe.bin'
+        with ProcessFetch(
+                multiprocessing.get_context('spawn'), _spawn_probe, (), spawn_target,
+                poll_timeout_s=20, join_timeout_s=10, kill_timeout_s=5) as operation:
+            spawned = operation.finish()
+        if spawned.path.read_bytes() != b'AKUZ portable spawned child':
+            raise RuntimeError('Portable multiprocessing spawn check failed')
         raw = root/'20260923_smoke.log'
         raw.write_text(
             '23:59:00.100,AKUZ,s,user: SerializationException: Failed item 1\n'
@@ -39,5 +56,5 @@ def run():
             result = detail(db, summary['groups'][0]['fp'])
             if result['days'] != [('2026-09-23',1), ('2026-09-24',1)]:
                 raise RuntimeError('Portable calendar check failed')
-    print(json.dumps(dict(ok=True, events=2, errors=2, crypto=True,
+    print(json.dumps(dict(ok=True, events=2, errors=2, crypto=True, spawn=True,
                           app_root=str(app_root())), ensure_ascii=True))
