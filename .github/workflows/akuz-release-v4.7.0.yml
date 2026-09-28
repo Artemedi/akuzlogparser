@@ -160,7 +160,7 @@ jobs:
             foreach ($asset in $assets) {
               $file = Resolve-Path $asset.Path
               $name = [System.Uri]::EscapeDataString([System.IO.Path]::GetFileName($file))
-              $uri = "$uploadBase?name=$name"
+              $uri = "${uploadBase}?name=$name"
               Invoke-WebRequest -Uri $uri -Headers $headers -Method Post -InFile $file -ContentType $asset.Type | Out-Null
             }
             $publishBody = @{ draft = $false } | ConvertTo-Json
