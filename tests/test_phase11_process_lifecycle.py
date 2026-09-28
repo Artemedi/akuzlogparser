@@ -117,10 +117,11 @@ def real_spawn_success_child(destination, sender):
     path = Path(destination)
     payload = b"real windows spawned snapshot"
     path.write_bytes(payload)
-    sender.send((
+    sender.send_bytes(json.dumps([
         "ok", str(path), hashlib.sha256(payload).hexdigest(),
         len(payload), .01, .01,
-        {"active": False, "stored_bytes": len(payload)}))
+        {"active": False, "stored_bytes": len(payload)}
+    ], separators=(",", ":")).encode("utf-8"))
     sender.close()
 
 
@@ -161,7 +162,7 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             poll_timeout_s=.01, join_timeout_s=.01, kill_timeout_s=.01)
         return op, ctx
 
-    def test_production_job_requires_listed_size_and_safe_ipc(self):
+    def test_production_job_requires_listed_size_and_json_ipc(self):
         with TemporaryDirectory(prefix="akuz_process_prod_contract_") as td:
             root = Path(td)
             receiver = FakeReceiver(ready=False)
@@ -171,11 +172,13 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                     ProcessFetchError, "listed-size binding"):
                 ProcessFetch(
                     ctx, lambda *args: None, (), root / "x.log",
-                    require_kill_job=True, safe_ipc=True)
-            with self.assertRaisesRegex(ProcessFetchError, "safe IPC"):
+                    require_kill_job=True)
+            with self.assertRaisesRegex(
+                    ProcessFetchError, "bounded JSON IPC"):
                 ProcessFetch(
                     ctx, lambda *args: None, (), root / "x.log",
-                    expected_listed_bytes=1, require_kill_job=True)
+                    expected_listed_bytes=1, require_kill_job=True,
+                    safe_ipc=False)
 
     def test_safe_ipc_rejects_malformed_json_and_cleans_snapshot(self):
         with TemporaryDirectory(prefix="akuz_process_json_bad_") as td:
@@ -210,6 +213,69 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                 with op:
                     op.finish()
             self.assertFalse(dest.exists())
+
+    def test_success_finish_releases_job_without_context_manager(self):
+        with TemporaryDirectory(prefix="akuz_process_finish_job_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            payload = b"complete snapshot"
+            receiver = FakeReceiver()
+            child = FakeChild(on_start=lambda: dest.write_bytes(payload))
+            digest = hashlib.sha256(payload).hexdigest()
+            receiver.message = (
+                "ok", str(dest), digest, len(payload), .25, 1.5)
+            op, _ = self.make(root, receiver, child)
+            op._kill_job = 123
+            with patch("akuz_process_fetch._close_windows_handle") as close_handle:
+                op.start()
+                result = op.finish()
+            self.assertEqual(result.digest, digest)
+            close_handle.assert_called_once_with(123)
+            self.assertIsNone(op._kill_job)
+            self.assertIsNone(op._start_gate)
+
+    def test_late_ipc_is_waited_until_overall_deadline(self):
+        with TemporaryDirectory(prefix="akuz_process_late_ipc_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            payload = b"late buffered result"
+            digest = hashlib.sha256(payload).hexdigest()
+
+            class LateReceiver(FakeReceiver):
+                def __init__(self):
+                    super().__init__(
+                        ("ok", str(dest), digest, len(payload), .2, .5),
+                        ready=False)
+                    self.polls = 0
+                def poll(self, timeout):
+                    self.polls += 1
+                    if self.polls >= 4:
+                        self.ready = True
+                    return self.ready
+
+            receiver = LateReceiver()
+            child = FakeChild(on_start=lambda: dest.write_bytes(payload))
+            child.alive = False
+            ctx = FakeContext(receiver, child)
+            op = ProcessFetch(
+                ctx, lambda *args: None, (), dest,
+                poll_timeout_s=1.0, join_timeout_s=.01, kill_timeout_s=.01)
+            with op:
+                result = op.finish()
+            self.assertGreaterEqual(receiver.polls, 4)
+            self.assertEqual(result.digest, digest)
+
+    def test_windows_path_identity_is_case_insensitive(self):
+        with patch("akuz_process_fetch.os.path.normcase",
+                   side_effect=lambda value: value.lower()):
+            self.assertTrue(_same_path(Path("C:/Temp/File.log"),
+                                       Path("c:/temp/file.log")))
+
+    def test_windows_handle_value_uses_pointer_value_without_truncation(self):
+        class Handle:
+            value = 0x12345678ABCDEF01
+        self.assertEqual(
+            _windows_handle_value(Handle()), 0x12345678ABCDEF01)
 
     def test_success_transfers_completed_snapshot_ownership(self):
         with TemporaryDirectory(prefix="akuz_process_fetch_ok_") as td:
@@ -389,6 +455,20 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             self.assertTrue(child.terminated)
             self.assertFalse(child.killed)
             self.assertFalse(dest.exists())
+
+    def test_context_exit_surfaces_unsafe_cleanup_failure(self):
+        with TemporaryDirectory(prefix="akuz_process_unsafe_exit_") as td:
+            root = Path(td)
+            receiver = FakeReceiver(ready=False)
+            child = FakeChild(
+                alive_after_start=True,
+                terminate_stops=False,
+                kill_stops=False)
+            op, _ = self.make(root, receiver, child)
+            with self.assertRaisesRegex(
+                    ProcessFetchUnsafeError, "could not be terminated"):
+                with op:
+                    raise ValueError("parent parse failed")
 
     def test_parent_parse_failure_aborts_running_child(self):
         with TemporaryDirectory(prefix="akuz_process_fetch_parent_") as td:
