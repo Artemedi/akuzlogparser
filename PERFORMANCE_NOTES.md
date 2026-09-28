@@ -2943,14 +2943,19 @@ Process wall 78.452962 / 83.730728 s, median 81.091845;
 total parent+child CPU median 65.875000; process-tree private median
 328,448,000 B. Median wall improved ~24.6%, total CPU increased ~12.2%.
 
-The concurrent 24-Sep fetch still slowed:
-serial 19.356464 / 18.350266 s (mean 18.853365);
-process 30.071016 / 29.367467 s (mean 29.719242), ~57.6% slower.
-First 23-Sep parse mean increased ~2.4%.
+Instrumentation correction: the first process run's
+`fetch["20260924"]` value was measured from Process.start() until the
+parent read the IPC result after parse(A). Therefore process values
+30.071016 / 29.367467 s are readiness latency, NOT pure child fetch wall,
+and the prior "~57.6% fetch slowdown" interpretation is withdrawn.
+Serial fetch values remain directly timed. Pair wall (-24.6%), total CPU
+(+12.2%), process-tree memory, parity and cleanup remain valid.
+First 23-Sep parse mean increase (~2.4%) remains valid.
 Child CPU 3.906250 / 3.875000 s and parent CPU
 61.578125 / 62.390625 s were audited, so total CPU is not parent-only.
 
-Decision: promising isolated candidate eligible for a bounded large-source
-multi-source gate, NOT normal app integration. Next test must include current
-25-Sep ~644.6 MB prefix in realistic one-ahead ordering and preserve balanced
-serial/process comparison, process-tree memory, parity and cleanup.
+Commits `be7b332` / `57e482f` now record pure child fetch wall inside
+the spawned worker separately from parent spawn-to-readiness latency.
+Decision revised: promising isolated candidate, but repeat corrected 23+24
+balanced pair before the large-source multi-source gate. NOT normal app
+integration.
