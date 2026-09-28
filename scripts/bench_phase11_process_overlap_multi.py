@@ -53,7 +53,8 @@ def _recv_child(ctx, cfg, spec: SourceSpec, destination: Path,
                 source_sha: dict):
     with ProcessFetch(
             ctx, _child_fetch, (cfg, spec), destination,
-            poll_timeout_s=900, join_timeout_s=30, kill_timeout_s=10
+            poll_timeout_s=900, join_timeout_s=30, kill_timeout_s=10,
+            require_metrics=True
     ) as prefetch:
         parse_current()
         result = prefetch.finish()
