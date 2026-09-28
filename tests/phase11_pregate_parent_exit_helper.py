@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import multiprocessing
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from akuz_process_fetch import _run_after_parent_gate
+from scripts.phase9_memory import sample
 
 
 def never_run(destination, sender):
@@ -33,7 +35,18 @@ def main():
         name="akuz-phase11-pregate-parent-death")
     child.start()
     sender.close()
-    pid_file.write_text(str(child.pid), encoding="ascii")
+    deadline = time.time() + 5
+    identity = None
+    while identity is None and time.time() < deadline:
+        identity = sample(child.pid)
+        if identity is None:
+            time.sleep(.01)
+    if identity is None:
+        raise SystemExit(3)
+    pid_file.write_text(json.dumps({
+        "pid": child.pid,
+        "creation_time_ticks": identity["creation_time_ticks"],
+    }), encoding="ascii")
     # Deliberately exit before assigning a Job Object or opening the gate.
     os._exit(79)
 
