@@ -40,7 +40,11 @@ def synthetic_row(mode: str, wall: float, second_fetch: float,
         workspace_bytes=1000)
     if mode == "process":
         row.update(parent_cpu_s=2.0, child_cpu_s=1.0,
-                   max_sampled_processes=2)
+                   max_sampled_processes=2,
+                   fetch_ready_latency={
+                       "20260923": 1.0,
+                       "20260924": second_fetch + 2.0})
+
     return row
 
 
@@ -80,6 +84,7 @@ class Phase11ProcessOverlapTests(unittest.TestCase):
         self.assertEqual(serial["wall_median_s"], 11.0)
         self.assertEqual(process["wall_median_s"], 8.5)
         self.assertEqual(process["second_fetch_values_s"], [6.0, 7.0])
+        self.assertEqual(process["second_ready_values_s"], [8.0, 9.0])
         self.assertEqual(process["first_parse_values_s"], [5.2, 5.4])
         with self.assertRaisesRegex(AssertionError, "two trials"):
             bench._summary(rows[:2], "serial")
