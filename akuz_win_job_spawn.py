@@ -242,6 +242,14 @@ if os.name == "nt":
                                 owner.close()
                             except BaseException:
                                 pass
+                    else:
+                        # CreateProcess failed before an exact child HANDLE
+                        # existed. The empty kill Job is still parent-owned
+                        # and must not leak.
+                        try:
+                            owner.close()
+                        except BaseException:
+                            pass
                     try:
                         _winapi.CloseHandle(rhandle)
                     except BaseException:
