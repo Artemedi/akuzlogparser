@@ -406,6 +406,32 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             close_handle.assert_called_once_with(123)
             self.assertIsNone(op._kill_job)
 
+    def test_owned_snapshot_cleanup_never_unlinks_replacement(self):
+        with TemporaryDirectory(prefix="akuz_process_cleanup_swap_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            replacement = root / "replacement.log"
+            dest.write_bytes(b"owned partial")
+            replacement.write_bytes(b"external replacement")
+            real_unlink = Path.unlink
+            injected = {"done": False}
+
+            def racing_unlink(path, *args, **kwargs):
+                if path == dest and not injected["done"]:
+                    injected["done"] = True
+                    os.replace(replacement, dest)
+                    raise PermissionError("simulated lock plus replacement")
+                return real_unlink(path, *args, **kwargs)
+
+            with patch.object(Path, "unlink", new=racing_unlink), \
+                 patch("akuz_process_fetch.sleep"):
+                with self.assertRaisesRegex(
+                        ProcessFetchUnsafeError, "pathname was replaced"):
+                    remove_owned_snapshot(dest, attempts=3, delay_s=.01)
+
+            self.assertTrue(injected["done"])
+            self.assertEqual(dest.read_bytes(), b"external replacement")
+
     def test_owned_snapshot_cleanup_retries_transient_windows_lock(self):
         with TemporaryDirectory(prefix="akuz_process_cleanup_retry_") as td:
             root = Path(td)
