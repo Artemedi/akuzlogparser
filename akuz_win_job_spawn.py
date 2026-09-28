@@ -372,17 +372,42 @@ if os.name == "nt":
         def close(self):
             if getattr(self, "_closed", False):
                 return
-            process_handle = getattr(self, "_handle", None)
-            pipe_handle = getattr(self, "_pipe_handle", None)
-            _close_handles_strict(
-                self._akuz_job_owner, process_handle, pipe_handle)
-            # Only after every owned HANDLE closed successfully may the quiet
-            # GC fallback be cancelled and ownership state cleared.
+
+            # Explicit close takes ownership away from the quiet GC fallback.
+            # Update each raw HANDLE slot immediately after its successful
+            # CloseHandle so a later retry can never double-close it.
             finalizer = getattr(self, "finalizer", None)
             if finalizer is not None and finalizer.still_active():
                 finalizer.cancel()
-            self._handle = None
-            self._pipe_handle = None
+
+            errors = []
+            try:
+                self._akuz_job_owner.close()
+            except BaseException as exc:
+                errors.append(exc)
+
+            process_handle = getattr(self, "_handle", None)
+            if process_handle is not None:
+                try:
+                    _winapi.CloseHandle(process_handle)
+                except BaseException as exc:
+                    errors.append(exc)
+                else:
+                    self._handle = None
+
+            pipe_handle = getattr(self, "_pipe_handle", None)
+            if pipe_handle is not None:
+                try:
+                    _winapi.CloseHandle(pipe_handle)
+                except BaseException as exc:
+                    errors.append(exc)
+                else:
+                    self._pipe_handle = None
+
+            if errors:
+                raise JobBoundSpawnError(
+                    "Could not close atomic Job-bound spawn handles"
+                ) from errors[0]
             self._closed = True
 
 

@@ -254,7 +254,10 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                 op.start()
                 result = op.finish()
             self.assertEqual(result.digest, digest)
-            close_handle.assert_called_once_with(123)
+            job_calls = [
+                call for call in close_handle.call_args_list
+                if call.args == (123,)]
+            self.assertEqual(len(job_calls), 1)
             self.assertIsNone(op._kill_job)
             self.assertIsNone(op._start_gate)
 
@@ -621,8 +624,17 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
         self.assertTrue(popen.finalizer.cancelled)
         self.assertTrue(popen._akuz_job_owner.closed)
         self.assertEqual(calls, [101, 102])
-        self.assertTrue(popen._closed)
+        self.assertFalse(popen._closed)
         self.assertIsNone(popen._handle)
+        self.assertEqual(popen._pipe_handle, 102)
+
+        # Retry owns only the one HANDLE that actually failed previously.
+        calls.clear()
+        with patch("akuz_win_job_spawn._winapi.CloseHandle",
+                   side_effect=lambda value: calls.append(value)):
+            popen.close()
+        self.assertEqual(calls, [102])
+        self.assertTrue(popen._closed)
         self.assertIsNone(popen._pipe_handle)
 
     @unittest.skipUnless(os.name == "nt", "Windows parent identity binding")
