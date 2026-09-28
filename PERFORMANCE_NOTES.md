@@ -2874,3 +2874,44 @@ intrusive.
 
 No report/parser/cache-schema/Phase9 architecture/Release behavior changed.
 See PHASE10_SSH_COMPRESSION.md.
+
+## Phase 11 balanced 2x2 real replication — threaded one-ahead rejected (2026-09-28)
+
+Real isolated pair benchmark on fixed 23+24 Sep source prefixes,
+compression forced off, order serial/overlap/overlap/serial.
+Exact benchmark workflow commit `e065dfa`,
+[Actions #36394213273](https://github.com/Artemedi/akuzlogparser/actions/runs/36394213273)
+SUCCESS. Independent read-only private JSON audit exact
+`49223dd`,
+[Actions #36394295913](https://github.com/Artemedi/akuzlogparser/actions/runs/36394295913)
+SUCCESS.
+
+Correctness/privacy: source SHA equality across all four modes PASS;
+deterministic report manifest equality PASS; owned workspace cleanup
+PASS; no raw payload saved; normal app cache and Release unchanged.
+
+Measured values:
+- serial wall 121.787921 / 100.138628 s, median 110.963274 s;
+  CPU median 58.781250 s; private median 393,189,376 B.
+- thread one-ahead overlap wall 136.705397 / 125.393428 s,
+  median 131.049413 s; CPU median 59.226562 s;
+  private median 357,048,320 B.
+- overlap median wall is ~18.1% slower; CPU median ~0.8% higher.
+- second 24-Sep fetch: serial 30.498877 / 18.470101 s
+  (mean 24.484489); overlap 37.418625 / 51.568935 s
+  (mean 44.493780), ~81.7% slower.
+- first 23-Sep parse mean: serial 25.860110 s; overlap
+  26.691686 s (~3.2% slower).
+
+The earlier single smoke's ~2.5% wall improvement did not reproduce.
+Memory direction also did not reproduce (smoke overlap private was higher,
+balanced overlap median private lower), so RAM is not assigned as the
+cause. The repeatable signal is contention of the next SSH fetch with
+report generation. Thread/GIL, crypto CPU, local snapshot write and
+scheduler effects are NOT separately identified.
+
+Decision: current `ThreadPoolExecutor(max_workers=1)` one-ahead
+candidate is REJECTED for production. Do not run the same candidate on
+25-Sep 644.6 MB source or integrate into `perform_build`. Any process-
+isolated alternative is a new candidate requiring separate cancellation,
+snapshot ownership, parity, RSS/disk and Windows evidence. No Release change.
