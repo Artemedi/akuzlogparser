@@ -9,7 +9,8 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from akuz_process_fetch import ProcessFetch, ProcessFetchError, ssh_fetch_child
+from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
+                                remove_owned_snapshot, ssh_fetch_child)
 from akuz_fetch import ConnectConfig
 
 
@@ -146,6 +147,44 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             self.assertFalse(child.killed)
             self.assertTrue(receiver.closed)
             self.assertTrue(ctx.sender.closed)
+
+    def test_buffered_ipc_wins_over_already_signaled_child_sentinel(self):
+        with TemporaryDirectory(prefix="akuz_process_fetch_buffered_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            payload = b"buffered result"
+            receiver = FakeReceiver()
+            child = FakeChild(on_start=lambda: dest.write_bytes(payload))
+            child.sentinel = object()
+            digest = hashlib.sha256(payload).hexdigest()
+            receiver.message = (
+                "ok", str(dest), digest, len(payload), .2, .5)
+            op, _ = self.make(root, receiver, child)
+            with patch("akuz_process_fetch.wait_connections",
+                       return_value=[child.sentinel]):
+                with op:
+                    result = op.finish()
+            self.assertEqual(result.digest, digest)
+            self.assertTrue(dest.is_file())
+
+    def test_owned_snapshot_cleanup_retries_transient_windows_lock(self):
+        with TemporaryDirectory(prefix="akuz_process_cleanup_retry_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            dest.write_bytes(b"partial")
+            real_unlink = Path.unlink
+            calls = {"count": 0}
+
+            def flaky_unlink(path, *args, **kwargs):
+                if path == dest and calls["count"] < 2:
+                    calls["count"] += 1
+                    raise PermissionError("simulated WinError 32")
+                return real_unlink(path, *args, **kwargs)
+
+            with patch.object(Path, "unlink", new=flaky_unlink),                  patch("akuz_process_fetch.sleep"):
+                remove_owned_snapshot(dest, attempts=4, delay_s=.01)
+            self.assertEqual(calls["count"], 2)
+            self.assertFalse(dest.exists())
 
     def test_pipe_oserror_is_normalized_and_cleans_snapshot(self):
         with TemporaryDirectory(prefix="akuz_process_fetch_pipe_") as td:
@@ -512,6 +551,26 @@ class RealSpawnLifecycleTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), b"real windows spawned snapshot")
 
     @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
+    @unittest.skipUnless(os.name == "nt", "Windows kill Job Object")
+    def test_kill_job_assignment_failure_aborts_child_before_gate(self):
+        with TemporaryDirectory(prefix="akuz_process_job_assign_fail_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            op = ProcessFetch(
+                multiprocessing.get_context("spawn"),
+                real_spawn_hanging_child, (), target,
+                poll_timeout_s=5, join_timeout_s=2, kill_timeout_s=2,
+                require_kill_job=True)
+            with patch(
+                    "akuz_process_fetch._create_kill_on_close_job",
+                    side_effect=ProcessFetchError("injected job assign failure")):
+                with self.assertRaisesRegex(
+                        ProcessFetchError, "job assign failure"):
+                    op.start()
+            self.assertFalse(op.child.is_alive())
+            self.assertFalse(target.exists())
+            self.assertIsNone(op._kill_job)
+
     def test_real_spawn_required_kill_job_completes_successfully(self):
         with TemporaryDirectory(prefix="akuz_process_real_job_") as td:
             root = Path(td)
