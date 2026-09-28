@@ -340,6 +340,20 @@ class SSHChildContractTests(unittest.TestCase):
 
 
 
+class WatchdogStartupFailureTests(unittest.TestCase):
+    def test_watchdog_start_failure_hard_exits_before_fetch(self):
+        with TemporaryDirectory(prefix="akuz_process_watchdog_fail_") as td:
+            root = Path(td)
+            helper = Path(__file__).with_name(
+                "phase11_watchdog_failure_helper.py")
+            proc = subprocess.run(
+                [sys.executable, str(helper), str(root)],
+                cwd=Path(__file__).resolve().parents[1],
+                timeout=20, check=False)
+            self.assertEqual(proc.returncode, 88)
+            self.assertFalse((root / "never.log").exists())
+
+
 class ParentWatchdogTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows process-handle watchdog")
     def test_hard_parent_exit_terminates_spawned_child(self):
