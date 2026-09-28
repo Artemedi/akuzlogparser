@@ -12,7 +12,10 @@ from unittest.mock import patch
 
 from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
                                 ProcessFetchUnsafeError,
-                                _same_path, _windows_handle_value,
+                                _close_windows_handle,
+                                _create_kill_on_close_job,
+                                _owned_snapshot_stat,
+                                _same_path_lexical, _windows_handle_value,
                                 remove_owned_snapshot, ssh_fetch_child)
 from akuz_fetch import ConnectConfig
 
@@ -236,7 +239,7 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             self.assertIsNone(op._kill_job)
             self.assertIsNone(op._start_gate)
 
-    def test_late_ipc_is_waited_until_overall_deadline(self):
+    def test_late_ipc_after_child_exit_is_accepted_beyond_100ms(self):
         with TemporaryDirectory(prefix="akuz_process_late_ipc_") as td:
             root = Path(td)
             dest = root / "snapshot.log"
@@ -244,34 +247,68 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             digest = hashlib.sha256(payload).hexdigest()
 
             class LateReceiver(FakeReceiver):
-                def __init__(self):
-                    super().__init__(
-                        ("ok", str(dest), digest, len(payload), .2, .5),
-                        ready=False)
-                    self.polls = 0
                 def poll(self, timeout):
-                    self.polls += 1
-                    if self.polls >= 4:
-                        self.ready = True
-                    return self.ready
+                    # Model Windows scheduler/pipe delivery lag > the old
+                    # 100 ms heuristic after the process handle signaled.
+                    time.sleep(0.20)
+                    self.ready = True
+                    return True
 
-            receiver = LateReceiver()
+            receiver = LateReceiver(
+                ("ok", str(dest), digest, len(payload), .2, .5),
+                ready=False)
             child = FakeChild(on_start=lambda: dest.write_bytes(payload))
+            child.sentinel = object()
             child.alive = False
             ctx = FakeContext(receiver, child)
             op = ProcessFetch(
                 ctx, lambda *args: None, (), dest,
-                poll_timeout_s=1.0, join_timeout_s=.01, kill_timeout_s=.01)
-            with op:
-                result = op.finish()
-            self.assertGreaterEqual(receiver.polls, 4)
+                poll_timeout_s=2.0, join_timeout_s=.01, kill_timeout_s=.01)
+            with patch(
+                    "akuz_process_fetch.wait_connections",
+                    return_value=[child.sentinel]):
+                with op:
+                    result = op.finish()
             self.assertEqual(result.digest, digest)
+            self.assertTrue(dest.is_file())
+
 
     def test_windows_path_identity_is_case_insensitive(self):
         with patch("akuz_process_fetch.os.path.normcase",
                    side_effect=lambda value: value.lower()):
-            self.assertTrue(_same_path(Path("C:/Temp/File.log"),
-                                       Path("c:/temp/file.log")))
+            self.assertTrue(_same_path_lexical("C:/Temp/File.log",
+                                               "c:/temp/file.log"))
+
+    def test_owned_snapshot_rejects_reparse_file(self):
+        with TemporaryDirectory(prefix="akuz_process_reparse_") as td:
+            target = Path(td) / "snapshot.log"
+            target.write_bytes(b"payload")
+            real_lstat = Path.lstat
+            def reparse_lstat(path):
+                st = real_lstat(path)
+                if path == target:
+                    class Wrapped:
+                        st_mode = st.st_mode
+                        st_size = st.st_size
+                        st_file_attributes = 0x0400
+                    return Wrapped()
+                return st
+            with patch.object(Path, "lstat", new=reparse_lstat):
+                with self.assertRaisesRegex(
+                        ProcessFetchError, "reparse point"):
+                    _owned_snapshot_stat(target)
+
+    def test_owned_snapshot_rejects_symlink_flag(self):
+        with TemporaryDirectory(prefix="akuz_process_symlink_") as td:
+            target = Path(td) / "snapshot.log"
+            target.write_bytes(b"payload")
+            real_is_symlink = Path.is_symlink
+            def fake_is_symlink(path):
+                return path == target or real_is_symlink(path)
+            with patch.object(Path, "is_symlink", new=fake_is_symlink):
+                with self.assertRaisesRegex(
+                        ProcessFetchError, "symlink"):
+                    _owned_snapshot_stat(target)
 
     def test_windows_handle_value_uses_pointer_value_without_truncation(self):
         class Handle:
@@ -761,6 +798,34 @@ class RealSpawnLifecycleTests(unittest.TestCase):
             self.assertFalse(op.child.is_alive())
             self.assertFalse(target.exists())
             self.assertIsNone(op._kill_job)
+
+    @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
+    def test_job_assignment_uses_spawn_handle_not_pid_lookup(self):
+        with TemporaryDirectory(prefix="akuz_process_job_handle_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            ctx = multiprocessing.get_context("spawn")
+            receiver, sender = ctx.Pipe(duplex=False)
+            child = ctx.Process(
+                target=real_spawn_hanging_child,
+                args=(str(target), sender))
+            child.start()
+            sender.close()
+
+            class NoPidProxy:
+                _popen = child._popen
+                @property
+                def pid(self):
+                    raise AssertionError("PID lookup must not be used")
+
+            job = _create_kill_on_close_job(NoPidProxy())
+            _close_windows_handle(job)
+            child.join(timeout=5)
+            if child.is_alive():
+                child.kill()
+                child.join(timeout=5)
+            receiver.close()
+            self.assertFalse(child.is_alive())
 
     def test_real_spawn_required_kill_job_completes_successfully(self):
         with TemporaryDirectory(prefix="akuz_process_real_job_") as td:
