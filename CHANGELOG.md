@@ -1,26 +1,40 @@
 # История изменений AKUZ Log Explorer
 
-## Post-v4.6.0 ? Phase 8 Error Probe (main, before next release)
+## 4.7.0 — 2026-09-28
 
-- Numeric-only counters for recognize_error paths: call count, scanned
-  prefix chars, 24k truncation, ASCII, exception, serialization, first-line
-  generic error, and unrecognized messages. No raw text is logged.
-- Public API and HTML/JS files unchanged; Phase 8 is instrumentation,
-  NOT a demonstrated speed improvement.
-- Paired Windows synthetic benchmarks show approximately 1-2% cost.
-- Two exploratory micro-optimizations (ASCII replace, JS translate)
-  are not integrated: no reproducible benefit.
-
-## После v4.6.0 — Phase 7 Shared Fold (в main, до нового релиза)
-
-- Один `casefold(message)` на событие в `generate()` вместо
-  двух независимых преобразований в `classify()` и `extract_duration()`.
-  Самостоятельные вызовы обеих функций и `read_input()` совместимы.
-- `generate.parse` дополнен отдельной метрикой `fold_s`; сравнивайте
-  суммарное время, так как состав `classify_s`/`duration_s` поменялся.
-- Дифференциальные тесты и побайтовые сравнения отчётов;
-  на двух парных Windows-бенчмарках синтетики около 6% выигрыша.
-- Это изменение ветки main после тега v4.6.0, отдельный релиз не создан.
+- **Общая выборка / Phase 9:** normal-app использует проверенный временный
+  derived spool для свежих отдельных отчётов и повторно применяет уже
+  вычисленные производные поля при построении combined. Spool живёт только
+  внутри одной операции в `cache/akuz-phase9-derived-*`, проверяется по
+  числу событий/identity/SHA и удаляется после завершения или ошибки.
+  Постоянный B-lite sidecar и derived clinical metadata не включены.
+- **Транзакционность кэша и публикации:** добавлены блокировка inventory,
+  один экземпляр приложения на один app-root, publication intent/recovery,
+  безопасные `.building`-каталоги и восстановление после сбоя между
+  генерацией отчёта и фиксацией inventory. Готовые single-отчёты не должны
+  теряться из-за ошибки combined.
+- **Идентичность источников:** перед reuse удалённого отчёта приложение
+  повторно сверяет актуальный server inventory, рост получает новую identity,
+  device/inode rotation отклоняется. Для локальных файлов доступен
+  выключенный по умолчанию `AKUZ_VERIFY_LOCAL_SOURCE_SHA=1`: полный SHA-256
+  исходного файла перед warm reuse обнаруживает same-size/same-mtime/same-inode
+  подмену. Обычный быстрый режим дополнительного чтения не выполняет.
+- **Производительность парсинга:** одно `casefold(message)` используется
+  совместно классификацией и извлечением длительности; differential/byte-parity
+  тесты сохраняют прежнюю семантику. Phase 8 добавляет numeric-only
+  instrumentation распознавания ошибок без текста событий.
+- **SSH compression:** параметр `[ssh] compression = true` остаётся opt-in.
+  На реальных fixed-prefix 23/24/25 Sep replicated A/B compression уменьшила
+  медианное wall на 67,6–71,0% и socket RX на 72,1–76,9%, но measured parent
+  `sshd` CPU вырос примерно в 5,2–6,1 раза. Поэтому default остаётся
+  `compression=false`; автоматически по размеру файла compression не включается.
+- **Экспериментальный overlap SSH fetch/parse:** thread-кандидат отклонён после
+  balanced real replication. Process-isolated кандидат показал положительный
+  benchmark-сигнал, но в v4.7.0 normal-app scheduler **не меняется** — эти
+  harness/workflow остаются исследовательскими и не входят в runtime path.
+- Расширены Python/Node regression, Windows self-hosted CI, real-source
+  read-only evidence gates и документация. Сырые журналы, заполненный конфиг,
+  приватные diagnostics и derived sidecars в релиз не входят.
 
 ## 4.6.0 — 2026-09-25
 
