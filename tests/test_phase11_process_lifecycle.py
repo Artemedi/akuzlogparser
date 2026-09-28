@@ -1175,7 +1175,9 @@ class RealSpawnLifecycleTests(unittest.TestCase):
             self.assertEqual(
                 result.digest, hashlib.sha256(payload).hexdigest())
             self.assertEqual(target.read_bytes(), payload)
-            self.assertFalse(op.child.is_alive())
+            self.assertTrue(
+                getattr(op.child, "_closed", False),
+                "successful production finish must close Process/Popen handles")
 
     def test_real_spawn_child_crash_fails_fast_and_cleans_partial(self):
         with TemporaryDirectory(prefix="akuz_process_real_crash_") as td:
