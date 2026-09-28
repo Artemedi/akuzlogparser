@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   portable:
-    name: Build and verify frozen Windows spawn
+    name: Build and verify final default-enabled Windows spawn
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 30
     defaults:
@@ -43,7 +43,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Frozen self-test failed' }
           $data = $json | ConvertFrom-Json
           if (-not $data.ok -or -not $data.spawn -or -not $data.crypto) { throw 'Frozen spawn/crypto proof missing' }
-          Write-Host 'PHASE11_PORTABLE_SPAWN=PASS'
+          Write-Host 'PHASE11_PORTABLE_SPAWN=PASS'\n          Write-Host 'PHASE11_DEFAULT_ENABLED_CANDIDATE=PASS'
       - name: Packaged smoke
         run: |
           $ErrorActionPreference = 'Stop'
