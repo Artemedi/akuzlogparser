@@ -1173,6 +1173,36 @@ class RealSpawnLifecycleTests(unittest.TestCase):
             self.assertFalse(target.exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
+    def test_atomic_payload_failure_terminates_assigned_job_before_return(self):
+        with TemporaryDirectory(prefix="akuz_process_payload_fail_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            terminated = []
+
+            def record_terminate(owner, process_handle, timeout_ms=10000):
+                terminated.append((owner, int(process_handle), timeout_ms))
+
+            op = ProcessFetch(
+                get_job_bound_spawn_context(),
+                real_spawn_hanging_child, (), target,
+                poll_timeout_s=5, join_timeout_s=2, kill_timeout_s=2,
+                expected_listed_bytes=1,
+                require_kill_job=True, safe_ipc=True)
+            with patch(
+                    "akuz_win_job_spawn.reduction.dump",
+                    side_effect=OSError("injected payload write failure")), \
+                 patch(
+                    "akuz_win_job_spawn._terminate_job_and_wait",
+                    side_effect=record_terminate):
+                with self.assertRaisesRegex(
+                        OSError, "payload write failure"):
+                    op.start()
+            self.assertEqual(len(terminated), 1)
+            self.assertFalse(target.exists())
+            self.assertIsNone(op.child)
+
+
+    @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
     def test_atomic_createprocess_failure_closes_empty_job(self):
         class FakeOwner:
             def __init__(self):

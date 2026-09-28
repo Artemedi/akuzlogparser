@@ -123,6 +123,27 @@ if os.name == "nt":
                 "Could not assign suspended child to Windows kill Job Object")
 
 
+    def _terminate_job_and_wait(job_owner, process_handle, timeout_ms=10000):
+        """Synchronously terminate an assigned child tree before error return."""
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.TerminateJobObject.argtypes = [
+            wintypes.HANDLE, wintypes.UINT]
+        kernel32.TerminateJobObject.restype = wintypes.BOOL
+        kernel32.WaitForSingleObject.argtypes = [
+            wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+
+        if not kernel32.TerminateJobObject(
+                wintypes.HANDLE(job_owner.handle), TERMINATE):
+            raise JobBoundSpawnError(
+                "Could not terminate failed atomic Job-bound child tree")
+        result = kernel32.WaitForSingleObject(
+            wintypes.HANDLE(int(process_handle)), timeout_ms)
+        if result != _winapi.WAIT_OBJECT_0:
+            raise JobBoundSpawnError(
+                "Failed atomic Job-bound child did not terminate in time")
+
+
     def _resume_thread(thread_handle):
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.ResumeThread.argtypes = [wintypes.HANDLE]
@@ -272,20 +293,35 @@ if os.name == "nt":
                     ht = None
 
                 if finalizer is not None:
-                    # A constructed Popen owns these handles. Cancel the quiet
-                    # GC callback and close synchronously so setup failures
-                    # cannot hide a leaked Job/process/spawn-pipe handle.
+                    # The child may already have been resumed and started
+                    # consuming the spawn pipe. Kill the already Job-bound tree
+                    # synchronously and wait for the exact process HANDLE
+                    # before releasing process/pipe ownership.
                     finalizer.cancel()
+                    termination_error = None
+                    if assigned and self.sentinel is not None:
+                        try:
+                            _terminate_job_and_wait(owner, self.sentinel)
+                        except BaseException as exc:
+                            termination_error = exc
+                    cleanup_error = None
                     try:
                         _close_handles_strict(
                             owner, self.sentinel, self._pipe_handle)
-                    except BaseException as cleanup_exc:
+                    except BaseException as exc:
+                        cleanup_error = exc
+                    self._closed = cleanup_error is None
+                    if cleanup_error is None:
+                        self._handle = None
+                        self._pipe_handle = None
+                    if termination_error is not None:
+                        raise JobBoundSpawnError(
+                            "Could not synchronously terminate failed atomic spawn"
+                        ) from termination_error
+                    if cleanup_error is not None:
                         raise JobBoundSpawnError(
                             "Could not clean failed atomic spawn handles"
-                        ) from cleanup_exc
-                    self._closed = True
-                    self._handle = None
-                    self._pipe_handle = None
+                        ) from cleanup_error
                 else:
                     if hp is not None:
                         if assigned:
