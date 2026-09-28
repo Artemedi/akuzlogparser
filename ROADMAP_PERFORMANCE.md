@@ -132,7 +132,7 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 
 **Gate:** побайтовая идентичность, корректный mixed-cache и net gain с учётом записи + чтения sidecar, приемлемый размер/пиковая RAM. Если нет — B-lite не включать в production.
 
-## 7. Phase 9.4 — выбор A / B-lite / гибрида; B-full только по отдельному доказательству [SAME-INPUT SYNTHETIC EVIDENCE PASS; OWNER CHOICE OPEN]
+## 7. Phase 9.4 — выбор A / B-lite / гибрида; B-full только по отдельному доказательству [v4.7 RELEASE CHOICE: CURRENT EPHEMERAL SPOOL; TEE/B-LITE DEFERRED]
 
 1. Свести прототипы на одной матрице: fresh-all, warm, mixed-cache, missing combined, повторное открытие спустя перезапуск, source changed, crash/rollback; CPU/wall/RSS/cache-disk.
 2. A даёт преимущество для свежего веера, B-lite — повторное использование прежних derive при смешанном кэше. Не объявлять один вариант абсолютным победителем до сравнительных данных.
@@ -146,7 +146,7 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 
 ## 8. Следующие независимые улучшения после Phase 9 (НЕ смешивать)
 
-### Phase 10 — SSH compression A/B [DONE: REPLICATED BENEFIT; DEFAULT OFF RETAINED]
+**2026-09-28 v4.7 release architecture decision:** normal application keeps the already validated ephemeral derived spool. Tee remains a research candidate; persistent B-lite is NOT authorized and derived clinical metadata retention is NOT enabled. This closes the architecture choice only for the v4.7 release train; future experiments require their own acceptance gate. See `PHASE94_OWNER_ARCHITECTURE_GATE.md`.\n\n### Phase 10 — SSH compression A/B [DONE: REPLICATED BENEFIT; DEFAULT OFF RETAINED]
 1. Выполнены три real-source fixed-prefix серии 3 control + 3 compressed в balanced order на 23/24/25 Sep: 171,378,567 / 140,361,291 / 644,567,384 B. Во всех сериях 6/6 client SHA одинаковы внутри fixed prefix; device/inode + non-truncation gates PASS.
 2. Compression уменьшил date-level median wall на 67.6–71.0% и client socket RX на 72.1–76.9%; client process CPU снизился на 46.0–50.4%. Цена: measured parent sshd CPU вырос примерно в 5.2–6.1 раза; для 25 Sep 2.72 -> 16.59 CPU s при 19.27 s compressed wall. Actions: #36384569840, #36387434198, #36384825633; independent numeric audit all three #36387735730 PASS.
 3. Серверный page cache не сбрасывался: это alternating natural-cache evidence, НЕ cold-cache claim. Сбрасывать cache production application server ради benchmark не разрешено и не требуется для принятого решения.
