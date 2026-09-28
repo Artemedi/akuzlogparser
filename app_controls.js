@@ -16,7 +16,7 @@
   const buttons=['fetch-latest','fetch-list','fetch-cache','picker-build','picker-select-all','picker-select-none'];
   const isLocal=/^(127\.0\.0\.1|localhost)$/.test(location.hostname)&&location.protocol==='http:';
   if(!isLocal){$('fetch-status').textContent='Офлайн-просмотр работает. Для SSH и управления отчётами запустите START_EXPLORER.bat.';for(const id of buttons)$(id).disabled=true;return}
-  let files=[],renderKey='',awaitAction='',shownResult='',pollTimer=null,pickerCollapsed=true,initialSourceLoaded=false,busyNow=true;
+  let files=[],renderKey='',awaitAction='',shownResult='',pollTimer=null,pickerCollapsed=true,initialSourceLoaded=false,busyNow=true,connectionFailures=0;
   const status=$('fetch-status'), picker=$('remote-picker'), collection=$('picker-files'), link=$('fetch-open');
   const url='/api/status';
   const label=s=>String(s??'');
@@ -129,7 +129,7 @@
   }
   async function refresh(){
     try{
-      const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const s=await r.json();setBusy(!!s.busy);
+      const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const s=await r.json();connectionFailures=0;setBusy(!!s.busy);
       if(!initialSourceLoaded){$('fetch-source').value=s.source||'linux';$('local-path').value=s.local_path||'';initialSourceLoaded=true;showLocalPath()}
       if(!s.busy && !s.error && ['list','build','latest'].includes(awaitAction)){$('fetch-source').value=s.source||'linux';showLocalPath()}
       status.textContent=s.error?'Ошибка: '+s.error:s.stage;
@@ -156,7 +156,14 @@
         if(!shownResult||shownResult!==JSON.stringify(s.result)){shownResult=JSON.stringify(s.result);await getReports()}
       }
       pollTimer=setTimeout(refresh,s.busy?1100:2500)
-    }catch(e){status.textContent='Нет связи с локальным сервисом: '+String(e.message||e);setBusy(true)}
+    }catch(e){
+      connectionFailures=Math.min(connectionFailures+1,8);
+      const delay=Math.min(10000,1000*Math.pow(2,Math.min(connectionFailures-1,3)));
+      status.textContent='Временно нет связи с локальным сервисом: '+String(e.message||e)+
+        ' · повтор через '+(delay/1000).toFixed(delay<1000?1:0)+' с';
+      setBusy(true);
+      pollTimer=setTimeout(refresh,delay);
+    }
   }
   async function action(endpoint,body,name){
     if(pollTimer)clearTimeout(pollTimer);
