@@ -1,0 +1,184 @@
+name: AKUZ v4.7.0 final release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/akuz-release-v4.7.0.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Test build smoke and publish v4.7.0
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out exact release revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Verify release identity and runner
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
+            throw 'Release workflow is restricted to DBA-008D'
+          }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:GITHUB_SHA) {
+            throw 'Checkout does not match GITHUB_SHA'
+          }
+          $version = (python -c "import akuz_version; print(akuz_version.__version__)").Trim()
+          if ($version -ne '4.7.0') { throw "Unexpected release version $version" }
+          python --version
+          node --version
+          Write-Host "RELEASE_SHA=$actual"
+          Write-Host 'RELEASE_IDENTITY=PASS'
+
+      - name: Install pinned build toolchain
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install --disable-pip-version-check -r requirements-build.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Build dependency installation failed' }
+
+      - name: Full Python regression
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -B -m unittest discover -s tests -q
+          if ($LASTEXITCODE -ne 0) { throw "Python regression failed: $LASTEXITCODE" }
+          Write-Host 'RELEASE_PYTHON_REGRESSION=PASS'
+
+      - name: Browser controls and diff hygiene
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test tests/test_app_controls.cjs tests/test_hourly_view.cjs
+          if ($LASTEXITCODE -ne 0) { throw "Browser regression failed: $LASTEXITCODE" }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
+          Write-Host 'RELEASE_BROWSER_AND_DIFF=PASS'
+
+      - name: Build Windows portable
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/build_portable.py
+          if ($LASTEXITCODE -ne 0) { throw 'Portable build failed' }
+
+      - name: Smoke packaged executable
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/smoke_portable.py dist/AKUZLogExplorer-windows-x64.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Portable smoke failed' }
+          Write-Host 'RELEASE_PORTABLE_SMOKE=PASS'
+
+      - name: Verify BUILD_INFO and SHA256SUMS
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          import hashlib
+          import json
+          from pathlib import Path
+          import subprocess
+          import zipfile
+
+          root = Path.cwd()
+          sha = subprocess.check_output(
+              ['git','rev-parse','HEAD'], cwd=root, text=True).strip()
+          archive = root/'dist'/'AKUZLogExplorer-windows-x64.zip'
+          exe = root/'dist'/'AKUZLogExplorer.exe'
+          sums = root/'dist'/'SHA256SUMS.txt'
+          if not archive.is_file() or not exe.is_file() or not sums.is_file():
+              raise SystemExit('release outputs missing')
+          with zipfile.ZipFile(archive) as package:
+              info = json.loads(
+                  package.read('AKUZLogExplorer/BUILD_INFO.json').decode('utf-8'))
+          if info.get('version') != '4.7.0' or info.get('commit') != sha:
+              raise SystemExit('BUILD_INFO version/commit mismatch')
+          parsed = {}
+          for line in sums.read_text(encoding='ascii').splitlines():
+              digest, name = line.split('  ', 1)
+              parsed[name] = digest
+          for path in (exe, archive):
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              if parsed.get(path.name) != digest:
+                  raise SystemExit('SHA256SUMS mismatch for ' + path.name)
+          if set(parsed) != {exe.name, archive.name}:
+              raise SystemExit('unexpected SHA256SUMS entries')
+          print('RELEASE_BUILD_INFO_AND_SHA256=PASS')
+          '@ | python -B -
+          if ($LASTEXITCODE -ne 0) { throw 'Release artifact verification failed' }
+
+      - name: Publish verified GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repo = $env:GITHUB_REPOSITORY
+          $api = "https://api.github.com/repos/$repo"
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          try {
+            $existing = Invoke-RestMethod -Uri "$api/releases/tags/v4.7.0" -Headers $headers -Method Get
+            if ($existing) { throw 'Release v4.7.0 already exists' }
+          } catch {
+            if (-not $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404) {
+              throw
+            }
+          }
+
+          $notes = Get-Content -LiteralPath 'RELEASE_NOTES.md' -Raw -Encoding UTF8
+          $body = @{
+            tag_name = 'v4.7.0'
+            target_commitish = $env:GITHUB_SHA
+            name = 'AKUZ Log Explorer 4.7.0 — Windows portable'
+            body = $notes
+            draft = $true
+            prerelease = $false
+            generate_release_notes = $false
+          } | ConvertTo-Json -Depth 5
+
+          $release = $null
+          try {
+            $release = Invoke-RestMethod -Uri "$api/releases" -Headers $headers -Method Post -ContentType 'application/json; charset=utf-8' -Body $body
+            $uploadBase = $release.upload_url -replace '\{\?name,label\}$',''
+            $assets = @(
+              @{ Path='dist/AKUZLogExplorer.exe'; Type='application/octet-stream' },
+              @{ Path='dist/AKUZLogExplorer-windows-x64.zip'; Type='application/zip' },
+              @{ Path='dist/SHA256SUMS.txt'; Type='text/plain' }
+            )
+            foreach ($asset in $assets) {
+              $file = Resolve-Path $asset.Path
+              $name = [System.Uri]::EscapeDataString([System.IO.Path]::GetFileName($file))
+              $uri = "$uploadBase?name=$name"
+              Invoke-WebRequest -Uri $uri -Headers $headers -Method Post -InFile $file -ContentType $asset.Type | Out-Null
+            }
+            $publishBody = @{ draft = $false } | ConvertTo-Json
+            $null = Invoke-RestMethod -Uri "$api/releases/$($release.id)" -Headers $headers -Method Patch -ContentType 'application/json' -Body $publishBody
+            $final = Invoke-RestMethod -Uri "$api/releases/$($release.id)" -Headers $headers -Method Get
+            if ($final.draft -or $final.tag_name -ne 'v4.7.0' -or @($final.assets).Count -ne 3 -or $final.target_commitish -ne $env:GITHUB_SHA) {
+              throw 'Published release verification failed'
+            }
+            Write-Host "RELEASE_URL=$($final.html_url)"
+            Write-Host 'RELEASE_PUBLISHED=PASS'
+          } catch {
+            if ($release -and $release.id) {
+              try {
+                $current = Invoke-RestMethod -Uri "$api/releases/$($release.id)" -Headers $headers -Method Get
+                if ($current.draft) {
+                  Invoke-RestMethod -Uri "$api/releases/$($release.id)" -Headers $headers -Method Delete | Out-Null
+                }
+              } catch {}
+            }
+            throw
+          }
