@@ -277,6 +277,75 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             self.assertEqual((other / "keep.log").read_bytes(), b"keep")
             self.assertEqual(normal.read_bytes(), b"normal")
 
+    def test_prefetch_requires_refreshed_listed_size_binding(self):
+        with TemporaryDirectory(prefix="akuz_p11_size_binding_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            rows[1]["size"] = None
+            root = home / "app"
+
+            FakeProcessFetch.reset()
+            result, calls = self.build(root, rows, process=True)
+
+            self.assertEqual(calls, [rows[0]["name"], rows[1]["name"]])
+            self.assertEqual(FakeProcessFetch.starts, [rows[2]["name"]])
+            self.assertEqual(FakeProcessFetch.max_active, 1)
+            self.assertEqual(len(result["reports"]), 3)
+            self.assertIsNotNone(result["combined"])
+
+    def test_atomic_promotion_never_overwrites_external_final_race(self):
+        with TemporaryDirectory(prefix="akuz_p11_final_race_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+            final = selected_snapshot_path(self.config(root), rows[1])
+            external = b"external unindexed snapshot"
+            real_link = os.link
+            injected = {"done": False}
+
+            def racing_link(src, dst, *args, **kwargs):
+                if Path(dst) == final and not injected["done"]:
+                    injected["done"] = True
+                    final.parent.mkdir(parents=True, exist_ok=True)
+                    final.write_bytes(external)
+                return real_link(src, dst, *args, **kwargs)
+
+            FakeProcessFetch.reset()
+            with patch("akuz_app.os.link", side_effect=racing_link):
+                with self.assertRaises(akuz_app.FetchError):
+                    self.build(root, rows, process=True)
+
+            self.assertTrue(injected["done"])
+            self.assertEqual(final.read_bytes(), external)
+            store = load_store(root)
+            self.assertEqual(len(store["downloads"]), 1)
+            self.assertEqual(len(store["reports"]), 1)
+            self.assertFalse(list((root / "downloads").glob(
+                ".akuz-phase11-prefetch-*")))
+
+    def test_atomic_promotion_unsupported_falls_back_to_serial(self):
+        with TemporaryDirectory(prefix="akuz_p11_link_fallback_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+
+            FakeProcessFetch.reset()
+            with patch(
+                    "akuz_app.os.link",
+                    side_effect=OSError("hard links unsupported")):
+                result, calls = self.build(root, rows, process=True)
+
+            self.assertEqual(
+                calls, [rows[0]["name"], rows[1]["name"], rows[2]["name"]])
+            self.assertEqual(
+                FakeProcessFetch.starts, [rows[1]["name"], rows[2]["name"]])
+            self.assertEqual(FakeProcessFetch.active, 0)
+            self.assertEqual(len(result["reports"]), 3)
+            self.assertIsNotNone(result["combined"])
+            self.assertEqual(len(load_store(root)["downloads"]), 3)
+            self.assertFalse(list((root / "downloads").glob(
+                ".akuz-phase11-prefetch-*")))
+
     def test_restart_recovers_inventory_committed_before_prefetch_promotion(self):
         with TemporaryDirectory(prefix="akuz_p11_inventory_before_promote_") as td:
             home = Path(td)
