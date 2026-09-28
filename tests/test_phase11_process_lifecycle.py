@@ -756,13 +756,21 @@ class PreGateParentDeathTests(unittest.TestCase):
                 cwd=Path(__file__).resolve().parents[1],
                 timeout=30, check=False)
             self.assertEqual(proc.returncode, 79)
-            child_pid = int((root / "child.pid").read_text("ascii"))
+            identity = json.loads(
+                (root / "child.pid").read_text("ascii"))
+            child_pid = int(identity["pid"])
+            child_created = int(identity["creation_time_ticks"])
             deadline = time.time() + 10
-            while sample(child_pid) is not None and time.time() < deadline:
+            current = sample(child_pid)
+            while (current is not None and
+                   current.get("creation_time_ticks") == child_created and
+                   time.time() < deadline):
                 time.sleep(.05)
-            self.assertIsNone(
-                sample(child_pid),
-                "pre-gate child survived hard parent termination")
+                current = sample(child_pid)
+            self.assertTrue(
+                current is None or
+                current.get("creation_time_ticks") != child_created,
+                "same pre-gate child survived hard parent termination")
             self.assertFalse((root / "owned.log").exists())
 
 
