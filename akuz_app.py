@@ -34,6 +34,7 @@ from akuz_store_lock import inventory_transaction
 from akuz_runtime import DOCUMENTS, app_root, prepare_runtime
 from akuz_instance_lock import InstanceBusy, exclusive_instance
 from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
+from akuz_win_job_spawn import get_job_bound_spawn_context
                                 ProcessFetchUnsafeError,
                                 remove_owned_snapshot, ssh_fetch_child)
 from akuz_version import __version__
@@ -496,7 +497,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
     process_prefetch_downloads = 0
     process_prefetch_child_cpu_s = 0.0
     prefetched_downloads = {}
-    process_ctx = (multiprocessing.get_context('spawn')
+    process_ctx = (get_job_bound_spawn_context()
                    if process_prefetch_root is not None else None)
 
     def record_capture(details):
