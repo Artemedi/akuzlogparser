@@ -7,11 +7,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+import hashlib
 import os
 import pickle
 import re
 import threading
-from time import perf_counter, process_time
+from multiprocessing import parent_process
+from multiprocessing.connection import wait as wait_connections
+from time import perf_counter, process_time, sleep
 
 from akuz_fetch import fetch_selected
 
@@ -85,8 +88,19 @@ class ProcessFetch:
             raise RuntimeError("ProcessFetch not started")
         message = None
         try:
-            if not self.receiver.poll(self.poll_timeout_s):
-                raise TimeoutError("Process fetch did not return")
+            sentinel = getattr(self.child, "sentinel", None)
+            if sentinel is None:
+                if not self.receiver.poll(self.poll_timeout_s):
+                    raise TimeoutError("Process fetch did not return")
+            else:
+                ready = wait_connections(
+                    [self.receiver, sentinel], timeout=self.poll_timeout_s)
+                if not ready:
+                    raise TimeoutError("Process fetch did not return")
+                if self.receiver not in ready:
+                    self.child.join(timeout=self.join_timeout_s)
+                    raise ProcessFetchError(
+                        "Process fetch child exited before IPC result")
             try:
                 message = self.receiver.recv()
             except (EOFError, OSError, pickle.UnpicklingError) as exc:
@@ -106,11 +120,30 @@ class ProcessFetch:
             returned = Path(returned_path)
             if returned.resolve() != self.destination.resolve():
                 raise ProcessFetchError("Process fetch returned unexpected snapshot path")
+            if (not isinstance(count, int) or isinstance(count, bool)
+                    or count < 0):
+                raise ProcessFetchError("Process fetch size invalid")
             if not returned.is_file() or returned.stat().st_size != count:
                 raise ProcessFetchError("Process fetch snapshot incomplete")
             if (not isinstance(digest, str) or
                     re.fullmatch(r"[0-9a-f]{64}", digest) is None):
                 raise ProcessFetchError("Process fetch digest invalid")
+            actual_digest = _sha256_file(returned)
+            if actual_digest != digest:
+                raise ProcessFetchError("Process fetch snapshot checksum mismatch")
+            allowed_metadata = {
+                "active", "captured_bytes", "stored_bytes",
+                "dropped_tail_bytes", "listed_bytes"}
+            if any(key not in allowed_metadata for key in metadata):
+                raise ProcessFetchError("Process fetch metadata contains unknown fields")
+            if "active" in metadata and not isinstance(metadata["active"], bool):
+                raise ProcessFetchError("Process fetch active flag invalid")
+            for key in allowed_metadata - {"active"}:
+                if key in metadata and (
+                        not isinstance(metadata[key], int)
+                        or isinstance(metadata[key], bool)
+                        or metadata[key] < 0):
+                    raise ProcessFetchError("Process fetch metadata invalid")
             if self.require_metrics:
                 if child_cpu is None or child_cpu <= 0:
                     raise ProcessFetchError("Process fetch CPU evidence unavailable")
@@ -134,13 +167,24 @@ class ProcessFetch:
 
     def abort(self):
         child = self.child
-        if child is not None and child.is_alive():
-            child.terminate()
-            child.join(timeout=self.kill_timeout_s)
-            if child.is_alive():
-                child.kill()
-                child.join(timeout=self.kill_timeout_s)
-        self.destination.unlink(missing_ok=True)
+        survivor = False
+        try:
+            if child is not None:
+                if child.is_alive():
+                    child.terminate()
+                    child.join(timeout=self.kill_timeout_s)
+                if child.is_alive():
+                    child.kill()
+                    child.join(timeout=self.kill_timeout_s)
+                survivor = child.is_alive()
+                if not survivor:
+                    # Reap an already-exited child as well; do not leave a
+                    # zombie/process handle solely because is_alive() was false.
+                    child.join(timeout=0)
+        finally:
+            self.destination.unlink(missing_ok=True)
+        if survivor:
+            raise ProcessFetchError("Process fetch child could not be terminated")
 
     def close(self):
         if not self._success:
@@ -157,40 +201,39 @@ class ProcessFetch:
 
 
 def _arm_parent_watchdog():
-    """On Windows, hard-exit this child when its parent process disappears."""
-    if os.name != 'nt':
+    """Hard-exit a Windows spawn child when its multiprocessing parent dies.
+
+    multiprocessing gives a spawned child a parent sentinel. Using that
+    sentinel avoids reopening a PID (and the PID-reuse race) and leaves handle
+    lifetime to multiprocessing itself.
+    """
+    if os.name != "nt":
         return None
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-    kernel32.OpenProcess.argtypes = [
-        wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-    kernel32.WaitForSingleObject.restype = wintypes.DWORD
-
-    synchronize = 0x00100000
-    wait_object_0 = 0x00000000
-    wait_timeout = 0x00000102
-    parent_pid = os.getppid()
-    handle = kernel32.OpenProcess(synchronize, False, parent_pid)
-    if not handle:
-        raise ProcessFetchError('Parent process watchdog unavailable')
+    parent = parent_process()
+    if parent is None:
+        raise ProcessFetchError("Parent process watchdog unavailable")
 
     def watch():
         while True:
-            result = kernel32.WaitForSingleObject(handle, 500)
-            if result == wait_timeout:
-                continue
-            if result == wait_object_0:
-                os._exit(86)
-            os._exit(87)
+            try:
+                if not parent.is_alive():
+                    os._exit(86)
+            except BaseException:
+                os._exit(87)
+            sleep(0.1)
 
     thread = threading.Thread(
-        target=watch, name='akuz-prefetch-parent-watch', daemon=True)
+        target=watch, name="akuz-prefetch-parent-watch", daemon=True)
     thread.start()
     return thread
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def ssh_fetch_child(cfg, remote: dict, destination: str, sender) -> None:
