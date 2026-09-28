@@ -80,7 +80,7 @@ python -m unittest discover -s tests -v
 node --test tests/test_app_controls.cjs tests/test_hourly_view.cjs
 ```
 
-Windows EXE собирается на Windows x64 с Python 3.12:
+Windows EXE собирается на Windows x64 с Python 3.11+:
 
 ```powershell
 python -m pip install -r requirements-build.txt
