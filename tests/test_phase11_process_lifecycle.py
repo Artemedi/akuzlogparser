@@ -1,4 +1,6 @@
 from pathlib import Path
+import multiprocessing
+import time
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
@@ -81,6 +83,22 @@ class FakeContext:
     def Process(self, *, target, args, name):
         self.process_args = (target, args, name)
         return self.child
+
+
+
+def real_spawn_success_child(destination, sender):
+    path = Path(destination)
+    payload = b"real windows spawned snapshot"
+    path.write_bytes(payload)
+    sender.send(("ok", str(path), "e" * 64, len(payload), .01, .01,
+                 {"active": False, "stored_bytes": len(payload)}))
+    sender.close()
+
+
+def real_spawn_hanging_child(destination, sender):
+    Path(destination).write_bytes(b"partial spawned snapshot")
+    time.sleep(60)
+    sender.close()
 
 
 class ProcessFetchLifecycleTests(unittest.TestCase):
@@ -280,6 +298,42 @@ class SSHChildContractTests(unittest.TestCase):
             self.assertTrue(sender.closed)
             self.assertEqual(sender.messages, [("error", "RuntimeError")])
             self.assertFalse(target.exists())
+
+
+
+class RealSpawnLifecycleTests(unittest.TestCase):
+    def test_real_spawn_returns_completed_snapshot(self):
+        with TemporaryDirectory(prefix="akuz_process_real_spawn_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            op = ProcessFetch(
+                multiprocessing.get_context("spawn"),
+                real_spawn_success_child, (), target,
+                poll_timeout_s=20, join_timeout_s=10, kill_timeout_s=5)
+            with op:
+                result = op.finish()
+            self.assertEqual(result.path, target)
+            self.assertEqual(result.digest, "e" * 64)
+            self.assertEqual(result.metadata["active"], False)
+            self.assertEqual(target.read_bytes(), b"real windows spawned snapshot")
+
+    def test_real_spawn_parent_abort_terminates_and_cleans_partial(self):
+        with TemporaryDirectory(prefix="akuz_process_real_abort_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            op = ProcessFetch(
+                multiprocessing.get_context("spawn"),
+                real_spawn_hanging_child, (), target,
+                poll_timeout_s=20, join_timeout_s=2, kill_timeout_s=5)
+            with self.assertRaisesRegex(ValueError, "parent parse failed"):
+                with op:
+                    deadline = time.time() + 10
+                    while not target.exists() and time.time() < deadline:
+                        time.sleep(.05)
+                    self.assertTrue(target.exists(), "spawned child did not create partial snapshot")
+                    raise ValueError("parent parse failed")
+            self.assertFalse(target.exists())
+            self.assertFalse(op.child.is_alive())
 
 
 if __name__ == "__main__":
