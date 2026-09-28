@@ -38,6 +38,7 @@ jobs:
           root = Path(r'E:\Software\Project\LogAkusExplorer\akuzlogparser\diagnostics')
           files = {
               '20260923': root / 'phase10_ssh_compression_ab_20260923_20260928.json',
+              '20260924': root / 'phase10_ssh_compression_ab_20260924_20260928.json',
               '20260925': root / 'phase10_ssh_compression_ab_20260925_20260928.json',
           }
           try:
