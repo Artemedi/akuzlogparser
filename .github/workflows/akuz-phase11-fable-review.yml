@@ -27,7 +27,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Ask Fable to review Phase 11 production semantics
+      - name: Ask Fable for two focused production reviews
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
@@ -50,9 +50,8 @@ jobs:
               $line = $_.Trim()
               if (-not $line -or $line.StartsWith('#') -or -not $line.Contains('=')) { return }
               $pair = $line.Split('=', 2)
-              $name = $pair[0].Trim()
-              $value = $pair[1].Trim().Trim('"').Trim("'")
-              [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+              [Environment]::SetEnvironmentVariable(
+                $pair[0].Trim(), $pair[1].Trim().Trim('"').Trim("'"), 'Process')
             }
           } else {
             Write-Host 'FABLE_SECRET_SOURCE=ONE_TIME_RSA_BLOB'
@@ -60,22 +59,22 @@ jobs:
           $env:FABLE_REVIEW_PRIVATE_KEY = 'E:\Software\Project\LogAkusExplorer\secrets\fable_review_ephemeral_private.pem'
 
           @'
+          import base64
           import json
           import os
           from pathlib import Path
+          import re
           import subprocess
           import tempfile
-          import sys
 
           token = os.environ.get('ANTHROPIC_AUTH_TOKEN', '')
           base = os.environ.get('ANTHROPIC_BASE_URL', '').rstrip('/')
           model = os.environ.get('ANTHROPIC_MODEL', 'claude-fable-5.1')
-          used_encrypted = False
           private_path = Path(os.environ.get('FABLE_REVIEW_PRIVATE_KEY', ''))
           encrypted_path = Path('.github/fable_review_secret.enc.b64')
+          used_encrypted = False
 
           if (not token or not base) and private_path.is_file() and encrypted_path.is_file():
-              import base64
               from cryptography.hazmat.primitives import hashes, serialization
               from cryptography.hazmat.primitives.asymmetric import padding
               private = serialization.load_pem_private_key(
@@ -103,124 +102,154 @@ jobs:
           if not token or not base:
               raise SystemExit('Fable API environment incomplete')
 
-          files = [
-              'akuz_process_fetch.py',
-              'akuz_app.py',
-              'tests/test_phase11_process_lifecycle.py',
-              'tests/test_phase11_normal_app_process_prefetch.py',
-              'PHASE11_SSH_OVERLAP.md',
+          def call_fable(label, prompt):
+              payload = json.dumps({
+                  'model': model,
+                  'max_tokens': 6000,
+                  'messages': [{'role': 'user', 'content': prompt}]
+              }, ensure_ascii=False).encode('utf-8')
+              request_path = None
+              try:
+                  with tempfile.NamedTemporaryFile(
+                          mode='wb', suffix='.json', delete=False) as request_file:
+                      request_file.write(payload)
+                      request_path = request_file.name
+                  config = (
+                      'url = "' + base + '/chat/completions"\n'
+                      'header = "Authorization: Bearer ' + token + '"\n'
+                      'header = "Content-Type: application/json"\n'
+                      'header = "User-Agent: curl/8"\n'
+                      'data-binary = "@' + request_path.replace('\\', '/') + '"\n'
+                  )
+                  proc = subprocess.run(
+                      ['curl', '--silent', '--show-error', '--max-time', '150',
+                       '--write-out', '\n%{http_code}', '--config', '-'],
+                      input=config.encode('utf-8'),
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE,
+                      timeout=160)
+                  raw = proc.stdout.decode('utf-8', 'replace')
+                  if '\n' not in raw:
+                      raise SystemExit(label + ': malformed curl response')
+                  body, status = raw.rsplit('\n', 1)
+                  if proc.returncode or not status.startswith('2'):
+                      print('FABLE_HTTP_FAILURE label=' + label +
+                            ' status=' + status +
+                            ' curl_exit=' + str(proc.returncode))
+                      raise SystemExit(label + ': Fable HTTP request failed')
+                  data = json.loads(body)
+              finally:
+                  if request_path:
+                      Path(request_path).unlink(missing_ok=True)
+
+              choice = data['choices'][0]
+              message = choice.get('message', {})
+              content = message.get('content', '')
+              if not isinstance(content, str) or not content.strip():
+                  usage = data.get('usage', {})
+                  print('FABLE_EMPTY_CONTENT label=' + label +
+                        ' finish=' + str(choice.get('finish_reason')) +
+                        ' completion_tokens=' +
+                        str(usage.get('completion_tokens')))
+                  raise SystemExit(label + ': Fable returned empty review')
+              print('FABLE_REVIEW_BEGIN ' + label)
+              print(content)
+              print('FABLE_REVIEW_END ' + label)
+              match = re.search(
+                  r'(?im)^\s*VERDICT\s*:\s*(ACCEPT|MODIFY|BLOCK)\s*$',
+                  content)
+              if not match:
+                  raise SystemExit(label + ': missing exact VERDICT line')
+              return match.group(1)
+
+          process_code = Path('akuz_process_fetch.py').read_text(encoding='utf-8')
+          lifecycle_tests = Path(
+              'tests/test_phase11_process_lifecycle.py').read_text(encoding='utf-8')
+
+          app = Path('akuz_app.py').read_text(encoding='utf-8')
+          start = app.index('def _phase11_prefetch_prefix')
+          end = app.index('\ndef perform_build_current', start)
+          app_phase11 = app[start:end]
+          app_tests = Path(
+              'tests/test_phase11_normal_app_process_prefetch.py'
+          ).read_text(encoding='utf-8')
+
+          lifecycle_prompt = """
+          Independent senior review. This code is proposed as the default
+          Windows/PyInstaller SSH prefetch lifecycle for AKUZ Log Explorer.
+          Find concrete release-blocking bugs; do not praise it.
+
+          Check Windows spawn, Process/Pipe ownership, timeout, terminate/kill,
+          parent hard-exit watchdog, child crash/EOF, cleanup, handle/thread
+          lifetime, sanitized IPC, and whether any scenario can leave a child
+          alive or a partial snapshot trusted as complete.
+
+          Evidence: real Windows spawn + forced abort tests pass; packaged
+          PyInstaller spawn self-test passes. Treat tests as evidence, not proof.
+
+          Return <=1000 words:
+          BLOCKERS
+          HIGH
+          MISSING TESTS
+          VERDICT: ACCEPT|MODIFY|BLOCK
+          The VERDICT line must be alone on its line.
+
+          ===== akuz_process_fetch.py =====
+          """ + process_code + """
+          ===== lifecycle tests =====
+          """ + lifecycle_tests
+
+          transaction_prompt = """
+          Independent senior review. Review only the normal-app Phase 11
+          one-ahead process-prefetch transaction below as a default production
+          path. Find concrete reproducible correctness/reliability bugs.
+
+          Focus on:
+          - Linux/SSH-only gating and default-on rollback switch;
+          - stale/warm/mixed cache and no unnecessary refetch;
+          - remote growth/rotation/truncation;
+          - ordering of temp snapshot, inventory persistence and final rename;
+          - hard crash at every boundary and restart recovery;
+          - inventory save failure and compensation;
+          - child failure/timeout serial fallback;
+          - single report publication while child runs;
+          - combined/analytics semantics;
+          - orphan workspace cleanup;
+          - whether local/SMB/custom generators can accidentally enter it.
+
+          Current evidence: 254 Python tests + browser/diff PASS; real normal-app
+          A/B on 857,563,363 bytes has inventory/analytics parity; process path
+          is materially faster; portable spawn/smoke PASS. Persistent B-lite is
+          not used and SSH compression remains default OFF.
+
+          Return <=1200 words:
+          BLOCKERS
+          HIGH
+          MISSING TESTS
+          VERDICT: ACCEPT|MODIFY|BLOCK
+          The VERDICT line must be alone on its line.
+
+          ===== Phase 11 normal-app code =====
+          """ + app_phase11 + """
+          ===== normal-app tests =====
+          """ + app_tests
+
+          verdicts = [
+              call_fable('LIFECYCLE', lifecycle_prompt),
+              call_fable('TRANSACTION', transaction_prompt),
           ]
-          parts = []
-          for name in files:
-              text = Path(name).read_text(encoding='utf-8')
-              # Keep the request code-only/documentation-only; no private logs,
-              # config, source paths, diagnostics JSON or credentials.
-              parts.append(f'\n\n===== {name} =====\n{text}')
-
-          prompt = r"""
-          You are the independent senior reviewer for AKUZ Log Explorer.
-          Review the current Phase 11 Windows process-isolated SSH prefetch
-          implementation as if it is about to become the default production
-          path in a portable PyInstaller EXE.
-
-          Do NOT assume the implementation is correct because tests pass.
-          Search for concrete failure modes and races. Focus especially on:
-          - one-child ownership and cancellation;
-          - Windows spawn/PyInstaller semantics;
-          - hard parent exit watchdog and orphan cleanup;
-          - child failure / timeout / pipe-close behavior;
-          - race between child completion, temp snapshot promotion, inventory
-            save and report publication;
-          - rollback if inventory persistence fails;
-          - mixed warm/fresh cache behavior and restart recovery;
-          - remote growth/rotation/truncation between refreshed inventory and
-            child fetch;
-          - active log snapshot semantics;
-          - whether a child can leak a temp/final snapshot or leave inventory
-            inconsistent;
-          - whether default-enabled behavior can accidentally affect local or
-            SMB sources;
-          - privacy: no raw clinical log text/path/credentials in IPC/logging;
-          - whether any benchmark-only dependency leaked into production.
-
-          Existing measured evidence, for context only:
-          - full Windows suite on the current runtime lineage: 251 Python tests
-            PASS, 2 skips, browser controls PASS, diff-check PASS after fixing
-            the hard-exit helper import;
-          - real normal-app static 24-27 Sep A/B on 857,563,363 source bytes:
-            prior accepted process trial 326.138 s vs serial 444.242 s,
-            inventory/analytics SQL/export parity PASS;
-          - portable frozen spawn self-test and packaged smoke previously PASS;
-          - process-prefetch is now default ON only for Linux/SSH multi-source,
-            with AKUZ_PHASE11_PROCESS_PREFETCH=0 as rollback switch;
-          - SSH compression remains default OFF;
-          - persistent B-lite metadata is not used.
-
-          Return:
-          1. BLOCKERS (must fix before release)
-          2. HIGH risks
-          3. MEDIUM/LOW observations
-          4. Missing tests you would require
-          5. Final verdict exactly one of: ACCEPT, MODIFY, BLOCK
-
-          Be specific: cite function/test names and describe a reproducible
-          scenario. Do not praise the project and do not repeat the prompt.
-          Keep the final answer under 2500 words; prioritize blockers over prose.
-          """
-
-          payload = json.dumps({
-              'model': model,
-              'max_tokens': 14000,
-              'messages': [{
-                  'role': 'user',
-                  'content': prompt + ''.join(parts)
-              }]
-          }, ensure_ascii=False).encode('utf-8')
-
-          request_path = None
-          try:
-              with tempfile.NamedTemporaryFile(
-                      mode='wb', suffix='.json', delete=False) as request_file:
-                  request_file.write(payload)
-                  request_path = request_file.name
-              curl_config = (
-                  'url = "' + base + '/chat/completions"\n'
-                  'header = "Authorization: Bearer ' + token + '"\n'
-                  'header = "Content-Type: application/json"\n'
-                  'header = "User-Agent: curl/8"\n'
-                  'data-binary = "@' + request_path.replace('\\', '/') + '"\n'
-              )
-              proc = subprocess.run(
-                  ['curl', '--silent', '--show-error', '--fail',
-                   '--max-time', '180', '--config', '-'],
-                  input=curl_config.encode('utf-8'),
-                  stdout=subprocess.PIPE,
-                  stderr=subprocess.PIPE,
-                  timeout=190)
-              if proc.returncode:
-                  raise SystemExit(
-                      'Fable curl failed with exit code ' + str(proc.returncode))
-              data = json.loads(proc.stdout.decode('utf-8'))
-          finally:
-              if request_path:
-                  Path(request_path).unlink(missing_ok=True)
-          choice = data['choices'][0]
-          message = choice.get('message', {})
-          content = message.get('content', '')
-          if not isinstance(content, str) or not content.strip():
-              usage = data.get('usage', {})
-              print('FABLE_EMPTY_CONTENT=1')
-              print('FABLE_FINISH_REASON=' + str(choice.get('finish_reason')))
-              print('FABLE_MESSAGE_KEYS=' + ','.join(sorted(message.keys())))
-              print('FABLE_COMPLETION_TOKENS=' + str(usage.get('completion_tokens')))
-              raise SystemExit('Fable returned empty review')
-          print('FABLE_REVIEW_BEGIN')
-          print(content)
-          print('FABLE_REVIEW_END')
+          rank = {'ACCEPT': 0, 'MODIFY': 1, 'BLOCK': 2}
+          overall = max(verdicts, key=lambda value: rank[value])
+          print('FABLE_LIFECYCLE_VERDICT=' + verdicts[0])
+          print('FABLE_TRANSACTION_VERDICT=' + verdicts[1])
+          print('FABLE_OVERALL_VERDICT=' + overall)
           print('FABLE_MODEL=' + model)
           print('NO_PRIVATE_LOGS_OR_SECRETS_SENT=PASS')
-          if used_encrypted:
+
+          if overall == 'ACCEPT' and used_encrypted:
               private_path.unlink(missing_ok=True)
               print('FABLE_EPHEMERAL_PRIVATE_KEY_DESTROYED=PASS')
+          if overall != 'ACCEPT':
+              raise SystemExit('Fable review requires changes: ' + overall)
           '@ | python -B -
           if ($LASTEXITCODE -ne 0) { throw 'Fable independent review failed' }
