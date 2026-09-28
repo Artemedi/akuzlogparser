@@ -170,6 +170,7 @@ if os.name == "nt":
             owner = _create_kill_job()
             hp = ht = None
             finalizer = None
+            assigned = False
 
             try:
                 with open(wfd, "wb", closefd=True) as to_child:
@@ -180,6 +181,7 @@ if os.name == "nt":
                     # Critical invariant: the exact CreateProcess handle is
                     # assigned while the primary thread is still suspended.
                     _assign_job(owner, hp)
+                    assigned = True
 
                     self.pid = pid
                     self.returncode = None
@@ -218,14 +220,26 @@ if os.name == "nt":
                         pass
                 else:
                     if hp is not None:
-                        try:
-                            if not owner.closed:
+                        if assigned:
+                            # Closing KILL_ON_JOB_CLOSE terminates the exact
+                            # suspended process tree after successful assign.
+                            try:
                                 owner.close()
-                            else:
-                                _winapi.TerminateProcess(hp, TERMINATE)
-                        except BaseException:
+                            except BaseException:
+                                try:
+                                    _winapi.TerminateProcess(hp, TERMINATE)
+                                except BaseException:
+                                    pass
+                        else:
+                            # Assignment failed: the Job does not own hp yet,
+                            # so terminate the exact suspended process handle
+                            # directly, then close the empty Job.
                             try:
                                 _winapi.TerminateProcess(hp, TERMINATE)
+                            except BaseException:
+                                pass
+                            try:
+                                owner.close()
                             except BaseException:
                                 pass
                     try:
