@@ -2915,3 +2915,42 @@ candidate is REJECTED for production. Do not run the same candidate on
 25-Sep 644.6 MB source or integrate into `perform_build`. Any process-
 isolated alternative is a new candidate requiring separate cancellation,
 snapshot ownership, parity, RSS/disk and Windows evidence. No Release change.
+
+## Phase 11 process-isolated pair replication — promising, not production (2026-09-28)
+
+After balanced threaded one-ahead regressed, a separate benchmark-only
+candidate moved only fetch(B) into a spawned Windows Python process.
+No app runtime/cache/Release modification.
+
+Harness `df5f762`; contract tests `93b71b2`.
+DBA-008D exact `93b71b2`:
+[Actions #36395600470](https://github.com/Artemedi/akuzlogparser/actions/runs/36395600470)
+231 Python PASS, 2 Windows skips, 117.566 s; Node/diff PASS.
+
+Balanced real order serial/process/process/serial:
+[Actions #36396123108](https://github.com/Artemedi/akuzlogparser/actions/runs/36396123108)
+SUCCESS, workflow `54c305e`.
+Independent numeric audit
+[Actions #36396165254](https://github.com/Artemedi/akuzlogparser/actions/runs/36396165254)
+SUCCESS, audit `95bc620`.
+Same fixed 23+24 Sep source SHA across all four trials, report-manifest
+parity PASS, process-tree memory samples valid, owned cleanup PASS,
+no raw payload, no cache/Release change.
+
+Serial wall 113.946302 / 101.149178 s, median 107.547740;
+CPU median 58.726562; private median 367,253,504 B.
+Process wall 78.452962 / 83.730728 s, median 81.091845;
+total parent+child CPU median 65.875000; process-tree private median
+328,448,000 B. Median wall improved ~24.6%, total CPU increased ~12.2%.
+
+The concurrent 24-Sep fetch still slowed:
+serial 19.356464 / 18.350266 s (mean 18.853365);
+process 30.071016 / 29.367467 s (mean 29.719242), ~57.6% slower.
+First 23-Sep parse mean increased ~2.4%.
+Child CPU 3.906250 / 3.875000 s and parent CPU
+61.578125 / 62.390625 s were audited, so total CPU is not parent-only.
+
+Decision: promising isolated candidate eligible for a bounded large-source
+multi-source gate, NOT normal app integration. Next test must include current
+25-Sep ~644.6 MB prefix in realistic one-ahead ordering and preserve balanced
+serial/process comparison, process-tree memory, parity and cleanup.
