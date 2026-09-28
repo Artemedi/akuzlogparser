@@ -236,8 +236,14 @@ class ProcessFetch:
             self._success = True
             return result
         finally:
-            self.receiver.close()
+            receiver = self.receiver
             self.receiver = None
+            if receiver is not None:
+                try:
+                    receiver.close()
+                except OSError:
+                    # Pipe teardown must never skip process/file cleanup.
+                    pass
             if not self._success:
                 self.abort()
 
