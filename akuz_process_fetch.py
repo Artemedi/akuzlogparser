@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 import os
 import threading
-from time import perf_counter
+from time import perf_counter, process_time
 
 from akuz_fetch import fetch_selected
 
@@ -202,6 +202,7 @@ def ssh_fetch_child(cfg, remote: dict, destination: str, sender) -> None:
     try:
         _arm_parent_watchdog()
         started = perf_counter()
+        cpu_started = process_time()
         child_cfg = replace(cfg, local_dest=target.parent)
         fetched, digest, details = fetch_selected(
             child_cfg, remote, notify=lambda message: None)
@@ -210,9 +211,7 @@ def ssh_fetch_child(cfg, remote: dict, destination: str, sender) -> None:
                 raise ProcessFetchError("Owned prefetch destination already exists")
             fetched.replace(target)
             fetched = target
-        from scripts.phase9_memory import sample
-        own = sample(__import__("os").getpid())
-        cpu = own["cpu_time_s"] if own is not None else None
+        cpu = process_time() - cpu_started
         sender.send((
             "ok", str(target), digest, target.stat().st_size,
             cpu, perf_counter() - started, details))
