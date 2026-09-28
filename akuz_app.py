@@ -34,9 +34,9 @@ from akuz_store_lock import inventory_transaction
 from akuz_runtime import DOCUMENTS, app_root, prepare_runtime
 from akuz_instance_lock import InstanceBusy, exclusive_instance
 from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
-from akuz_win_job_spawn import get_job_bound_spawn_context
                                 ProcessFetchUnsafeError,
                                 remove_owned_snapshot, ssh_fetch_child)
+from akuz_win_job_spawn import get_job_bound_spawn_context
 from akuz_version import __version__
 from akuz_diagnostics import event as perf_event, phase as perf_phase
 
