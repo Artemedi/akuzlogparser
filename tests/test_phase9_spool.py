@@ -130,33 +130,54 @@ class SpoolPrototypeTests(unittest.TestCase):
             self.assertFalse(list((root/"reports").glob("*.building")))
             self.assertEqual(len(load_store(root)["reports"]), 0)
 
-    def test_spool_corruption_fails_closed_then_recovers_without_stale_cache(self):
+    def test_spool_corruption_falls_back_to_raw_parse_with_same_semantics(self):
         with TemporaryDirectory() as td:
             home = Path(td)
             sources = home / "sources"
             create_sources(sources, 12, 768)
             _, expected = build(home / "control", sources, False)
             original_exit = SpoolWriter.__exit__
+
             def corrupt_after_close(self, exc_type, exc, tb):
                 result = original_exit(self, exc_type, exc, tb)
                 if self.path.name == "0000.jsonl" and exc is None:
                     with self.path.open("a", encoding="utf-8") as stream:
                         stream.write("[]\\n")
                 return result
+
             with patch.object(SpoolWriter, "__exit__", corrupt_after_close):
-                with self.assertRaisesRegex(ValueError, "checksum mismatch"):
-                    build(home / "experimental", sources, True)
-            root = home / "experimental"
-            self.assertFalse(list((root / "cache").glob("akuz-phase9-derived-*")))
-            self.assertFalse(list((root / "reports").glob("*.building")))
-            store = load_store(root)
-            self.assertEqual(len(store["reports"]), 3)
-            self.assertTrue(all(row["kind"] == "single"
-                                for row in store["reports"].values()))
-            recovered, current = build(root, sources, True)
-            self.assertFalse(recovered["reused"])
+                result, current = build(home / "experimental", sources, True)
+
+            self.assertFalse(result["reused"])
             self.assertEqual(current, expected)
-            self.assertFalse(list((root / "cache").glob("akuz-phase9-derived-*")))
+            root = home / "experimental"
+            self.assertFalse(list((root / "cache").glob(
+                "akuz-phase9-derived-*")))
+            self.assertFalse(list((root / "reports").glob("*.building")))
+
+    def test_missing_spool_falls_back_to_raw_parse_with_same_semantics(self):
+        with TemporaryDirectory() as td:
+            home = Path(td)
+            sources = home / "sources"
+            create_sources(sources, 12, 768)
+            _, expected = build(home / "control", sources, False)
+            original_exit = SpoolWriter.__exit__
+
+            def remove_after_close(self, exc_type, exc, tb):
+                result = original_exit(self, exc_type, exc, tb)
+                if self.path.name == "0000.jsonl" and exc is None:
+                    self.path.unlink(missing_ok=True)
+                return result
+
+            with patch.object(SpoolWriter, "__exit__", remove_after_close):
+                result, current = build(home / "experimental", sources, True)
+
+            self.assertFalse(result["reused"])
+            self.assertEqual(current, expected)
+            root = home / "experimental"
+            self.assertFalse(list((root / "cache").glob(
+                "akuz-phase9-derived-*")))
+            self.assertFalse(list((root / "reports").glob("*.building")))
 
 
 if __name__ == "__main__":
