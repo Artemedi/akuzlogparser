@@ -398,8 +398,18 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
     restore_downloads = 0
     singles_new = 0
     singles_reused = 0
-    def download(remote):
+    process_prefetch_downloads = 0
+    prefetched_downloads = {}
+    process_ctx = (multiprocessing.get_context('spawn')
+                   if process_prefetch_root is not None else None)
+
+    def record_capture(details):
         nonlocal active_count, dropped_bytes
+        if details.get('active'):
+            active_count += 1
+            dropped_bytes += details.get('dropped_tail_bytes', 0)
+
+    def download(remote):
         with perf_phase(root, 'source.fetch', bytes_expected=remote.get('size', 0),
                         source_kind={'linux': 1, 'windows': 2, 'local': 3}.get(source, 0)):
             if source == 'linux':
@@ -414,10 +424,64 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         details = result[2] if len(result) > 2 else {}
         perf_event(root, 'source.fetch', 'summary', bytes_saved=path.stat().st_size,
                    source_kind={'linux': 1, 'windows': 2, 'local': 3}.get(source, 0))
-        if details.get('active'):
-            active_count += 1
-            dropped_bytes += details.get('dropped_tail_bytes', 0)
+        record_capture(details)
         return path, digest, details
+
+    def start_next_prefetch(current_index):
+        if process_prefetch_root is None or current_index >= len(ids):
+            return None
+        next_fid = ids[current_index]
+        if next_fid in store['downloads'] or next_fid in prefetched_downloads:
+            return None
+        next_remote = listed[next_fid]
+        final = selected_snapshot_path(cfg, next_remote)
+        if final.exists():
+            return None
+        target = process_prefetch_root / (
+            f'{current_index:04d}_{next_fid[:18]}.log')
+        operation = ProcessFetch(
+            process_ctx, ssh_fetch_child, (cfg, next_remote), target,
+            poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10)
+        try:
+            operation.start()
+        except Exception:
+            perf_event(root, 'process.prefetch', 'start_fallback',
+                       source_index=current_index + 1, enabled=0)
+            return None
+        perf_event(root, 'process.prefetch', 'start',
+                   source_index=current_index + 1,
+                   bytes_expected=next_remote.get('size', 0))
+        return next_fid, next_remote, operation
+
+    def finish_prefetch(prefetch):
+        nonlocal process_prefetch_downloads
+        if prefetch is None:
+            return
+        next_fid, next_remote, operation = prefetch
+        result = operation.finish()
+        final = selected_snapshot_path(cfg, next_remote)
+        if final.exists():
+            operation.close()
+            raise FetchError(
+                'Снимок следующего файла уже появился вне индекса. Проверьте downloads.')
+        result.path.replace(final)
+        details = result.metadata
+        store['downloads'][next_fid] = dict(
+            path=str(final), sha256=result.digest, size=final.stat().st_size,
+            host=cfg.host, remote=next_remote['path'],
+            mtime=next_remote['mtime'], snapshot=details)
+        save_store(root, store)
+        prefetched_downloads[next_fid] = (final, result.digest, details)
+        process_prefetch_downloads += 1
+        record_capture(details)
+        perf_event(
+            root, 'process.prefetch', 'done',
+            source_index=ids.index(next_fid) + 1,
+            bytes_saved=result.bytes,
+            child_fetch_s=(round(result.child_fetch_wall_s, 3)
+                           if result.child_fetch_wall_s is not None else 0),
+            ready_s=round(result.ready_latency_s, 3))
+        operation.close()
     for idx, fid in enumerate(ids, 1):
         remote = listed[fid]
         chosen = dates[fid]
