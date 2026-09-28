@@ -40,9 +40,7 @@ if os.name == "nt":
             handle, self.handle = self.handle, None
             if handle is None:
                 return
-            if not _winapi.CloseHandle(handle):
-                raise JobBoundSpawnError(
-                    "Could not close Windows kill Job Object")
+            _winapi.CloseHandle(handle)
 
         @property
         def closed(self):
@@ -171,6 +169,7 @@ if os.name == "nt":
             create_suspended = 0x00000004
             owner = _create_kill_job()
             hp = ht = None
+            finalizer = None
 
             try:
                 with open(wfd, "wb", closefd=True) as to_child:
@@ -190,6 +189,7 @@ if os.name == "nt":
                     self.finalizer = util.Finalize(
                         self, _finalize_handles,
                         (owner, self.sentinel, int(rhandle)))
+                    finalizer = self.finalizer
 
                     set_spawning_popen(self)
                     try:
@@ -202,34 +202,41 @@ if os.name == "nt":
                     _winapi.CloseHandle(ht)
                     ht = None
             except BaseException:
-                # If assignment happened, closing the Job kills even a still
-                # suspended child. If assignment did not happen, terminate the
-                # exact CreateProcess handle directly before closing it.
-                if hp is not None:
-                    try:
-                        if not owner.closed:
-                            owner.close()
-                        else:
-                            _winapi.TerminateProcess(hp, TERMINATE)
-                    except BaseException:
-                        try:
-                            _winapi.TerminateProcess(hp, TERMINATE)
-                        except BaseException:
-                            pass
+                # If the standard-style Finalize object exists, let it own the
+                # Job/process/pipe handles exactly once. Before that point,
+                # close the Job (killing an assigned suspended child) and then
+                # close the raw CreateProcess/pipe handles ourselves.
                 if ht is not None:
                     try:
                         _winapi.CloseHandle(ht)
                     except BaseException:
                         pass
-                try:
-                    _winapi.CloseHandle(rhandle)
-                except BaseException:
-                    pass
-                if hp is not None:
+                if finalizer is not None:
                     try:
-                        _winapi.CloseHandle(hp)
+                        finalizer()
                     except BaseException:
                         pass
+                else:
+                    if hp is not None:
+                        try:
+                            if not owner.closed:
+                                owner.close()
+                            else:
+                                _winapi.TerminateProcess(hp, TERMINATE)
+                        except BaseException:
+                            try:
+                                _winapi.TerminateProcess(hp, TERMINATE)
+                            except BaseException:
+                                pass
+                    try:
+                        _winapi.CloseHandle(rhandle)
+                    except BaseException:
+                        pass
+                    if hp is not None:
+                        try:
+                            _winapi.CloseHandle(hp)
+                        except BaseException:
+                            pass
                 raise
 
         def duplicate_for_child(self, handle):
