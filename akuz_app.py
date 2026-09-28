@@ -498,17 +498,32 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             operation.close()
             raise FetchError(
                 'Снимок следующего файла уже появился вне индекса. Проверьте downloads.')
-        result.path.replace(final)
         details = result.metadata
+        # Commit inventory BEFORE promoting the completed temp snapshot.
+        # If the parent hard-exits after this save but before replace(), the
+        # indexed path is simply missing; cached_download() treats that as a
+        # cache miss and the next run can fetch it normally. The inverse order
+        # could leave an unindexed final snapshot that blocks future fetches.
         store['downloads'][next_fid] = dict(
-            path=str(final), sha256=result.digest, size=final.stat().st_size,
+            path=str(final), sha256=result.digest, size=result.bytes,
             host=cfg.host, remote=next_remote['path'],
             mtime=next_remote['mtime'], snapshot=details)
         try:
             save_store(root, store)
         except BaseException:
             store['downloads'].pop(next_fid, None)
-            final.unlink(missing_ok=True)
+            raise
+        try:
+            result.path.replace(final)
+        except BaseException:
+            # Best-effort compensation. Even if this rollback persistence
+            # fails, the on-disk inventory points to a missing path, which is
+            # recoverable as a normal cache miss on restart.
+            store['downloads'].pop(next_fid, None)
+            try:
+                save_store(root, store)
+            except BaseException:
+                pass
             raise
         prefetched_downloads[next_fid] = (final, result.digest, details)
         process_prefetch_downloads += 1
