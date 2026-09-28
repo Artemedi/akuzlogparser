@@ -281,6 +281,32 @@ def _combine_sources(selected, scratch: Path, base: date):
     return count, total_lines
 
 
+def _phase11_prefetch_prefix(root: Path) -> str:
+    owner = key_for('phase11-prefetch-owner', str(Path(root).resolve()))[:12]
+    return '.akuz-phase11-prefetch-' + owner + '-'
+
+
+def _cleanup_phase11_prefetch_orphans(root: Path, local_dest: Path) -> int:
+    """Remove only this app-root's owned stale prefetch workspaces."""
+    prefix = _phase11_prefetch_prefix(root)
+    removed = 0
+    local_dest = Path(local_dest).resolve()
+    if not local_dest.is_dir():
+        return 0
+    for candidate in local_dest.glob(prefix + '*'):
+        try:
+            candidate.resolve().relative_to(local_dest)
+        except (OSError, ValueError):
+            continue
+        if candidate.is_symlink() or candidate.is_file():
+            candidate.unlink(missing_ok=True)
+            removed += 1
+        elif candidate.is_dir():
+            shutil.rmtree(candidate)
+            removed += 1
+    return removed
+
+
 def perform_build(root: Path, state: State, selections,
                   fetch_fn=fetch_selected, gen_fn=generate, refresh_remote=False,
                   use_derived_spool=None):
@@ -321,8 +347,14 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
             cfg = source_config(root, source, local_path)
             try:
                 cfg.local_dest.mkdir(parents=True, exist_ok=True)
+                orphan_count = _cleanup_phase11_prefetch_orphans(
+                    root, cfg.local_dest)
+                if orphan_count:
+                    perf_event(root, 'process.prefetch', 'orphan_cleanup',
+                               removed=orphan_count)
                 folder = stack.enter_context(tempfile.TemporaryDirectory(
-                    prefix='.akuz-phase11-prefetch-', dir=cfg.local_dest))
+                    prefix=_phase11_prefetch_prefix(root),
+                    dir=cfg.local_dest))
                 process_prefetch_root = Path(folder)
             except OSError:
                 perf_event(root, 'process.prefetch', 'setup_fallback', enabled=0)
