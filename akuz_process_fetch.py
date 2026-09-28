@@ -403,6 +403,13 @@ class ProcessFetch:
                 finally:
                     self.receiver = None
 
+        if not survivor and child is not None:
+            try:
+                self._close_reaped_child_resources()
+            except BaseException as exc:
+                if unsafe_error is None:
+                    unsafe_error = exc
+
         if survivor:
             raise ProcessFetchUnsafeError(
                 "Process fetch child could not be terminated") from unsafe_error

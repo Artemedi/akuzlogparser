@@ -602,7 +602,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             return
         final = selected_snapshot_path(cfg, next_remote)
         if final.exists():
-            remove_owned_snapshot(result.path)
+            remove_owned_snapshot(\n                result.path, expected_identity=result.cleanup_identity)
             operation.close()
             raise FetchError(
                 'Снимок следующего файла уже появился вне индекса. Проверьте downloads.')
@@ -635,7 +635,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             save_store(root, store)
         except BaseException:
             store['downloads'].pop(next_fid, None)
-            remove_owned_snapshot(result.path)
+            remove_owned_snapshot(\n                result.path, expected_identity=result.cleanup_identity)
             operation.close()
             raise
 
@@ -646,14 +646,14 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             os.link(result.path, final)
         except FileExistsError as exc:
             rollback_prefetch_inventory('final_exists')
-            remove_owned_snapshot(result.path)
+            remove_owned_snapshot(\n                result.path, expected_identity=result.cleanup_identity)
             operation.close()
             raise FetchError(
                 'Снимок следующего файла уже появился вне индекса. '
                 'Проверьте downloads.') from exc
         except OSError:
             rollback_prefetch_inventory('link_failed')
-            remove_owned_snapshot(result.path)
+            remove_owned_snapshot(\n                result.path, expected_identity=result.cleanup_identity)
             operation.close()
             perf_event(root, 'process.prefetch', 'promotion_fallback',
                        source_index=ids.index(next_fid) + 1, enabled=0)
@@ -663,7 +663,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             return
 
         try:
-            remove_owned_snapshot(result.path)
+            remove_owned_snapshot(\n                result.path, expected_identity=result.cleanup_identity)
         except ProcessFetchError:
             # final is already atomically linked and indexed. Keep the valid
             # snapshot; app-root-scoped orphan cleanup retries temp removal on

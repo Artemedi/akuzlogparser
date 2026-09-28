@@ -129,20 +129,31 @@ if os.name == "nt":
                 "Could not resume Job-bound Windows child")
 
 
-    def _finalize_handles(owner, process_handle, pipe_handle):
-        error = None
+    def _close_handles_strict(owner, process_handle, pipe_handle):
+        errors = []
         try:
             owner.close()
         except BaseException as exc:
-            error = exc
+            errors.append(exc)
         for handle in (process_handle, pipe_handle):
+            if handle is None:
+                continue
             try:
                 _winapi.CloseHandle(handle)
             except BaseException as exc:
-                if error is None:
-                    error = exc
-        # Finalizers must not throw during interpreter shutdown.
-        return error
+                errors.append(exc)
+        if errors:
+            raise JobBoundSpawnError(
+                "Could not close atomic Job-bound spawn handles") from errors[0]
+
+
+    def _finalize_handles(owner, process_handle, pipe_handle):
+        # GC/interpreter-shutdown fallback only. Normal ProcessFetch lifecycle
+        # calls JobBoundPopen.close() synchronously and propagates failures.
+        try:
+            _close_handles_strict(owner, process_handle, pipe_handle)
+        except BaseException:
+            pass
 
 
     class JobBoundPopen:
@@ -204,10 +215,12 @@ if os.name == "nt":
                 self.returncode = None
                 self._handle = hp
                 self.sentinel = int(hp)
+                self._pipe_handle = int(rhandle)
                 self._akuz_job_owner = owner
+                self._closed = False
                 self.finalizer = util.Finalize(
                     self, _finalize_handles,
-                    (owner, self.sentinel, int(rhandle)))
+                    (owner, self.sentinel, self._pipe_handle))
                 finalizer = self.finalizer
 
                 # Job membership is now authoritative. Resume before writing
@@ -255,11 +268,20 @@ if os.name == "nt":
                     ht = None
 
                 if finalizer is not None:
-                    # Finalize owns owner/hp/rhandle exactly once.
+                    # A constructed Popen owns these handles. Cancel the quiet
+                    # GC callback and close synchronously so setup failures
+                    # cannot hide a leaked Job/process/spawn-pipe handle.
+                    finalizer.cancel()
                     try:
-                        finalizer()
-                    except BaseException:
-                        pass
+                        _close_handles_strict(
+                            owner, self.sentinel, self._pipe_handle)
+                    except BaseException as cleanup_exc:
+                        raise JobBoundSpawnError(
+                            "Could not clean failed atomic spawn handles"
+                        ) from cleanup_exc
+                    self._closed = True
+                    self._handle = None
+                    self._pipe_handle = None
                 else:
                     if hp is not None:
                         if assigned:
@@ -344,7 +366,18 @@ if os.name == "nt":
             self._akuz_job_owner.close()
 
         def close(self):
-            self.finalizer()
+            if getattr(self, "_closed", False):
+                return
+            self._closed = True
+            finalizer = getattr(self, "finalizer", None)
+            if finalizer is not None and finalizer.still_active():
+                finalizer.cancel()
+            process_handle = getattr(self, "_handle", None)
+            pipe_handle = getattr(self, "_pipe_handle", None)
+            self._handle = None
+            self._pipe_handle = None
+            _close_handles_strict(
+                self._akuz_job_owner, process_handle, pipe_handle)
 
 
     class JobBoundSpawnProcess(SpawnProcess):
