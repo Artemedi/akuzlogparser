@@ -13,7 +13,6 @@ import os
 import re
 import threading
 from multiprocessing import parent_process
-from multiprocessing.connection import wait as wait_connections
 from time import monotonic, perf_counter, process_time, sleep
 
 from akuz_fetch import fetch_selected
@@ -142,8 +141,12 @@ class ProcessFetch:
     def _release_kill_job(self):
         if self._kill_job is None:
             return
-        _close_windows_handle(self._kill_job)
+        # Transfer ownership out of object state before CloseHandle. If the
+        # close itself fails, the failure is unsafe but must never trigger a
+        # second close attempt on the same integer HANDLE from finally/abort.
+        handle = self._kill_job
         self._kill_job = None
+        _close_windows_handle(handle)
 
     def finish(self) -> ProcessFetchResult:
         if self.child is None or self.receiver is None or self.started_at is None:
@@ -152,41 +155,36 @@ class ProcessFetch:
         primary_error = None
         try:
             deadline = monotonic() + self.poll_timeout_s
-            sentinel = getattr(self.child, "sentinel", None)
-            if sentinel is None:
-                # Test/non-Windows fallback: the Pipe remains the authority.
-                while True:
-                    remaining = deadline - monotonic()
-                    if remaining <= 0:
-                        raise TimeoutError("Process fetch did not return")
+            # The one-way Pipe is the sole IPC authority. Do not mix a
+            # Connection with a raw Windows process HANDLE in
+            # multiprocessing.connection.wait(); that contract is not stable
+            # across CPython/Windows versions. Poll the Pipe in short bounded
+            # slices and use child liveness only to shorten crash detection.
+            while True:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Process fetch did not return")
+                try:
+                    if self.receiver.poll(min(0.10, remaining)):
+                        break
+                except (EOFError, OSError) as exc:
+                    raise ProcessFetchError(
+                        "Process fetch pipe closed or invalid") from exc
+
+                if not self.child.is_alive():
+                    self.child.join(timeout=0)
+                    # send_bytes may have completed just before process exit;
+                    # preserve a bounded grace for the Pipe buffer to become
+                    # visible, but never wait the full operation timeout.
+                    drain = min(2.0, max(0.0, deadline - monotonic()))
                     try:
-                        if self.receiver.poll(min(0.10, remaining)):
+                        if drain > 0 and self.receiver.poll(drain):
                             break
                     except (EOFError, OSError) as exc:
                         raise ProcessFetchError(
                             "Process fetch pipe closed or invalid") from exc
-            else:
-                remaining = deadline - monotonic()
-                if remaining <= 0:
-                    raise TimeoutError("Process fetch did not return")
-                ready = wait_connections(
-                    [self.receiver, sentinel], timeout=remaining)
-                if not ready:
-                    raise TimeoutError("Process fetch did not return")
-                if self.receiver not in ready:
-                    # The child is dead. A successful send immediately before
-                    # exit can become readable slightly after the process
-                    # handle signals, so allow a bounded drain grace instead
-                    # of waiting the full 300 s or using a 100 ms heuristic.
-                    self.child.join(timeout=0)
-                    drain = min(2.0, max(0.0, deadline - monotonic()))
-                    try:
-                        if drain <= 0 or not self.receiver.poll(drain):
-                            raise ProcessFetchError(
-                                "Process fetch child exited before IPC result")
-                    except (EOFError, OSError) as exc:
-                        raise ProcessFetchError(
-                            "Process fetch pipe closed or invalid") from exc
+                    raise ProcessFetchError(
+                        "Process fetch child exited before IPC result")
 
             try:
                 raw = self.receiver.recv_bytes(maxlength=8192)
@@ -461,24 +459,23 @@ def remove_owned_snapshot(path: Path, *, attempts=100, delay_s=0.10):
         if attempt + 1 < max(1, attempts):
             sleep(delay_s)
     if target.exists():
-        raise ProcessFetchError(
+        raise ProcessFetchUnsafeError(
             "Owned process snapshot could not be removed") from last_error
 
 
 def _run_after_parent_gate(target, args, destination, sender, gate):
-    """Do not begin child I/O until the parent has assigned a kill Job Object."""
-    parent = parent_process()
-    while not gate.wait(0.05):
-        if parent is None:
-            sender.close()
-            os._exit(89)
+    """Arm parent-death supervision before waiting for Job assignment gate."""
+    try:
+        _arm_parent_watchdog()
+    except BaseException:
         try:
-            if not parent.is_alive():
-                sender.close()
-                os._exit(89)
-        except BaseException:
             sender.close()
+        finally:
             os._exit(89)
+    # No child I/O may begin before the parent assigns KILL_ON_JOB_CLOSE and
+    # opens this gate. Parent hard-exit is independently authoritative via the
+    # already-armed Windows parent-sentinel watchdog.
+    gate.wait()
     target(*args, destination, sender)
 
 
@@ -590,31 +587,58 @@ def _close_windows_handle(handle):
         raise ProcessFetchUnsafeError("Could not close Windows handle")
 
 
+_parent_watchdog_thread = None
+
+
 def _arm_parent_watchdog():
     """Hard-exit a Windows spawn child when its multiprocessing parent dies.
 
-    multiprocessing gives a spawned child a parent sentinel. Using that
-    sentinel avoids reopening a PID (and the PID-reuse race) and leaves handle
-    lifetime to multiprocessing itself.
+    On Windows the multiprocessing ParentProcess sentinel is an authoritative
+    process handle. WaitForSingleObject avoids PID reopening/reuse and avoids
+    a polling-only gap before the Job assignment gate opens.
     """
+    global _parent_watchdog_thread
     if os.name != "nt":
         return None
+    if (_parent_watchdog_thread is not None
+            and _parent_watchdog_thread.is_alive()):
+        return _parent_watchdog_thread
+
     parent = parent_process()
     if parent is None:
         raise ProcessFetchError("Parent process watchdog unavailable")
+    sentinel = getattr(parent, "sentinel", None)
+    if sentinel is None:
+        raise ProcessFetchError("Parent process sentinel unavailable")
+
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    handle = wintypes.HANDLE(_windows_handle_value(sentinel))
+    wait_object_0 = 0x00000000
+    wait_timeout = 0x00000102
+    infinite = 0xFFFFFFFF
+
+    # If the parent died before this child reached Python user code, fail
+    # synchronously before starting any SSH I/O or waiting on the gate.
+    initial = kernel32.WaitForSingleObject(handle, 0)
+    if initial == wait_object_0:
+        os._exit(86)
+    if initial != wait_timeout:
+        raise ProcessFetchUnsafeError("Parent process sentinel wait failed")
 
     def watch():
-        while True:
-            try:
-                if not parent.is_alive():
-                    os._exit(86)
-            except BaseException:
-                os._exit(87)
-            sleep(0.1)
+        result = kernel32.WaitForSingleObject(handle, infinite)
+        if result == wait_object_0:
+            os._exit(86)
+        os._exit(87)
 
     thread = threading.Thread(
         target=watch, name="akuz-prefetch-parent-watch", daemon=True)
     thread.start()
+    _parent_watchdog_thread = thread
     return thread
 
 
