@@ -165,11 +165,12 @@ jobs:
 
           Be specific: cite function/test names and describe a reproducible
           scenario. Do not praise the project and do not repeat the prompt.
+          Keep the final answer under 2500 words; prioritize blockers over prose.
           """
 
           payload = json.dumps({
               'model': model,
-              'max_tokens': 7000,
+              'max_tokens': 14000,
               'messages': [{
                   'role': 'user',
                   'content': prompt + ''.join(parts)
@@ -203,8 +204,15 @@ jobs:
           finally:
               if request_path:
                   Path(request_path).unlink(missing_ok=True)
-          content = data['choices'][0]['message']['content']
+          choice = data['choices'][0]
+          message = choice.get('message', {})
+          content = message.get('content', '')
           if not isinstance(content, str) or not content.strip():
+              usage = data.get('usage', {})
+              print('FABLE_EMPTY_CONTENT=1')
+              print('FABLE_FINISH_REASON=' + str(choice.get('finish_reason')))
+              print('FABLE_MESSAGE_KEYS=' + ','.join(sorted(message.keys())))
+              print('FABLE_COMPLETION_TOKENS=' + str(usage.get('completion_tokens')))
               raise SystemExit('Fable returned empty review')
           print('FABLE_REVIEW_BEGIN')
           print(content)
