@@ -1,0 +1,44 @@
+name: AKUZ Phase 10 replicated SSH compression AB 25Sep
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/akuz-phase10-ssh-compression-ab-25sep.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ab:
+    name: Replicated compression A-B on fixed 25-Sep prefix
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out exact benchmark harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Run six alternating fixed-prefix transfers on 25-Sep
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
+            throw 'DBA-008D only'
+          }
+          $privateRoot = 'E:\Software\Project\LogAkusExplorer\akuzlogparser'
+          python -B scripts/bench_phase10_ssh_compression_ab.py `
+            --config (Join-Path $privateRoot 'ConnectConf.cfg') `
+            --app-root $privateRoot `
+            --day 20260925 `
+            --result (Join-Path $privateRoot 'diagnostics\phase10_ssh_compression_ab_20260925_20260928.json')
+          if ($LASTEXITCODE -ne 0) { throw 'Replicated Phase 10 large-source A/B failed' }
+          Write-Host 'PHASE10_STATUS=REPLICATED_LARGE_AB_PARTIAL_NOT_ACCEPTANCE'
+          Write-Host 'NO_RELEASE_CHANGE=PASS'
