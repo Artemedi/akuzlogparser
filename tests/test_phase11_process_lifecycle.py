@@ -11,6 +11,8 @@ import unittest
 from unittest.mock import patch
 
 from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
+                                ProcessFetchUnsafeError,
+                                _same_path, _windows_handle_value,
                                 remove_owned_snapshot, ssh_fetch_child)
 from akuz_fetch import ConnectConfig
 
