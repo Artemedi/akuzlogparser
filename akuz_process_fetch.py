@@ -5,9 +5,11 @@ It does not know about AKUZ inventory/cache and is not wired into perform_build.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from time import perf_counter
+
+from akuz_fetch import fetch_selected
 
 
 class ProcessFetchError(RuntimeError):
@@ -22,6 +24,7 @@ class ProcessFetchResult:
     child_cpu_s: float
     child_fetch_wall_s: float
     ready_latency_s: float
+    metadata: dict
 
 
 class ProcessFetch:
@@ -89,7 +92,12 @@ class ProcessFetch:
             if self.child.exitcode != 0 or not message or message[0] != "ok":
                 kind = message[1] if message and message[0] == "error" else "ChildExit"
                 raise ProcessFetchError("Process fetch failed: " + str(kind))
-            _, returned_path, digest, count, child_cpu, child_fetch_wall = message
+            if len(message) not in (6, 7):
+                raise ProcessFetchError("Process fetch IPC shape invalid")
+            _, returned_path, digest, count, child_cpu, child_fetch_wall = message[:6]
+            metadata = message[6] if len(message) == 7 else {}
+            if not isinstance(metadata, dict):
+                raise ProcessFetchError("Process fetch metadata invalid")
             returned = Path(returned_path)
             if returned.resolve() != self.destination.resolve():
                 raise ProcessFetchError("Process fetch returned unexpected snapshot path")
@@ -107,7 +115,8 @@ class ProcessFetch:
                 bytes=count,
                 child_cpu_s=float(child_cpu),
                 child_fetch_wall_s=float(child_fetch_wall),
-                ready_latency_s=perf_counter() - self.started_at)
+                ready_latency_s=perf_counter() - self.started_at,
+                metadata=dict(metadata))
             self._success = True
             return result
         finally:
@@ -138,3 +147,38 @@ class ProcessFetch:
 
     def __exit__(self, exc_type, exc, tb):
         self.close()
+
+
+def ssh_fetch_child(cfg, remote: dict, destination: str, sender) -> None:
+    """Spawn-safe SSH fetch into an owned temporary destination.
+
+    The child never writes inventory. fetch_selected writes inside the owned
+    destination directory; the completed file is renamed to the exact IPC
+    destination before success is reported.
+    """
+    target = Path(destination)
+    fetched = None
+    try:
+        started = perf_counter()
+        child_cfg = replace(cfg, local_dest=target.parent)
+        fetched, digest, details = fetch_selected(
+            child_cfg, remote, notify=lambda message: None)
+        if fetched.resolve() != target.resolve():
+            if target.exists():
+                raise ProcessFetchError("Owned prefetch destination already exists")
+            fetched.replace(target)
+            fetched = target
+        from scripts.phase9_memory import sample
+        own = sample(__import__("os").getpid())
+        cpu = own["cpu_time_s"] if own is not None else None
+        sender.send((
+            "ok", str(target), digest, target.stat().st_size,
+            cpu, perf_counter() - started, details))
+    except BaseException as exc:
+        try:
+            sender.send(("error", type(exc).__name__))
+        except BaseException:
+            pass
+        raise
+    finally:
+        sender.close()
