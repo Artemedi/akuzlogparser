@@ -5,13 +5,25 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import json
 import multiprocessing
+import os
 
 
 def _spawn_probe(destination, sender):
+    import hashlib
+
     path = Path(destination)
     payload = b'AKUZ portable spawned child'
     path.write_bytes(payload)
-    sender.send(('ok', str(path), 'f' * 64, len(payload), .01, .01, {'active': False}))
+    sender.send_bytes(json.dumps([
+        'ok', str(path), hashlib.sha256(payload).hexdigest(), len(payload),
+        .01, .01, {
+            'active': False,
+            'captured_bytes': len(payload),
+            'stored_bytes': len(payload),
+            'dropped_tail_bytes': 0,
+            'listed_bytes': len(payload),
+        }
+    ], separators=(',', ':')).encode('utf-8'))
     sender.close()
 
 
@@ -33,9 +45,13 @@ def run():
     with TemporaryDirectory(prefix='akuz-portable-check-') as scratch:
         root = Path(scratch)
         spawn_target = root/'spawn-probe.bin'
+        payload_size = len(b'AKUZ portable spawned child')
         with ProcessFetch(
                 multiprocessing.get_context('spawn'), _spawn_probe, (), spawn_target,
-                poll_timeout_s=20, join_timeout_s=10, kill_timeout_s=5) as operation:
+                poll_timeout_s=20, join_timeout_s=10, kill_timeout_s=5,
+                expected_listed_bytes=payload_size,
+                require_kill_job=(os.name == 'nt'),
+                safe_ipc=True) as operation:
             spawned = operation.finish()
         if spawned.path.read_bytes() != b'AKUZ portable spawned child':
             raise RuntimeError('Portable multiprocessing spawn check failed')
