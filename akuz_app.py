@@ -400,6 +400,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
     singles_new = 0
     singles_reused = 0
     process_prefetch_downloads = 0
+    process_prefetch_child_cpu_s = 0.0
     prefetched_downloads = {}
     process_ctx = (multiprocessing.get_context('spawn')
                    if process_prefetch_root is not None else None)
@@ -455,7 +456,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         return next_fid, next_remote, operation
 
     def finish_prefetch(prefetch):
-        nonlocal process_prefetch_downloads
+        nonlocal process_prefetch_downloads, process_prefetch_child_cpu_s
         if prefetch is None:
             return
         next_fid, next_remote, operation = prefetch
@@ -474,6 +475,8 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         save_store(root, store)
         prefetched_downloads[next_fid] = (final, result.digest, details)
         process_prefetch_downloads += 1
+        if result.child_cpu_s is not None:
+            process_prefetch_child_cpu_s += result.child_cpu_s
         record_capture(details)
         perf_event(
             root, 'process.prefetch', 'done',
@@ -481,6 +484,8 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             bytes_saved=result.bytes,
             child_fetch_s=(round(result.child_fetch_wall_s, 3)
                            if result.child_fetch_wall_s is not None else 0),
+            child_cpu_s=(round(result.child_cpu_s, 3)
+                         if result.child_cpu_s is not None else 0),
             ready_s=round(result.ready_latency_s, 3))
         operation.close()
     for idx, fid in enumerate(ids, 1):
@@ -666,6 +671,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                singles_new=singles_new, singles_reused=singles_reused,
                skipped_identical=len(skipped), active_snapshots=active_count,
                process_prefetch_downloads=process_prefetch_downloads,
+               process_prefetch_child_cpu_s=round(process_prefetch_child_cpu_s, 3),
                combined_status=(0 if combined is None else (1 if combined['reused'] else 2)),
                analytics_warning=bool(analytics_warning),
                elapsed_s=round(perf_counter() - build_started, 3))
