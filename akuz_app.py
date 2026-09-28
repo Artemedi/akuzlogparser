@@ -33,7 +33,7 @@ from akuz_store_lock import inventory_transaction
 
 from akuz_runtime import DOCUMENTS, app_root, prepare_runtime
 from akuz_instance_lock import InstanceBusy, exclusive_instance
-from akuz_process_fetch import ProcessFetch, ssh_fetch_child
+from akuz_process_fetch import ProcessFetch, ProcessFetchError, ssh_fetch_child
 from akuz_version import __version__
 from akuz_diagnostics import event as perf_event, phase as perf_phase
 
@@ -492,7 +492,20 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         if prefetch is None:
             return
         next_fid, next_remote, operation = prefetch
-        result = operation.finish()
+        try:
+            result = operation.finish()
+        except (ProcessFetchError, TimeoutError, OSError):
+            # Prefetch is an optimization only. A child/IPC/timeout failure
+            # must not make the default path less reliable than the historical
+            # serial scheduler. The next loop iteration performs the ordinary
+            # fetch, which re-applies all rotation/truncation/stat checks.
+            operation.close()
+            perf_event(root, 'process.prefetch', 'finish_fallback',
+                       source_index=ids.index(next_fid) + 1, enabled=0)
+            state.set_stage(
+                'Предзагрузка следующего файла не удалась; '
+                'продолжаю обычной загрузкой…')
+            return
         final = selected_snapshot_path(cfg, next_remote)
         if final.exists():
             operation.close()
