@@ -232,7 +232,7 @@ class ProcessFetch:
             if (not isinstance(digest, str) or
                     re.fullmatch(r"[0-9a-f]{64}", digest) is None):
                 raise ProcessFetchError("Process fetch digest invalid")
-            actual_digest = _sha256_file(returned)
+            actual_digest = _sha256_owned_snapshot(returned, st)
             if actual_digest != digest:
                 raise ProcessFetchError(
                     "Process fetch snapshot checksum mismatch")
@@ -649,11 +649,57 @@ def _arm_parent_watchdog():
     return thread
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+def _snapshot_identity(st):
+    return (
+        st.st_dev, st.st_ino, st.st_size,
+        getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000)))
+
+
+def _sha256_owned_snapshot(path: Path, expected_stat) -> str:
+    """Hash the exact regular file identity validated by lstat.
+
+    The descriptor identity must match the pre-open lstat and remain stable
+    for the whole read. A post-read owned-path check also proves the pathname
+    still resolves to that same file rather than a swapped symlink/reparse
+    target. O_NOFOLLOW is used where the platform exposes it; Windows is bound
+    by file identity because os.open does not provide O_NOFOLLOW there.
+    """
+    target = Path(path)
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOINHERIT", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+
+    try:
+        fd = os.open(target, flags)
+    except OSError as exc:
+        raise ProcessFetchError(
+            "Process fetch snapshot could not be opened safely") from exc
+
+    try:
+        opened = os.fstat(fd)
+        if _snapshot_identity(opened) != _snapshot_identity(expected_stat):
+            raise ProcessFetchError(
+                "Process fetch snapshot identity changed before hashing")
+
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
             digest.update(chunk)
+
+        after = os.fstat(fd)
+        if _snapshot_identity(after) != _snapshot_identity(opened):
+            raise ProcessFetchError(
+                "Process fetch snapshot changed while hashing")
+    finally:
+        os.close(fd)
+
+    visible = _owned_snapshot_stat(target)
+    if _snapshot_identity(visible) != _snapshot_identity(after):
+        raise ProcessFetchError(
+            "Process fetch snapshot path changed while hashing")
     return digest.hexdigest()
 
 
