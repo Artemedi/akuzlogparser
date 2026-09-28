@@ -169,16 +169,27 @@ jobs:
               re.findall(r'^\\s*def (test_[A-Za-z0-9_]+)', lifecycle_test_source, re.M))
 
           app = Path('akuz_app.py').read_text(encoding='utf-8')
+          cleanup_start = app.index('def _phase11_prefetch_prefix')
+          cleanup_end = app.index('\ndef perform_build(', cleanup_start)
           gate_start = app.index("    process_flag = ")
           gate_end = app.index("    (root/'cache').mkdir", gate_start)
           ops_start = app.index('    def start_next_prefetch')
           ops_end = app.index('    for idx, fid in enumerate(ids, 1):', ops_start)
           loop_start = app.index('        prefetch = start_next_prefetch')
           loop_end = app.index('    combined = None', loop_start)
+          spool_start = app.index('def _iter_combined_sources')
+          spool_end = app.index('\ndef _combine_sources', spool_start)
           app_phase11 = (
+              app[cleanup_start:cleanup_end] + '\n...\n' +
               app[gate_start:gate_end] + '\n...\n' +
               app[ops_start:ops_end] + '\n...\n' +
-              app[loop_start:loop_end])
+              app[loop_start:loop_end] + '\n...\n' +
+              app[spool_start:spool_end])
+          fetch_source = Path('akuz_fetch.py').read_text(encoding='utf-8')
+          fetch_start = fetch_source.index('def fetch_selected')
+          fetch_end = fetch_source.index(
+              'fetch_selected._akuz_process_prefetch_compatible', fetch_start)
+          fetch_selected_code = fetch_source[fetch_start:fetch_end]
           app_test_source = Path(
               'tests/test_phase11_normal_app_process_prefetch.py'
           ).read_text(encoding='utf-8')
@@ -228,10 +239,22 @@ jobs:
           - orphan workspace cleanup;
           - whether local/SMB/custom generators can accidentally enter it.
 
-          Current evidence: 254 Python tests + browser/diff PASS; real normal-app
-          A/B on 857,563,363 bytes has inventory/analytics parity; process path
-          is materially faster; portable spawn/smoke PASS. Persistent B-lite is
-          not used and SSH compression remains default OFF.
+          Important surrounding semantics to verify rather than assume:
+          - child fetch uses the same fetch_selected() as serial: trusted-path
+            re-list, device/inode check, stat-before, bounded head read,
+            stat-after, rotation/truncation rejection and active-log trimming;
+          - an unindexed final file is intentionally fail-closed: the serial
+            fetch also refuses dest.exists(), so treating an arbitrary external
+            final as a warm hit would weaken integrity;
+          - derived spools are disposable acceleration only. A missing spool
+            entry makes _iter_combined_sources parse event_stream normally;
+          - owned prefetch workspaces are purged for every Linux build even when
+            AKUZ_PHASE11_PROCESS_PREFETCH=0.
+
+          Current evidence: full Windows regression, real normal-app A/B
+          inventory/analytics parity and portable spawn/smoke have passed on
+          the current runtime lineage. Persistent B-lite is not used and SSH
+          compression remains default OFF.
 
           Return <=700 words:
           BLOCKERS
@@ -242,6 +265,8 @@ jobs:
 
           ===== Phase 11 normal-app code =====
           """ + app_phase11 + """
+          ===== fetch_selected SSH snapshot contract =====
+          """ + fetch_selected_code + """
           ===== normal-app test names =====
           """ + app_tests
 
