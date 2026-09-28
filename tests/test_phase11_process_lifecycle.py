@@ -384,9 +384,7 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
         with TemporaryDirectory(prefix="akuz_process_win_swap_") as td:
             root = Path(td)
             target = root / "snapshot.log"
-            replacement = root / "replacement.log"
             target.write_bytes(b"owned")
-            replacement.write_bytes(b"external")
             import akuz_process_fetch as process_fetch
             real_identity = process_fetch._windows_cleanup_identity
             calls = {"count": 0}
@@ -394,8 +392,13 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             def racing_identity(handle):
                 identity = real_identity(handle)
                 calls["count"] += 1
-                if calls["count"] == 1:
-                    os.replace(replacement, target)
+                if calls["count"] == 2:
+                    # Model a pathname that now resolves to a different file
+                    # between the stable anchor and DELETE-handle open. The
+                    # replacement itself is intentionally not performed here:
+                    # Windows can deny rename while the anchor is open, and
+                    # the contract under test is handle-identity mismatch.
+                    return (identity[0], identity[1] + 1, identity[2])
                 return identity
 
             with patch(
@@ -405,23 +408,49 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                         ProcessFetchUnsafeError, "pathname was replaced"):
                     remove_owned_snapshot(
                         target, attempts=2, delay_s=.01)
-            self.assertEqual(target.read_bytes(), b"external")
+            self.assertGreaterEqual(calls["count"], 2)
+            self.assertEqual(target.read_bytes(), b"owned")
 
     def test_owned_snapshot_cleanup_failure_is_unsafe(self):
         with TemporaryDirectory(prefix="akuz_process_cleanup_unsafe_") as td:
             root = Path(td)
             dest = root / "snapshot.log"
             dest.write_bytes(b"partial")
-            with patch.object(
-                    Path, "unlink",
-                    side_effect=PermissionError("simulated persistent lock")), \
-                 patch("akuz_process_fetch.sleep"):
-                with self.assertRaisesRegex(
-                        ProcessFetchUnsafeError, "could not be removed"):
-                    remove_owned_snapshot(dest, attempts=3, delay_s=.01)
+            if os.name == "nt":
+                import akuz_process_fetch as process_fetch
+                real_open = process_fetch._windows_open_cleanup_handle
+
+                def blocked_delete_open(path, access):
+                    if access & 0x00010000:
+                        raise PermissionError("simulated persistent WinError 32")
+                    return real_open(path, access)
+
+                with patch(
+                        "akuz_process_fetch._windows_open_cleanup_handle",
+                        side_effect=blocked_delete_open), \
+                     patch("akuz_process_fetch.sleep"):
+                    with self.assertRaisesRegex(
+                            ProcessFetchUnsafeError, "could not be removed"):
+                        remove_owned_snapshot(dest, attempts=3, delay_s=.01)
+            else:
+                with patch.object(
+                        Path, "unlink",
+                        side_effect=PermissionError("simulated persistent lock")), \
+                     patch("akuz_process_fetch.sleep"):
+                    with self.assertRaisesRegex(
+                            ProcessFetchUnsafeError, "could not be removed"):
+                        remove_owned_snapshot(dest, attempts=3, delay_s=.01)
             self.assertTrue(dest.exists())
 
     def test_job_close_failure_after_validation_is_not_double_closed(self):
+        class FailingOwner:
+            def __init__(self):
+                self.calls = 0
+
+            def close(self):
+                self.calls += 1
+                raise ProcessFetchUnsafeError("close failed")
+
         with TemporaryDirectory(prefix="akuz_process_job_close_") as td:
             root = Path(td)
             dest = root / "snapshot.log"
@@ -431,17 +460,16 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                 ("ok", str(dest), digest, len(payload), .2, .5))
             child = FakeChild(on_start=lambda: dest.write_bytes(payload))
             op, _ = self.make(root, receiver, child)
-            op._kill_job = 123
-            with patch(
-                    "akuz_process_fetch._close_windows_handle",
-                    side_effect=ProcessFetchUnsafeError("close failed")) as close_handle:
-                op.start()
-                with self.assertRaisesRegex(
-                        ProcessFetchUnsafeError, "close failed"):
-                    op.finish()
-            close_handle.assert_called_once_with(123)
+            op.start()
+            owner = FailingOwner()
+            op._kill_job = owner
+            with self.assertRaisesRegex(
+                    ProcessFetchUnsafeError, "close failed"):
+                op.finish()
+            self.assertEqual(owner.calls, 1)
             self.assertIsNone(op._kill_job)
 
+    @unittest.skipIf(os.name == "nt", "POSIX fallback cleanup race")
     def test_owned_snapshot_cleanup_never_unlinks_replacement(self):
         with TemporaryDirectory(prefix="akuz_process_cleanup_swap_") as td:
             root = Path(td)
@@ -473,17 +501,34 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             root = Path(td)
             dest = root / "snapshot.log"
             dest.write_bytes(b"partial")
-            real_unlink = Path.unlink
             calls = {"count": 0}
+            if os.name == "nt":
+                import akuz_process_fetch as process_fetch
+                real_open = process_fetch._windows_open_cleanup_handle
 
-            def flaky_unlink(path, *args, **kwargs):
-                if path == dest and calls["count"] < 2:
-                    calls["count"] += 1
-                    raise PermissionError("simulated WinError 32")
-                return real_unlink(path, *args, **kwargs)
+                def flaky_open(path, access):
+                    if access & 0x00010000 and calls["count"] < 2:
+                        calls["count"] += 1
+                        raise PermissionError("simulated transient WinError 32")
+                    return real_open(path, access)
 
-            with patch.object(Path, "unlink", new=flaky_unlink),                  patch("akuz_process_fetch.sleep"):
-                remove_owned_snapshot(dest, attempts=4, delay_s=.01)
+                with patch(
+                        "akuz_process_fetch._windows_open_cleanup_handle",
+                        side_effect=flaky_open), \
+                     patch("akuz_process_fetch.sleep"):
+                    remove_owned_snapshot(dest, attempts=4, delay_s=.01)
+            else:
+                real_unlink = Path.unlink
+
+                def flaky_unlink(path, *args, **kwargs):
+                    if path == dest and calls["count"] < 2:
+                        calls["count"] += 1
+                        raise PermissionError("simulated transient lock")
+                    return real_unlink(path, *args, **kwargs)
+
+                with patch.object(Path, "unlink", new=flaky_unlink), \
+                     patch("akuz_process_fetch.sleep"):
+                    remove_owned_snapshot(dest, attempts=4, delay_s=.01)
             self.assertEqual(calls["count"], 2)
             self.assertFalse(dest.exists())
 
