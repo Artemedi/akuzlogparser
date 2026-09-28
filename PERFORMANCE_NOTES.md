@@ -2994,3 +2994,34 @@ Decision: corrected pair candidate advances only to an isolated
 23+24+25 multi-source/large-source benchmark with one child maximum,
 fixed prefix, parity, process-tree memory, CPU split, fetch/readiness
 timing and cleanup. No normal-app integration yet.
+
+## Phase 11 three-source process-isolated large gate (2026-09-28)
+
+New benchmark-only harness `scripts/bench_phase11_process_overlap_multi.py`
+keeps one spawned fetch child maximum across fixed 23/24/25 Sep prefixes.
+Exact contract commit `89daa2a`: DBA-008D Actions #36406054018,
+234 Python PASS (2 skips, 116.309 s), Node controls + diff PASS.
+
+Real balanced order serial/process/process/serial:
+Actions #36406239299 (workflow `dd6f219`) + independent numeric audit
+#36406284302 (`9ad19ac`) SUCCESS. Compression OFF. Fixed prefix bytes
+171,378,567 / 140,361,291 / 644,567,384. Source SHA and deterministic
+report manifests equal in 4/4 trials; zero payload retention, owned workspace
+cleanup PASS, app cache and Release unchanged.
+
+Serial wall 259.258158 / 280.110036 s, median 269.684097.
+Process wall 216.670384 / 215.096836 s, median 215.883610:
+~19.9% lower wall median; both process trials beat both serial trials.
+Total CPU median 138.671875 -> 162.539062 s (~17.2% higher).
+Process-tree private median 399,509,504 -> 356,929,536 B (~10.7% lower
+in this two-trial series; do not generalize).
+
+24-Sep serial fetch 18.345334/23.470378 s; process pure child
+32.010912/20.856221 s; readiness 32.511390/29.630600 s.
+25-Sep serial fetch 87.478401/104.360589 s; process pure child
+89.025576/77.720484 s; readiness 89.551881/78.004371 s.
+
+Decision for v4.7: positive research result, **NOT integrated**. Release keeps
+sequential normal-app SSH scheduling and the validated ephemeral derived spool.
+Process overlap requires a future normal-app cancellation/failure/mixed-cache/
+inventory/restart + portable gate before production use.
