@@ -530,7 +530,12 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         next_fid = ids[current_index]
         if next_fid in store['downloads'] or next_fid in prefetched_downloads:
             return None
-        next_remote = listed[next_fid]
+        # Defensive against an inventory changing underneath a future caller:
+        # process-prefetch is optional and must never surface a raw KeyError.
+        # The historical serial/reconciliation path remains authoritative.
+        next_remote = listed.get(next_fid)
+        if next_remote is None:
+            return None
         expected_size = next_remote.get('size')
         if (not isinstance(expected_size, int) or isinstance(expected_size, bool)
                 or expected_size < 0):
