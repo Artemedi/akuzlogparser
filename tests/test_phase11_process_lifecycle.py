@@ -469,6 +469,10 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                 op.finish()
             self.assertEqual(owner.calls, 1)
             self.assertIsNone(op._kill_job)
+            # Handle teardown failed after the snapshot had already passed
+            # size/SHA/metadata validation. Fail closed, but do not destroy
+            # that validated temp in the generic abort finally path.
+            self.assertTrue(dest.exists())
 
     @unittest.skipIf(os.name == "nt", "POSIX fallback cleanup race")
     def test_owned_snapshot_cleanup_never_unlinks_replacement(self):
@@ -532,6 +536,78 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                     remove_owned_snapshot(dest, attempts=4, delay_s=.01)
             self.assertEqual(calls["count"], 2)
             self.assertFalse(dest.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows validated cleanup identity")
+    def test_validated_identity_swap_before_cleanup_preserves_replacement(self):
+        with TemporaryDirectory(prefix="akuz_process_validated_swap_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            replacement = root / "replacement.log"
+            target.write_bytes(b"AAAA")
+            expected = _owned_snapshot_stat(target)
+            digest, cleanup_identity = _sha256_owned_snapshot(
+                target, expected, return_cleanup_identity=True)
+            self.assertEqual(digest, hashlib.sha256(b"AAAA").hexdigest())
+            self.assertIsNotNone(cleanup_identity)
+
+            replacement.write_bytes(b"BBBB")
+            os.replace(replacement, target)
+            with self.assertRaisesRegex(
+                    ProcessFetchUnsafeError,
+                    "identity changed before cleanup"):
+                remove_owned_snapshot(
+                    target, attempts=2, delay_s=.01,
+                    expected_identity=cleanup_identity)
+            self.assertEqual(target.read_bytes(), b"BBBB")
+
+    @unittest.skipUnless(os.name == "nt", "Windows strict Popen handle close")
+    def test_jobbound_popen_close_propagates_handle_failure(self):
+        import akuz_win_job_spawn as job_spawn
+
+        class FakeFinalizer:
+            def __init__(self):
+                self.cancelled = False
+
+            def still_active(self):
+                return True
+
+            def cancel(self):
+                self.cancelled = True
+
+        class FakeOwner:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        popen = object.__new__(job_spawn.JobBoundPopen)
+        popen._closed = False
+        popen.finalizer = FakeFinalizer()
+        popen._akuz_job_owner = FakeOwner()
+        popen._handle = 101
+        popen._pipe_handle = 102
+
+        calls = []
+        def close_handle(value):
+            calls.append(value)
+            if value == 102:
+                raise OSError("injected spawn-pipe close failure")
+
+        with patch(
+                "akuz_win_job_spawn._winapi.CloseHandle",
+                side_effect=close_handle):
+            with self.assertRaisesRegex(
+                    JobBoundSpawnError,
+                    "Could not close atomic Job-bound spawn handles"):
+                popen.close()
+
+        self.assertTrue(popen.finalizer.cancelled)
+        self.assertTrue(popen._akuz_job_owner.closed)
+        self.assertEqual(calls, [101, 102])
+        self.assertTrue(popen._closed)
+        self.assertIsNone(popen._handle)
+        self.assertIsNone(popen._pipe_handle)
 
     def test_pipe_oserror_is_normalized_and_cleans_snapshot(self):
         with TemporaryDirectory(prefix="akuz_process_fetch_pipe_") as td:

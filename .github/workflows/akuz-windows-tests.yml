@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: akuz-windows-tests-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   regression:
