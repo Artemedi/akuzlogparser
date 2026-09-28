@@ -348,7 +348,10 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                 op.abort()
             self.assertTrue(child.terminated)
             self.assertTrue(child.killed)
-            self.assertFalse(dest.exists())
+            # A child that survived both termination mechanisms may still
+            # hold/write the file. Fail closed and leave the app-scoped temp
+            # for orphan cleanup rather than unlinking under a live process.
+            self.assertTrue(dest.exists())
 
     def test_unexpected_returned_path_fails_closed_without_deleting_foreign_file(self):
         with TemporaryDirectory(prefix="akuz_process_fetch_path_") as td:
