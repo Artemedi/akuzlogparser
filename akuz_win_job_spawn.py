@@ -152,68 +152,110 @@ if os.name == "nt":
 
         def __init__(self, process_obj):
             prep_data = spawn.get_preparation_data(process_obj._name)
-            rhandle, whandle = _winapi.CreatePipe(None, 0)
-            wfd = msvcrt.open_osfhandle(whandle, 0)
-            cmd = spawn.get_command_line(
-                parent_pid=os.getpid(), pipe_handle=rhandle)
-            python_exe = spawn.get_executable()
 
-            if WINENV and _path_eq(python_exe, sys.executable):
-                cmd[0] = python_exe = sys._base_executable
-                env = os.environ.copy()
-                env["__PYVENV_LAUNCHER__"] = sys.executable
-            else:
-                env = None
-
-            cmd = " ".join('"%s"' % value for value in cmd)
-            create_suspended = 0x00000004
-            owner = _create_kill_job()
+            rhandle = whandle = None
+            wfd = None
+            to_child = None
+            owner = None
             hp = ht = None
             finalizer = None
             assigned = False
 
             try:
-                with open(wfd, "wb", closefd=True) as to_child:
-                    hp, ht, pid, tid = _winapi.CreateProcess(
-                        python_exe, cmd, None, None, False,
-                        create_suspended, env, None, None)
+                rhandle, whandle = _winapi.CreatePipe(None, 0)
+                try:
+                    wfd = msvcrt.open_osfhandle(whandle, 0)
+                except BaseException:
+                    # open_osfhandle did not accept ownership.
+                    _winapi.CloseHandle(whandle)
+                    whandle = None
+                    raise
+                # The CRT fd now owns whandle.
+                whandle = None
+                to_child = open(wfd, "wb", closefd=True)
+                wfd = None
 
-                    # Critical invariant: the exact CreateProcess handle is
-                    # assigned while the primary thread is still suspended.
-                    _assign_job(owner, hp)
-                    assigned = True
+                cmd = spawn.get_command_line(
+                    parent_pid=os.getpid(), pipe_handle=rhandle)
+                python_exe = spawn.get_executable()
 
-                    self.pid = pid
-                    self.returncode = None
-                    self._handle = hp
-                    self.sentinel = int(hp)
-                    self._akuz_job_owner = owner
-                    self.finalizer = util.Finalize(
-                        self, _finalize_handles,
-                        (owner, self.sentinel, int(rhandle)))
-                    finalizer = self.finalizer
+                if WINENV and _path_eq(python_exe, sys.executable):
+                    cmd[0] = python_exe = sys._base_executable
+                    env = os.environ.copy()
+                    env["__PYVENV_LAUNCHER__"] = sys.executable
+                else:
+                    env = None
 
-                    set_spawning_popen(self)
-                    try:
-                        reduction.dump(prep_data, to_child)
-                        reduction.dump(process_obj, to_child)
-                    finally:
-                        set_spawning_popen(None)
+                # Deliberately matches CPython 3.11 popen_spawn_win32.
+                cmd = " ".join('"%s"' % value for value in cmd)
+                create_suspended = 0x00000004
+                owner = _create_kill_job()
 
-                    _resume_thread(ht)
-                    _winapi.CloseHandle(ht)
-                    ht = None
+                hp, ht, pid, tid = _winapi.CreateProcess(
+                    python_exe, cmd, None, None, False,
+                    create_suspended, env, None, None)
+
+                # Critical invariant: the exact CreateProcess handle is
+                # assigned while the primary thread is still suspended.
+                _assign_job(owner, hp)
+                assigned = True
+
+                self.pid = pid
+                self.returncode = None
+                self._handle = hp
+                self.sentinel = int(hp)
+                self._akuz_job_owner = owner
+                self.finalizer = util.Finalize(
+                    self, _finalize_handles,
+                    (owner, self.sentinel, int(rhandle)))
+                finalizer = self.finalizer
+
+                # Job membership is now authoritative. Resume before writing
+                # the spawn payload so a payload larger than the anonymous-pipe
+                # buffer cannot deadlock while the child is suspended.
+                _resume_thread(ht)
+                _winapi.CloseHandle(ht)
+                ht = None
+
+                set_spawning_popen(self)
+                try:
+                    reduction.dump(prep_data, to_child)
+                    reduction.dump(process_obj, to_child)
+                finally:
+                    set_spawning_popen(None)
+
+                to_child.close()
+                to_child = None
             except BaseException:
-                # If the standard-style Finalize object exists, let it own the
-                # Job/process/pipe handles exactly once. Before that point,
-                # close the Job (killing an assigned suspended child) and then
-                # close the raw CreateProcess/pipe handles ourselves.
+                # Close the Python/CRT writer first so a resumed child cannot
+                # remain blocked on an artificially open parent writer.
+                if to_child is not None:
+                    try:
+                        to_child.close()
+                    except BaseException:
+                        pass
+                    to_child = None
+                if wfd is not None:
+                    try:
+                        os.close(wfd)
+                    except BaseException:
+                        pass
+                    wfd = None
+                if whandle is not None:
+                    try:
+                        _winapi.CloseHandle(whandle)
+                    except BaseException:
+                        pass
+                    whandle = None
                 if ht is not None:
                     try:
                         _winapi.CloseHandle(ht)
                     except BaseException:
                         pass
+                    ht = None
+
                 if finalizer is not None:
+                    # Finalize owns owner/hp/rhandle exactly once.
                     try:
                         finalizer()
                     except BaseException:
@@ -222,7 +264,7 @@ if os.name == "nt":
                     if hp is not None:
                         if assigned:
                             # Closing KILL_ON_JOB_CLOSE terminates the exact
-                            # suspended process tree after successful assign.
+                            # suspended/resumed process tree.
                             try:
                                 owner.close()
                             except BaseException:
@@ -231,29 +273,29 @@ if os.name == "nt":
                                 except BaseException:
                                     pass
                         else:
-                            # Assignment failed: the Job does not own hp yet,
-                            # so terminate the exact suspended process handle
-                            # directly, then close the empty Job.
+                            # Assignment failed: Job does not own hp, so kill
+                            # the exact suspended process handle directly.
                             try:
                                 _winapi.TerminateProcess(hp, TERMINATE)
                             except BaseException:
                                 pass
-                            try:
-                                owner.close()
-                            except BaseException:
-                                pass
-                    else:
-                        # CreateProcess failed before an exact child HANDLE
-                        # existed. The empty kill Job is still parent-owned
-                        # and must not leak.
+                            if owner is not None:
+                                try:
+                                    owner.close()
+                                except BaseException:
+                                    pass
+                    elif owner is not None:
+                        # Failure before CreateProcess produced hp.
                         try:
                             owner.close()
                         except BaseException:
                             pass
-                    try:
-                        _winapi.CloseHandle(rhandle)
-                    except BaseException:
-                        pass
+
+                    if rhandle is not None:
+                        try:
+                            _winapi.CloseHandle(rhandle)
+                        except BaseException:
+                            pass
                     if hp is not None:
                         try:
                             _winapi.CloseHandle(hp)
