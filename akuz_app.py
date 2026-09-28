@@ -33,7 +33,8 @@ from akuz_store_lock import inventory_transaction
 
 from akuz_runtime import DOCUMENTS, app_root, prepare_runtime
 from akuz_instance_lock import InstanceBusy, exclusive_instance
-from akuz_process_fetch import ProcessFetch, ProcessFetchError, ssh_fetch_child
+from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
+                                remove_owned_snapshot, ssh_fetch_child)
 from akuz_version import __version__
 from akuz_diagnostics import event as perf_event, phase as perf_phase
 
@@ -504,6 +505,13 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         if next_fid in store['downloads'] or next_fid in prefetched_downloads:
             return None
         next_remote = listed[next_fid]
+        expected_size = next_remote.get('size')
+        if (not isinstance(expected_size, int) or isinstance(expected_size, bool)
+                or expected_size < 0):
+            # Production prefetch must always be bound to the refreshed
+            # inventory size. Fall back to the historical serial fetch when
+            # the adapter cannot provide that proof.
+            return None
         final = selected_snapshot_path(cfg, next_remote)
         if final.exists():
             return None
@@ -512,7 +520,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         operation = ProcessFetch(
             process_ctx, ssh_fetch_child, (cfg, next_remote), target,
             poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10,
-            expected_listed_bytes=next_remote.get('size'),
+            expected_listed_bytes=expected_size,
             require_kill_job=(os.name == 'nt'))
         try:
             operation.start()
@@ -551,6 +559,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             return
         final = selected_snapshot_path(cfg, next_remote)
         if final.exists():
+            remove_owned_snapshot(result.path)
             operation.close()
             raise FetchError(
                 'Снимок следующего файла уже появился вне индекса. Проверьте downloads.')
@@ -559,11 +568,22 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         # from the trusted refreshed inventory in the parent so persisted
         # snapshot metadata remains byte/semantic-compatible with serial fetch.
         details["remote_path"] = next_remote["path"]
-        # Commit inventory BEFORE promoting the completed temp snapshot.
-        # If the parent hard-exits after this save but before replace(), the
-        # indexed path is simply missing; cached_download() treats that as a
-        # cache miss and the next run can fetch it normally. The inverse order
-        # could leave an unindexed final snapshot that blocks future fetches.
+
+        def rollback_prefetch_inventory(reason):
+            store['downloads'].pop(next_fid, None)
+            try:
+                save_store(root, store)
+            except BaseException:
+                # A stale persisted entry still points to a missing/untrusted
+                # path and cached_download() revalidates size+SHA before reuse.
+                perf_event(
+                    root, 'process.prefetch',
+                    'rollback_inventory_save_failed',
+                    source_index=ids.index(next_fid) + 1,
+                    reason=reason)
+
+        # Commit inventory BEFORE promotion. If the parent hard-exits before
+        # promotion, restart sees an indexed missing path and safely refetches.
         store['downloads'][next_fid] = dict(
             path=str(final), sha256=result.digest, size=result.bytes,
             host=cfg.host, remote=next_remote['path'],
@@ -572,27 +592,41 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             save_store(root, store)
         except BaseException:
             store['downloads'].pop(next_fid, None)
+            remove_owned_snapshot(result.path)
+            operation.close()
             raise
+
         try:
-            result.path.replace(final)
-        except BaseException:
-            # Best-effort compensation. Even if this rollback persistence
-            # fails, the on-disk inventory points to a missing path, which is
-            # recoverable as a normal cache miss on restart.
-            store['downloads'].pop(next_fid, None)
-            try:
-                save_store(root, store)
-            except BaseException:
-                pass
-            try:
-                result.path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            try:
-                operation.close()
-            except Exception:
-                pass
-            raise
+            # Atomic no-overwrite promotion on the same downloads volume.
+            # os.link fails with FileExistsError rather than replacing a file
+            # that appeared after the earlier existence check.
+            os.link(result.path, final)
+        except FileExistsError as exc:
+            rollback_prefetch_inventory('final_exists')
+            remove_owned_snapshot(result.path)
+            operation.close()
+            raise FetchError(
+                'Снимок следующего файла уже появился вне индекса. '
+                'Проверьте downloads.') from exc
+        except OSError:
+            rollback_prefetch_inventory('link_failed')
+            remove_owned_snapshot(result.path)
+            operation.close()
+            perf_event(root, 'process.prefetch', 'promotion_fallback',
+                       source_index=ids.index(next_fid) + 1, enabled=0)
+            state.set_stage(
+                'Не удалось атомарно принять предзагрузку; '
+                'продолжаю обычной загрузкой…')
+            return
+
+        try:
+            remove_owned_snapshot(result.path)
+        except ProcessFetchError:
+            # final is already atomically linked and indexed. Keep the valid
+            # snapshot; app-root-scoped orphan cleanup retries temp removal on
+            # the next run rather than discarding a proven final snapshot.
+            perf_event(root, 'process.prefetch', 'temp_cleanup_deferred',
+                       source_index=ids.index(next_fid) + 1)
         prefetched_downloads[next_fid] = (final, result.digest, details)
         process_prefetch_downloads += 1
         if result.child_cpu_s is not None:
