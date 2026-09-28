@@ -132,13 +132,17 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
         selected = [dict(id=row["id"], date="") for row in chosen_rows]
         calls = []
         fetch = self.fake_fetch(calls)
-        env = {"AKUZ_PHASE11_PROCESS_PREFETCH": "1" if process else "0"}
-        with patch.dict(os.environ, env),              patch("akuz_app.source_config", return_value=self.config(root)),              patch("akuz_app.source_list",
+        env = ({} if process is None else
+               {"AKUZ_PHASE11_PROCESS_PREFETCH": "1" if process else "0"})
+        with patch.dict(os.environ, env):
+            if process is None:
+                os.environ.pop("AKUZ_PHASE11_PROCESS_PREFETCH", None)
+            with patch("akuz_app.source_config", return_value=self.config(root)),              patch("akuz_app.source_list",
                    side_effect=lambda cfg, source, notify:
-                       [dict(row) for row in rows]),              patch("akuz_app.ProcessFetch", process_class):
-            akuz_app.perform_build(
-                root, state, selected, fetch_fn=fetch,
-                refresh_remote=True, use_derived_spool=True)
+                       [dict(row) for row in rows]),                 patch("akuz_app.ProcessFetch", process_class):
+                akuz_app.perform_build(
+                    root, state, selected, fetch_fn=fetch,
+                    refresh_remote=True, use_derived_spool=True)
         return state.result, calls
 
     def signatures(self, root):
@@ -146,6 +150,24 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             inventory_manifest(root),
             semantic_sql(root),
             semantic_exports(root))
+
+    def test_linux_multisource_prefetch_is_enabled_by_default(self):
+        with TemporaryDirectory(prefix="akuz_p11_app_default_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+
+            FakeProcessFetch.reset()
+            result, calls = self.build(root, rows, process=None)
+
+            self.assertEqual(calls, [rows[0]["name"]])
+            self.assertEqual(
+                FakeProcessFetch.starts,
+                [rows[1]["name"], rows[2]["name"]])
+            self.assertEqual(FakeProcessFetch.max_active, 1)
+            self.assertEqual(FakeProcessFetch.active, 0)
+            self.assertFalse(result["reused"])
+            self.assertIsNotNone(result["combined"])
 
     def test_fresh_three_source_process_prefetch_matches_serial_semantics(self):
         with TemporaryDirectory(prefix="akuz_p11_app_fresh_") as td:
