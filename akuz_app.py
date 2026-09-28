@@ -511,7 +511,8 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             f'{current_index:04d}_{next_fid[:18]}.log')
         operation = ProcessFetch(
             process_ctx, ssh_fetch_child, (cfg, next_remote), target,
-            poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10)
+            poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10,
+            expected_listed_bytes=next_remote.get('size'))
         try:
             operation.start()
         except Exception:
