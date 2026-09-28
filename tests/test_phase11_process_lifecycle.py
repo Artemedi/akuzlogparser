@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import multiprocessing
 import os
 import subprocess
@@ -93,9 +94,16 @@ def real_spawn_success_child(destination, sender):
     path = Path(destination)
     payload = b"real windows spawned snapshot"
     path.write_bytes(payload)
-    sender.send(("ok", str(path), "e" * 64, len(payload), .01, .01,
-                 {"active": False, "stored_bytes": len(payload)}))
+    sender.send((
+        "ok", str(path), hashlib.sha256(payload).hexdigest(),
+        len(payload), .01, .01,
+        {"active": False, "stored_bytes": len(payload)}))
     sender.close()
+
+
+def real_spawn_crash_child(destination, sender):
+    Path(destination).write_bytes(b"partial before crash")
+    os._exit(91)
 
 
 def real_spawn_hanging_child(destination, sender):
@@ -120,14 +128,15 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             payload = b"complete snapshot"
             receiver = FakeReceiver()
             child = FakeChild(on_start=lambda: dest.write_bytes(payload))
+            digest = hashlib.sha256(payload).hexdigest()
             receiver.message = (
-                "ok", str(dest), "a" * 64, len(payload), .25, 1.5)
+                "ok", str(dest), digest, len(payload), .25, 1.5)
             op, ctx = self.make(root, receiver, child)
             with op:
                 result = op.finish()
             self.assertEqual(result.path, dest)
             self.assertEqual(result.bytes, len(payload))
-            self.assertEqual(result.digest, "a" * 64)
+            self.assertEqual(result.digest, digest)
             self.assertGreaterEqual(result.ready_latency_s, 0)
             self.assertTrue(dest.is_file())
             self.assertFalse(child.terminated)
@@ -158,6 +167,23 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                 "ok", str(dest), "Z" * 64, len(payload), .2, .5)
             op, _ = self.make(root, receiver, child)
             with self.assertRaisesRegex(ProcessFetchError, "digest invalid"):
+                with op:
+                    op.finish()
+            self.assertFalse(dest.exists())
+
+    def test_same_size_wrong_checksum_is_rejected_and_cleaned(self):
+        with TemporaryDirectory(prefix="akuz_process_fetch_hash_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            payload = b"complete snapshot"
+            receiver = FakeReceiver()
+            child = FakeChild(on_start=lambda: dest.write_bytes(payload))
+            receiver.message = (
+                "ok", str(dest), hashlib.sha256(b"different").hexdigest(),
+                len(payload), .2, .5)
+            op, _ = self.make(root, receiver, child)
+            with self.assertRaisesRegex(
+                    ProcessFetchError, "checksum mismatch"):
                 with op:
                     op.finish()
             self.assertFalse(dest.exists())
@@ -390,9 +416,28 @@ class RealSpawnLifecycleTests(unittest.TestCase):
             with op:
                 result = op.finish()
             self.assertEqual(result.path, target)
-            self.assertEqual(result.digest, "e" * 64)
+            self.assertEqual(
+                result.digest,
+                hashlib.sha256(b"real windows spawned snapshot").hexdigest())
             self.assertEqual(result.metadata["active"], False)
             self.assertEqual(target.read_bytes(), b"real windows spawned snapshot")
+
+    def test_real_spawn_child_crash_fails_fast_and_cleans_partial(self):
+        with TemporaryDirectory(prefix="akuz_process_real_crash_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            op = ProcessFetch(
+                multiprocessing.get_context("spawn"),
+                real_spawn_crash_child, (), target,
+                poll_timeout_s=20, join_timeout_s=5, kill_timeout_s=5)
+            started = time.monotonic()
+            with self.assertRaisesRegex(
+                    ProcessFetchError, "child exited before IPC"):
+                with op:
+                    op.finish()
+            self.assertLess(time.monotonic() - started, 10)
+            self.assertFalse(target.exists())
+            self.assertFalse(op.child.is_alive())
 
     def test_real_spawn_parent_abort_terminates_and_cleans_partial(self):
         with TemporaryDirectory(prefix="akuz_process_real_abort_") as td:
