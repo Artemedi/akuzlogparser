@@ -1,7 +1,6 @@
 # Phase 9.4 — remote source identity gate
 
-Status: **SYNTHETIC NORMAL-APP TESTS ADDED; WINDOWS CI AND REAL SSH
-METADATA PROBE PENDING at this checkpoint. No architecture selection.**
+Status: **SYNTHETIC NORMAL-APP SSH IDENTITY PASS; REAL SSH METADATA PROBE IN PROGRESS. No architecture selection.**
 
 Scope is source identity and cache reconciliation only. This document does
 not authorize Tee/B-lite integration, derived-metadata persistence, or a
@@ -52,9 +51,12 @@ Added cases:
    host must be treated as a new source identity; no report IDs may alias
    across hosts.
 
-Acceptance requires the self-hosted Windows regression for exact commit
-`b3851b9b76111e5854fed48ed5942a45b315b17e` to finish SUCCESS. Until then
-these are test definitions, not a passed gate.
+Self-hosted Windows regression for exact commit
+`b3851b9b76111e5854fed48ed5942a45b315b17e` completed SUCCESS:
+[Actions #36382720832](https://github.com/Artemedi/akuzlogparser/actions/runs/36382720832),
+203 Python tests PASS (2 Windows platform skips, 107.681 s), Node browser
+controls PASS and `git diff --check` PASS. The four synthetic normal-app
+SSH identity cases above are therefore a passed regression gate.
 
 ## Real SSH metadata probe
 
