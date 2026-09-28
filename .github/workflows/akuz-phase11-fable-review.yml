@@ -34,8 +34,20 @@ jobs:
             throw 'DBA-008D only'
           }
 
-          $secretFile = 'E:\Software\Project\LogAkusExplorer\secrets\fable.env'
-          if (-not (Test-Path $secretFile)) { throw 'Fable env file not found' }
+          $projectRoot = 'E:\Software\Project\LogAkusExplorer'
+          $secretFile = $null
+          if (Test-Path $projectRoot) {
+            $matches = @(Get-ChildItem $projectRoot -Filter 'fable.env' -File -Recurse -ErrorAction SilentlyContinue)
+            if ($matches.Count -eq 1) {
+              $secretFile = $matches[0].FullName
+              Write-Host 'FABLE_ENV_DISCOVERY=ONE_MATCH'
+            } elseif ($matches.Count -gt 1) {
+              throw ('Multiple fable.env files found: ' + $matches.Count)
+            }
+          }
+          if (-not $secretFile) {
+            throw 'Fable env file not found under project root'
+          }
 
           Get-Content $secretFile | ForEach-Object {
             $line = $_.Trim()
