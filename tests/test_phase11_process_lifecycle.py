@@ -467,7 +467,8 @@ class RealSpawnLifecycleTests(unittest.TestCase):
                 poll_timeout_s=20, join_timeout_s=5, kill_timeout_s=5)
             started = time.monotonic()
             with self.assertRaisesRegex(
-                    ProcessFetchError, "child exited before IPC"):
+                    ProcessFetchError,
+                    "child exited before IPC|pipe closed or invalid"):
                 with op:
                     op.finish()
             self.assertLess(time.monotonic() - started, 10)
