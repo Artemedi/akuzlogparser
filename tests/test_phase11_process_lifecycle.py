@@ -241,15 +241,15 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             payload = b"buffered result"
             receiver = FakeReceiver()
             child = FakeChild(on_start=lambda: dest.write_bytes(payload))
-            child.sentinel = object()
+            # Receiver data must win even if the child has already
+            # exited; finish() no longer depends on a raw process sentinel.
+            child.alive = False
             digest = hashlib.sha256(payload).hexdigest()
             receiver.message = (
                 "ok", str(dest), digest, len(payload), .2, .5)
             op, _ = self.make(root, receiver, child)
-            with patch("akuz_process_fetch.wait_connections",
-                       return_value=[child.sentinel]):
-                with op:
-                    result = op.finish()
+            with op:
+                result = op.finish()
             self.assertEqual(result.digest, digest)
             self.assertTrue(dest.is_file())
 
