@@ -36,6 +36,7 @@ def run():
     from akuz_runtime import app_root
     from akuz_store import load_store, sha256
     from akuz_process_fetch import ProcessFetch
+    from akuz_win_job_spawn import get_job_bound_spawn_context
 
     key = Ed25519PrivateKey.generate()
     message = b'AKUZ portable offline check'
@@ -47,7 +48,7 @@ def run():
         spawn_target = root/'spawn-probe.bin'
         payload_size = len(b'AKUZ portable spawned child')
         with ProcessFetch(
-                multiprocessing.get_context('spawn'), _spawn_probe, (), spawn_target,
+                get_job_bound_spawn_context(), _spawn_probe, (), spawn_target,
                 poll_timeout_s=20, join_timeout_s=10, kill_timeout_s=5,
                 expected_listed_bytes=payload_size,
                 require_kill_job=(os.name == 'nt'),
