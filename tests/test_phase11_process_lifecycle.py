@@ -263,7 +263,9 @@ class SSHChildContractTests(unittest.TestCase):
                 produced.write_bytes(payload)
                 return produced, "d" * 64, details
 
-            with patch("akuz_process_fetch.fetch_selected", side_effect=fake_fetch),                  patch("scripts.phase9_memory.sample",
+            with patch("akuz_process_fetch._arm_parent_watchdog"), \
+                 patch("akuz_process_fetch.fetch_selected", side_effect=fake_fetch), \
+                 patch("scripts.phase9_memory.sample",
                        return_value={"cpu_time_s": .5,
                                      "working_set_bytes": 1,
                                      "private_bytes": 1}):
@@ -288,7 +290,8 @@ class SSHChildContractTests(unittest.TestCase):
             target = root / "prefetch" / "next.log"
             target.parent.mkdir()
             sender = CaptureSender()
-            with patch(
+            with patch("akuz_process_fetch._arm_parent_watchdog"), \
+                 patch(
                     "akuz_process_fetch.fetch_selected",
                     side_effect=RuntimeError("secret payload text")):
                 ssh_fetch_child(
