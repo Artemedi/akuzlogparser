@@ -263,7 +263,7 @@ jobs:
           path. Find concrete reproducible correctness/reliability bugs.
 
           Focus on:
-          - Linux/SSH-only gating and default-on rollback switch;
+          - Windows-client + SSH-source-only gating and default-on rollback switch;
           - stale/warm/mixed cache and no unnecessary refetch;
           - remote growth/rotation/truncation;
           - ordering of temp snapshot, inventory persistence and final rename;
@@ -284,8 +284,9 @@ jobs:
             final as a warm hit would weaken integrity;
           - derived spools are disposable acceleration only. A missing spool
             entry makes _iter_combined_sources parse event_stream normally;
-          - owned prefetch workspaces are purged for every Linux build even when
-            AKUZ_PHASE11_PROCESS_PREFETCH=0.
+          - owned prefetch workspaces are purged for eligible SSH builds even when
+            AKUZ_PHASE11_PROCESS_PREFETCH=0; unsafe cleanup failures are
+            fail-closed and never trigger a second writer.
 
           Previous Fable transaction review returned MODIFY for the
           exists()->replace overwrite race and weak rollback observability.
@@ -306,7 +307,8 @@ jobs:
           integrity.
 
           Current candidate additionally uses inventory-intent-first plus
-          atomic no-overwrite hard-link promotion. An external final cannot
+          atomic no-overwrite hard-link promotion and explicit policy helpers
+          proving Windows client + SSH source are both required. An external final cannot
           be replaced; unsupported hard-link promotion rolls the optimization
           back to historical serial fetch. Earlier real normal-app A/B has
           inventory/analytics parity and portable spawn/smoke passed; both
