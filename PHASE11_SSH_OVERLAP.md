@@ -1,0 +1,113 @@
+# Phase 11 — overlap SSH download and single-report generation
+
+Status: **ISOLATED SCHEDULER + REAL-HARNESS CONTRACT PASS; REAL 23+24 SMOKE RUNNING; NOT PRODUCTION INTEGRATED**.
+
+No normal application scheduler, cache schema, compression default, Phase 9
+architecture, or GitHub Release is changed by this phase.
+
+## Hypothesis
+
+The current normal application processes uncached SSH sources sequentially:
+download source A completely, generate A, then download B, generate B.
+For a multi-source fresh build, some of the SSH wait for source B may be
+hidden behind CPU/report-generation work for the already completed source A.
+
+The proposed Phase 11 shape is deliberately narrow:
+
+1. Fetch A to a **completed bounded local snapshot**.
+2. Start at most one fetch B in a worker.
+3. Parse/generate A on the main thread using only completed A.
+4. Join B; only after B has fully returned may parse/generate B start.
+5. Continue one source ahead. Never parse bytes still arriving over SSH.
+
+This is not streaming an actively growing remote file into the parser.
+
+## Isolated scheduler contract
+
+Module: `scripts/phase11_overlap.py`.
+
+`run_one_ahead()` owns one fetch worker maximum. The first fetch is
+synchronous. It validates that every fetch returned an existing completed
+snapshot associated with the exact expected item before the parser receives
+it. The output order is the input order.
+
+Synthetic contract tests in `tests/test_phase11_overlap.py` cover:
+
+- fetch(B) really starts while parse(A) is still active;
+- parser sees a completed final snapshot, never the caller's `.part`;
+- fetch(B) failure preserves successful parse(A) and never starts C;
+- parse(A) failure joins an already running fetch(B), never parses B/C;
+- output order equals the serial reference;
+- invalid snapshot contract fails closed;
+- empty input is a no-op.
+
+Exact `9cb36b4806d8c6880a3c353bb84dc500c3590e7a`:
+[DBA-008D Actions #36388179105](https://github.com/Artemedi/akuzlogparser/actions/runs/36388179105)
+SUCCESS — **219 Python tests, 2 Windows skips, 105.998 s**,
+Node browser controls PASS, diff-check PASS.
+
+Important limitation: Python `Future.cancel()` cannot forcibly abort a
+fetch that has already started. The prototype therefore joins a running
+fetch before returning a parse error. Immediate network cancellation would
+need a cooperative cancellation contract in the SSH adapter before
+production integration.
+
+## Real SSH smoke harness contract
+
+Harness: `scripts/bench_phase11_ssh_overlap.py`.
+
+It discovers the real 23/24 Sep sources once, freezes each initial byte
+bound + device/inode identity, and explicitly forces SSH compression OFF
+to isolate Phase 11 from Phase 10. A custom fixed-prefix fetch:
+
+- rechecks trusted server path and device/inode;
+- requires current size >= the frozen bound;
+- reads exactly `head -c bound`;
+- computes SHA while writing an owned local snapshot;
+- rechecks device/inode and non-truncation after transfer;
+- deletes a partial local destination on failure.
+
+Each completed snapshot is then passed to the existing
+`akuz_html_explorer.generate()` for a real standalone single report.
+Serial and overlap report directories are compared through deterministic
+file manifests and source SHA equality. Only boolean equality is retained
+in result evidence; source SHA and per-file report hashes are stripped.
+Memory uses sampled process working-set/private bytes during each mode.
+
+Exact harness-contract commit
+`6eba8d455798a236caf21d89afe4e0388d21ca82`:
+[DBA-008D Actions #36388731847](https://github.com/Artemedi/akuzlogparser/actions/runs/36388731847)
+SUCCESS — **223 Python tests, 2 Windows skips, 106.233 s**,
+Node controls PASS, diff-check PASS.
+
+## First real smoke
+
+Workflow:
+[AKUZ Phase 11 real SSH overlap smoke](https://github.com/Artemedi/akuzlogparser/actions/workflows/akuz-phase11-ssh-overlap-smoke.yml).
+
+Scope is only 23+24 Sep, one serial observation followed by one overlap
+observation. All snapshots/reports live under an owned temporary E:-volume
+diagnostics workspace and must be deleted before success. The private JSON
+may retain numeric timings/memory, but raw log/report payloads are not an
+artifact and are not uploaded.
+
+Because mode order is serial then overlap and there is only one observation
+per mode, a successful smoke is **not acceptance evidence**. It may justify
+a balanced replicated benchmark; it cannot justify production scheduler
+changes by itself.
+
+## Production gates still open
+
+Before integrating one-ahead fetch into `perform_build`:
+
+- balanced replicated real measurements, including the 25-Sep large source;
+- process memory and transient disk amplification within limits;
+- cooperative cancellation or an explicitly accepted bounded wait policy;
+- network failure / remote rotation / source truncation while next fetch is
+  in flight;
+- inventory transaction interaction and cache rollback;
+- mixed fresh/warm source cases (do not refetch a ready source);
+- exact single+combined report and analytics semantics;
+- interruption/restart and portable Windows validation.
+
+No production integration is authorized by the smoke alone.
