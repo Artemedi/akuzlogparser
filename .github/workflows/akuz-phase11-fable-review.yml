@@ -105,7 +105,7 @@ jobs:
           def call_fable(label, prompt):
               payload = json.dumps({
                   'model': model,
-                  'max_tokens': 6000,
+                  'max_tokens': 3500,
                   'messages': [{'role': 'user', 'content': prompt}]
               }, ensure_ascii=False).encode('utf-8')
               request_path = None
@@ -163,16 +163,27 @@ jobs:
               return match.group(1)
 
           process_code = Path('akuz_process_fetch.py').read_text(encoding='utf-8')
-          lifecycle_tests = Path(
+          lifecycle_test_source = Path(
               'tests/test_phase11_process_lifecycle.py').read_text(encoding='utf-8')
+          lifecycle_tests = '\n'.join(
+              re.findall(r'^\\s*def (test_[A-Za-z0-9_]+)', lifecycle_test_source, re.M))
 
           app = Path('akuz_app.py').read_text(encoding='utf-8')
-          start = app.index('def _phase11_prefetch_prefix')
-          end = app.index('\ndef perform_build_current', start)
-          app_phase11 = app[start:end]
-          app_tests = Path(
+          gate_start = app.index("    process_flag = ")
+          gate_end = app.index("    (root/'cache').mkdir", gate_start)
+          ops_start = app.index('    def start_next_prefetch')
+          ops_end = app.index('    for idx, fid in enumerate(ids, 1):', ops_start)
+          loop_start = app.index('        prefetch = start_next_prefetch')
+          loop_end = app.index('    combined = None', loop_start)
+          app_phase11 = (
+              app[gate_start:gate_end] + '\n...\n' +
+              app[ops_start:ops_end] + '\n...\n' +
+              app[loop_start:loop_end])
+          app_test_source = Path(
               'tests/test_phase11_normal_app_process_prefetch.py'
           ).read_text(encoding='utf-8')
+          app_tests = '\n'.join(
+              re.findall(r'^\\s*def (test_[A-Za-z0-9_]+)', app_test_source, re.M))
 
           lifecycle_prompt = """
           Independent senior review. This code is proposed as the default
@@ -187,7 +198,7 @@ jobs:
           Evidence: real Windows spawn + forced abort tests pass; packaged
           PyInstaller spawn self-test passes. Treat tests as evidence, not proof.
 
-          Return <=1000 words:
+          Return <=700 words:
           BLOCKERS
           HIGH
           MISSING TESTS
@@ -196,7 +207,7 @@ jobs:
 
           ===== akuz_process_fetch.py =====
           """ + process_code + """
-          ===== lifecycle tests =====
+          ===== lifecycle test names =====
           """ + lifecycle_tests
 
           transaction_prompt = """
@@ -222,7 +233,7 @@ jobs:
           is materially faster; portable spawn/smoke PASS. Persistent B-lite is
           not used and SSH compression remains default OFF.
 
-          Return <=1200 words:
+          Return <=700 words:
           BLOCKERS
           HIGH
           MISSING TESTS
@@ -231,7 +242,7 @@ jobs:
 
           ===== Phase 11 normal-app code =====
           """ + app_phase11 + """
-          ===== normal-app tests =====
+          ===== normal-app test names =====
           """ + app_tests
 
           verdicts = [
