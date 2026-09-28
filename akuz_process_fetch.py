@@ -44,7 +44,8 @@ class ProcessFetch:
 
     def __init__(self, ctx, target, args, destination: Path,
                  *, poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10,
-                 name="akuz-phase11-fetch", require_metrics=False):
+                 name="akuz-phase11-fetch", require_metrics=False,
+                 expected_listed_bytes=None):
         self.ctx = ctx
         self.target = target
         self.args = tuple(args)
@@ -54,6 +55,7 @@ class ProcessFetch:
         self.kill_timeout_s = kill_timeout_s
         self.name = name
         self.require_metrics = require_metrics
+        self.expected_listed_bytes = expected_listed_bytes
         self.receiver = None
         self.child = None
         self.started_at = None
@@ -78,9 +80,22 @@ class ProcessFetch:
             self.receiver = None
             self.child = None
             self.started_at = None
-            self.destination.unlink(missing_ok=True)
+            try:
+                self.destination.unlink(missing_ok=True)
+            except OSError:
+                pass
             raise
-        sender.close()
+        try:
+            sender.close()
+        except BaseException:
+            try:
+                self.abort()
+            finally:
+                try:
+                    sender.close()
+                except BaseException:
+                    pass
+            raise
         return self
 
     def finish(self) -> ProcessFetchResult:
@@ -144,6 +159,24 @@ class ProcessFetch:
                         or isinstance(metadata[key], bool)
                         or metadata[key] < 0):
                     raise ProcessFetchError("Process fetch metadata invalid")
+            if self.expected_listed_bytes is not None:
+                expected = self.expected_listed_bytes
+                if (not isinstance(expected, int) or isinstance(expected, bool)
+                        or expected < 0):
+                    raise ProcessFetchError("Process fetch expected size invalid")
+                if metadata.get("listed_bytes") != expected:
+                    raise ProcessFetchError(
+                        "Process fetch listed-size binding mismatch")
+                if metadata.get("stored_bytes") != count:
+                    raise ProcessFetchError(
+                        "Process fetch stored-size binding mismatch")
+                captured = metadata.get("captured_bytes")
+                if not isinstance(captured, int) or captured < count:
+                    raise ProcessFetchError(
+                        "Process fetch captured-size binding mismatch")
+                if metadata.get("active") is False and captured != count:
+                    raise ProcessFetchError(
+                        "Process fetch static snapshot size mismatch")
             if self.require_metrics:
                 if child_cpu is None or child_cpu <= 0:
                     raise ProcessFetchError("Process fetch CPU evidence unavailable")
@@ -187,7 +220,12 @@ class ProcessFetch:
                     self.receiver.close()
                 finally:
                     self.receiver = None
-            self.destination.unlink(missing_ok=True)
+            try:
+                self.destination.unlink(missing_ok=True)
+            except OSError:
+                # Do not mask the original timeout/crash/kill failure on
+                # Windows when another process still has the file open.
+                pass
         if survivor:
             raise ProcessFetchError("Process fetch child could not be terminated")
 
