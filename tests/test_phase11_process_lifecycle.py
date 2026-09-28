@@ -41,12 +41,14 @@ class FakeSender:
 
 class FakeChild:
     def __init__(self, on_start=None, *, exitcode=0,
-                 alive_after_start=False, terminate_stops=True):
+                 alive_after_start=False, terminate_stops=True,
+                 kill_stops=True):
         self.on_start = on_start
         self.exitcode = exitcode
         self.alive = False
         self.alive_after_start = alive_after_start
         self.terminate_stops = terminate_stops
+        self.kill_stops = kill_stops
         self.terminated = False
         self.killed = False
         self.join_calls = 0
@@ -69,7 +71,8 @@ class FakeChild:
 
     def kill(self):
         self.killed = True
-        self.alive = False
+        if self.kill_stops:
+            self.alive = False
 
 
 class FakeContext:
@@ -243,6 +246,35 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             op, _ = self.make(root, receiver, child)
             op.start()
             op.abort()
+            self.assertTrue(child.terminated)
+            self.assertTrue(child.killed)
+            self.assertFalse(dest.exists())
+
+    def test_abort_reaps_already_exited_child(self):
+        with TemporaryDirectory(prefix="akuz_process_fetch_reap_") as td:
+            root = Path(td)
+            receiver = FakeReceiver(ready=False)
+            child = FakeChild(alive_after_start=False)
+            op, _ = self.make(root, receiver, child)
+            op.start()
+            op.abort()
+            self.assertGreaterEqual(child.join_calls, 1)
+
+    def test_abort_reports_child_that_survives_terminate_and_kill(self):
+        with TemporaryDirectory(prefix="akuz_process_fetch_survivor_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            receiver = FakeReceiver(ready=False)
+            child = FakeChild(
+                on_start=lambda: dest.write_bytes(b"partial"),
+                alive_after_start=True,
+                terminate_stops=False,
+                kill_stops=False)
+            op, _ = self.make(root, receiver, child)
+            op.start()
+            with self.assertRaisesRegex(
+                    ProcessFetchError, "could not be terminated"):
+                op.abort()
             self.assertTrue(child.terminated)
             self.assertTrue(child.killed)
             self.assertFalse(dest.exists())
