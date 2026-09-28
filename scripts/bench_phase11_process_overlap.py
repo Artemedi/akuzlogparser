@@ -47,13 +47,18 @@ def _child_fetch(cfg, spec: SourceSpec, destination: str, sender) -> None:
         worker_wall_s = perf_counter() - worker_wall0
         from scripts.phase9_memory import sample
         own = sample(os.getpid())
-        sender.send(("ok", str(snapshot.path), snapshot.digest, snapshot.bytes,
-                     own["cpu_time_s"] if own is not None else None,
-                     worker_wall_s))
+        sender.send_bytes(json.dumps([
+            "ok", str(snapshot.path), snapshot.digest, snapshot.bytes,
+            own["cpu_time_s"] if own is not None else None,
+            worker_wall_s
+        ], ensure_ascii=True, separators=(",", ":")).encode("utf-8"))
     except BaseException as exc:
-        # Local-only IPC. Never print remote identity or credentials.
+        # Local-only bounded JSON IPC. Never print remote identity or credentials.
         try:
-            sender.send(("error", type(exc).__name__))
+            sender.send_bytes(json.dumps(
+                ["error", type(exc).__name__],
+                ensure_ascii=True, separators=(",", ":")
+            ).encode("utf-8"))
         except BaseException:
             pass
         raise
