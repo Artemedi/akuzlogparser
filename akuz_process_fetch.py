@@ -311,7 +311,17 @@ class ProcessFetch:
         return self.start()
 
     def __exit__(self, exc_type, exc, tb):
-        self.close()
+        if exc_type is None:
+            self.close()
+        else:
+            try:
+                self.close()
+            except Exception:
+                # Preserve the original parse/report failure. Any app-scoped
+                # prefetch temp left by an exceptional OS teardown is purged
+                # by the next build's orphan cleanup.
+                pass
+        return False
 
 
 def remove_owned_snapshot(path: Path, *, attempts=40, delay_s=0.10):
