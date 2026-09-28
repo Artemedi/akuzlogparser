@@ -2788,3 +2788,45 @@ strict original-source hash on warm reuse, while
 report IDs, SQL/JS semantics and spool cleanup remain
 identical. The default mode is NOT upgraded to strict
 verification by this work.
+
+## Phase 9.4 remote SSH identity and metadata probe (2026-09-28)
+
+No production architecture change. Added synthetic normal-app
+SSH identity regression `tests/test_phase94_remote_source_identity.py`:
+same bytes/different remote paths remain independent; old browser
+selection reconciles remote growth; device/inode rotation fails before
+fetch while preserving reports/downloads/analytics; same remote path
+under another configured SSH host creates a distinct identity.
+Windows DBA-008D exact `b3851b9`,
+[Actions #36382720832](https://github.com/Artemedi/akuzlogparser/actions/runs/36382720832):
+203 Python tests PASS, 2 Windows skips, 107.681 s; Node controls
+PASS, diff-check PASS.
+
+Separate real read-only SSH metadata workflow
+`.github/workflows/akuz-phase94-ssh-metadata.yml` performs two
+server directory listings only. Corrected exact `7da765e`,
+[Actions #36382815851](https://github.com/Artemedi/akuzlogparser/actions/runs/36382815851)
+SUCCESS: target 23/24/25 Sep files were uniquely present,
+server device/inode available, id/path/size/mtime/device/inode
+stable across the two listings, paths remained within configured
+remote root. No `.log` payload fetched and no host/path/inode/digest
+printed.
+
+Current remote byte sizes: 171,378,567 / 140,361,291 /
+644,567,384 B. The earlier frozen exact-real benchmark source
+for 25 Sep was 644,034,993 B, so current remote 25-Sep is
+532,391 B larger. Therefore current remote identity is NOT the
+old frozen exact-SHA dataset; future real gates must create a new
+snapshot and SHA evidence rather than reusing old performance labels.
+
+The first metadata workflow commit `a35cfb5` had invalid YAML
+here-string indentation and failed before any job; it is not SSH
+evidence. A temporary GitHub-hosted synthetic safety workflow also
+failed before test steps and was removed after the self-hosted
+Windows PASS; it is not counted as code-test evidence.
+
+OPEN: remote same-size/same-mtime/same-inode content rewrite is not
+cryptographically detected by metadata identity; server-side full SHA
+would impose remote I/O/CPU and has NOT been enabled. Network-loss,
+process-kill/power-loss and integrated Tee/B-lite publication remain
+separate acceptance gates. Release unchanged.
