@@ -183,7 +183,7 @@ class ProcessFetch:
                     # send_bytes may have completed just before process exit;
                     # preserve a bounded grace for the Pipe buffer to become
                     # visible, but never wait the full operation timeout.
-                    drain = min(2.0, max(0.0, deadline - monotonic()))
+                    drain = min(0.5, max(0.0, deadline - monotonic()))
                     try:
                         if drain > 0 and self.receiver.poll(drain):
                             break
@@ -453,19 +453,50 @@ def _windows_handle_value(handle) -> int:
 
 
 def remove_owned_snapshot(path: Path, *, attempts=100, delay_s=0.10):
-    """Remove one owned temporary snapshot or fail closed if it survives."""
+    """Remove one owned temp file without ever unlinking a replacement.
+
+    A transient Windows lock may require retries. Once the first existing
+    pathname identity is observed, every retry must still refer to that exact
+    filesystem object; if another process replaces the name, cleanup fails
+    unsafe instead of deleting the replacement.
+    """
     target = Path(path)
     last_error = None
+    owned_identity = None
+
     for attempt in range(max(1, attempts)):
         try:
-            target.unlink(missing_ok=True)
-            if not target.exists():
-                return
+            st = target.lstat()
+        except FileNotFoundError:
+            return
         except OSError as exc:
             last_error = exc
+            st = None
+
+        if st is not None:
+            identity = (st.st_dev, st.st_ino, st.st_mode)
+            if owned_identity is None:
+                owned_identity = identity
+            elif identity != owned_identity:
+                raise ProcessFetchUnsafeError(
+                    "Owned process snapshot pathname was replaced")
+
+            try:
+                target.unlink()
+                return
+            except FileNotFoundError:
+                return
+            except OSError as exc:
+                last_error = exc
+
         if attempt + 1 < max(1, attempts):
             sleep(delay_s)
-    if target.exists():
+
+    try:
+        still_exists = target.exists() or target.is_symlink()
+    except OSError:
+        still_exists = True
+    if still_exists:
         raise ProcessFetchUnsafeError(
             "Owned process snapshot could not be removed") from last_error
 
