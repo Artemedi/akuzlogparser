@@ -146,10 +146,11 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 
 ## 8. Следующие независимые улучшения после Phase 9 (НЕ смешивать)
 
-### Phase 10 — SSH compression A/B [OPEN]
-1. На одном неподвижном snapshot SHA измерить compression=0/1 по >=3 чередующимся прогонам с холодным/тёплым файловым кэшем; зафиксировать серверный sshd CPU, клиент CPU, bytes over wire, elapsed и throughput.
-2. Сравнить особенно 644 567 384-byte источник; отдельно оценить риск CPU-давления на сервере приложений и скорость/сжимаемость XML.
-3. При отсутствии стабильного net gain сохранить compression=0 по умолчанию. Не менять семантику snapshot, SHA, stat_before/after.
+### Phase 10 — SSH compression A/B [DONE: REPLICATED BENEFIT; DEFAULT OFF RETAINED]
+1. Выполнены три real-source fixed-prefix серии 3 control + 3 compressed в balanced order на 23/24/25 Sep: 171,378,567 / 140,361,291 / 644,567,384 B. Во всех сериях 6/6 client SHA одинаковы внутри fixed prefix; device/inode + non-truncation gates PASS.
+2. Compression уменьшил date-level median wall на 67.6–71.0% и client socket RX на 72.1–76.9%; client process CPU снизился на 46.0–50.4%. Цена: measured parent sshd CPU вырос примерно в 5.2–6.1 раза; для 25 Sep 2.72 -> 16.59 CPU s при 19.27 s compressed wall. Actions: #36384569840, #36387434198, #36384825633; independent numeric audit all three #36387735730 PASS.
+3. Серверный page cache не сбрасывался: это alternating natural-cache evidence, НЕ cold-cache claim. Сбрасывать cache production application server ради benchmark не разрешено и не требуется для принятого решения.
+4. Решение Phase 10: `compression=false` оставить default; `compression=true` — документированный opt-in при доказанном network/transfer bottleneck и CPU headroom на сервере. Не включать автоматически по размеру файла. Snapshot/SHA/stat_before/after semantics и Release не изменены. Подробнее: PHASE10_SSH_COMPRESSION.md.
 
 ### Phase 11 — перекрытие SSH download и parse [OPEN]
 1. Проверить конвейер A download → parse(A) параллельно download(B), НЕ чтение растущего активного файла без законченного snapshot.
