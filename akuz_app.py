@@ -338,6 +338,36 @@ def _cleanup_phase11_prefetch_orphans(root: Path, local_dest: Path) -> int:
     return removed
 
 
+def _phase11_process_requested(env=None) -> bool:
+    """Parse the default-on rollback switch; explicit empty is invalid."""
+    values = os.environ if env is None else env
+    name = 'AKUZ_PHASE11_PROCESS_PREFETCH'
+    if name not in values:
+        return True
+    flag = str(values[name]).strip().lower()
+    if flag in ('1', 'true', 'yes', 'on'):
+        return True
+    if flag in ('0', 'false', 'no', 'off'):
+        return False
+    raise FetchError('Неверное значение AKUZ_PHASE11_PROCESS_PREFETCH')
+
+
+def _phase11_process_allowed(process_requested, source, selections,
+                             fetch_fn, gen_fn, client_os=None) -> bool:
+    """Production Phase 11 policy.
+
+    source == 'linux' is the SSH-to-Linux-server adapter label. The accepted
+    multiprocessing runtime is Windows portable only because hard parent-exit
+    containment requires a KILL_ON_JOB_CLOSE Job Object.
+    """
+    platform = os.name if client_os is None else client_os
+    return (
+        bool(process_requested) and platform == 'nt'
+        and source == 'linux' and len(selections) > 1
+        and getattr(fetch_fn, '_akuz_process_prefetch_compatible', False)
+        and gen_fn is generate)
+
+
 def perform_build(root: Path, state: State, selections,
                   fetch_fn=fetch_selected, gen_fn=generate, refresh_remote=False,
                   use_derived_spool=None):
@@ -352,28 +382,12 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
                   use_derived_spool=None):
     if use_derived_spool is None:
         use_derived_spool = os.environ.get('AKUZ_PHASE9_DERIVED_SPOOL', '1').strip().lower() not in ('0', 'false', 'no', 'off')
-    process_env = 'AKUZ_PHASE11_PROCESS_PREFETCH'
-    if process_env in os.environ:
-        process_flag = os.environ[process_env].strip().lower()
-        valid_flags = ('0', 'false', 'no', 'off', '1', 'true', 'yes', 'on')
-        if process_flag not in valid_flags:
-            raise FetchError('Неверное значение AKUZ_PHASE11_PROCESS_PREFETCH')
-    else:
-        process_flag = '1'
+    process_requested = _phase11_process_requested()
     with state.lock:
         source = state.source
         local_path = state.local_path
-    process_requested = process_flag in ('1', 'true', 'yes', 'on')
-    # state.source == 'linux' names the SSH-to-Linux-server adapter; it is
-    # NOT the client operating system. Phase 11 production acceptance is for
-    # the Windows portable runtime only because its hard-exit guarantee uses
-    # a mandatory KILL_ON_JOB_CLOSE Job Object. Linux/macOS clients retain
-    # the historical serial SSH scheduler.
-    process_allowed = (
-        process_requested and os.name == 'nt'
-        and source == 'linux' and len(selections) > 1
-        and getattr(fetch_fn, '_akuz_process_prefetch_compatible', False)
-        and gen_fn is generate)
+    process_allowed = _phase11_process_allowed(
+        process_requested, source, selections, fetch_fn, gen_fn)
 
     (root/'cache').mkdir(parents=True, exist_ok=True)
     with ExitStack() as stack:
