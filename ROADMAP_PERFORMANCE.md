@@ -152,7 +152,7 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 3. Серверный page cache не сбрасывался: это alternating natural-cache evidence, НЕ cold-cache claim. Сбрасывать cache production application server ради benchmark не разрешено и не требуется для принятого решения.
 4. Решение Phase 10: `compression=false` оставить default; `compression=true` — документированный opt-in при доказанном network/transfer bottleneck и CPU headroom на сервере. Не включать автоматически по размеру файла. Snapshot/SHA/stat_before/after semantics и Release не изменены. Подробнее: PHASE10_SSH_COMPRESSION.md.
 
-### Phase 11 — перекрытие SSH download и parse [THREAD REJECTED; PROCESS PAIR PASS; LARGE-SOURCE GATE OPEN]
+### Phase 11 — перекрытие SSH download и parse [THREAD REJECTED; PROCESS 23+24+25 BENCHMARK PASS; v4.7 RUNTIME DEFERRED]
 1. Проверить конвейер A download → parse(A) параллельно download(B), НЕ чтение растущего активного файла без законченного snapshot.
 2. Измерять wall, CPU/IO конкуренцию, RSS, SSH стабильность, rollback, отмену, отсутствие разных версий одной и той же копии.
 3. Учитывать, что текущий `perform_build` последователен; не вносить scheduler + cache rewrite в один commit.
@@ -161,6 +161,10 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 
 
 **2026-09-28 process-isolated pair result (corrected instrumentation):** separate benchmark-only candidate moves only the next SSH fetch to one spawned Windows Python process. Initial 23+24 balanced run showed wall benefit but mislabeled parent readiness latency as fetch wall; that causal slowdown claim is retracted. Correction `be7b332` + `57e482f` passed exact Windows 231 Python tests (2 skips), Node/diff PASS (#36397172147). New immutable corrected real run `serial, process, process, serial` Actions #36403656948 exact workflow `27ef63f` plus audit #36403687747 exact `c1e8512`: source SHA/report parity + cleanup PASS. Serial wall 100.777862/101.672542 s (median 101.225202); process 88.732724/92.426783 s (median 90.579754), ~10.5% faster, while total CPU median rises 61.351562 → 70.390625 s (~14.7%). Pure process child fetch(B) 19.953724/18.679295 s versus serial 16.589666/22.345354 s; process readiness 32.732658/31.004642 s. Candidate advances only to bounded 23+24+25 large-source/multi-source gate; normal app integration, cancellation/failure matrix and portable remain OPEN. See `PHASE11_SSH_OVERLAP.md`.
+**2026-09-28 process-isolated 23+24+25 large result:** exact contract `89daa2a` Windows 234 Python PASS (2 skips), Node/diff PASS. Balanced real workflow `dd6f219` / Actions #36406239299 + audit `9ad19ac` / #36406284302 SUCCESS on fixed 171,378,567 / 140,361,291 / 644,567,384 B prefixes, source SHA/report parity/cleanup PASS. Serial wall median 269.684097 s; process 215.883610 s (~19.9% faster); total CPU median 138.671875 -> 162.539062 s (~17.2% higher). Candidate is benchmark-positive but **deferred from v4.7 runtime**: normal app keeps sequential fetch + validated ephemeral derived spool. Cancellation/failure/mixed-cache/inventory/restart/portable integration gates move to post-v4.7 research. See `PHASE11_SSH_OVERLAP.md`.
+
+**v4.7 release scope freeze:** Phase 12–16 remain future independent research and are NOT release blockers. v4.7 contains only already validated production-path changes; experimental delta/resume, SQLite rewrite, browser virtualization and process scheduler are excluded.
+
 ### Phase 12 — delta/resume для удалённого .log [OPEN, повышенный риск]
 1. Разделить append-only активный журнал, удалённый архив, новый файл с тем же именем, truncated/replaced/rotated file.
 2. Доказать идентичность сохранённого префикса криптографически/надёжными сегментами, проверять before/after stat, дату, inode/identity по доступности, file size и границу multiline; делать atomic commit offset **только после** успешной фиксации полного снимка/отчёта.
