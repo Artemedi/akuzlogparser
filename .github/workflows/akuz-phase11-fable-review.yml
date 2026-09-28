@@ -268,8 +268,22 @@ jobs:
           calls CreateProcess with bInheritHandles=False. The child duplicates
           the read handle from the parent; Popen.duplicate_for_child delegates
           to reduction.duplicate(handle, self.sentinel). Therefore do NOT
-          report bInheritHandles=False itself as a pipe-inheritance blocker;
-          compare JobBoundPopen against that CPython 3.11 duplication contract.
+          report bInheritHandles=False itself as a pipe-inheritance blocker.
+          Also, authoritative CPython 3.11 popen_spawn_win32 builds the command
+          line with exactly:
+              cmd = ' '.join('"%s"' % x for x in cmd)
+          It does NOT use subprocess.list2cmdline there. Do not report our same
+          quoting expression as a divergence from CPython 3.11.
+
+          Latest lifecycle hardening after the prior review:
+          - CreateProcess failure before hp exists closes the empty Job owner;
+          - snapshot hashing is bound to one open descriptor identity and
+            rejects same-size pathname replacement;
+          - cleanup retries bind to the initially observed filesystem identity
+            and fail unsafe rather than unlinking a replacement pathname;
+          - child-exit late-IPC grace is 0.5 s and is additionally capped by
+            the remaining overall poll_timeout deadline;
+          - supported portable target is Windows x64 only.
 
           Treat regression evidence as evidence, not proof. Re-check the
           implementation rather than trusting this summary.
