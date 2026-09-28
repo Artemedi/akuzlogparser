@@ -291,10 +291,9 @@ class SSHChildContractTests(unittest.TestCase):
             with patch(
                     "akuz_process_fetch.fetch_selected",
                     side_effect=RuntimeError("secret payload text")):
-                with self.assertRaisesRegex(RuntimeError, "secret payload text"):
-                    ssh_fetch_child(
-                        self.cfg(root), {"path": "/srv/akuz/a.log"},
-                        str(target), sender)
+                ssh_fetch_child(
+                    self.cfg(root), {"path": "/srv/akuz/a.log"},
+                    str(target), sender)
             self.assertTrue(sender.closed)
             self.assertEqual(sender.messages, [("error", "RuntimeError")])
             self.assertFalse(target.exists())
