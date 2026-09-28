@@ -10,7 +10,6 @@ from pathlib import Path
 import hashlib
 import json
 import os
-import pickle
 import re
 import threading
 from multiprocessing import parent_process
@@ -20,6 +19,11 @@ from akuz_fetch import fetch_selected
 
 
 class ProcessFetchError(RuntimeError):
+    pass
+
+
+class ProcessFetchUnsafeError(ProcessFetchError):
+    """Cleanup/lifecycle failure where serial fallback is unsafe."""
     pass
 
 
@@ -46,7 +50,7 @@ class ProcessFetch:
                  *, poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10,
                  name="akuz-phase11-fetch", require_metrics=False,
                  expected_listed_bytes=None, require_kill_job=False,
-                 safe_ipc=False):
+                 safe_ipc=True):
         self.ctx = ctx
         self.target = target
         self.args = tuple(args)
@@ -58,16 +62,15 @@ class ProcessFetch:
         self.require_metrics = require_metrics
         self.expected_listed_bytes = expected_listed_bytes
         self.require_kill_job = require_kill_job
-        self.safe_ipc = safe_ipc
+        if safe_ipc is not True:
+            raise ProcessFetchError("Process fetch requires bounded JSON IPC")
+        self.safe_ipc = True
         if require_kill_job:
             if (not isinstance(expected_listed_bytes, int)
                     or isinstance(expected_listed_bytes, bool)
                     or expected_listed_bytes < 0):
                 raise ProcessFetchError(
                     "Production Job prefetch requires listed-size binding")
-            if not safe_ipc:
-                raise ProcessFetchError(
-                    "Production Job prefetch requires safe IPC")
         self.receiver = None
         self._start_gate = None
         self._kill_job = None
@@ -135,10 +138,17 @@ class ProcessFetch:
             raise
         return self
 
+    def _release_kill_job(self):
+        if self._kill_job is None:
+            return
+        _close_windows_handle(self._kill_job)
+        self._kill_job = None
+
     def finish(self) -> ProcessFetchResult:
         if self.child is None or self.receiver is None or self.started_at is None:
             raise RuntimeError("ProcessFetch not started")
         message = None
+        primary_error = None
         try:
             deadline = monotonic() + self.poll_timeout_s
             while True:
@@ -151,29 +161,14 @@ class ProcessFetch:
                 except (EOFError, OSError) as exc:
                     raise ProcessFetchError(
                         "Process fetch pipe closed or invalid") from exc
-                if not self.child.is_alive():
-                    self.child.join(timeout=0)
-                    # One short final drain covers a child that flushed IPC
-                    # immediately before exiting without depending on the
-                    # platform-specific multiprocessing sentinel handle.
-                    try:
-                        if self.receiver.poll(min(0.10, max(0.0, remaining))):
-                            break
-                    except (EOFError, OSError) as exc:
-                        raise ProcessFetchError(
-                            "Process fetch pipe closed or invalid") from exc
-                    raise ProcessFetchError(
-                        "Process fetch child exited before IPC result")
+
             try:
-                if self.safe_ipc:
-                    raw = self.receiver.recv_bytes(maxlength=8192)
-                    message = json.loads(raw.decode("utf-8"))
-                else:
-                    message = self.receiver.recv()
-            except (EOFError, OSError, pickle.UnpicklingError,
-                    UnicodeDecodeError, ValueError) as exc:
+                raw = self.receiver.recv_bytes(maxlength=8192)
+                message = json.loads(raw.decode("utf-8"))
+            except (EOFError, OSError, UnicodeDecodeError, ValueError) as exc:
                 raise ProcessFetchError(
                     "Process fetch pipe closed or invalid") from exc
+
             self.child.join(timeout=self.join_timeout_s)
             if self.child.is_alive():
                 raise TimeoutError("Process fetch did not exit")
@@ -182,13 +177,16 @@ class ProcessFetch:
                 raise ProcessFetchError("Process fetch failed: " + str(kind))
             if len(message) not in (6, 7):
                 raise ProcessFetchError("Process fetch IPC shape invalid")
+
             _, returned_path, digest, count, child_cpu, child_fetch_wall = message[:6]
             metadata = message[6] if len(message) == 7 else {}
             if not isinstance(metadata, dict):
                 raise ProcessFetchError("Process fetch metadata invalid")
+
             returned = Path(returned_path)
-            if returned.resolve() != self.destination.resolve():
-                raise ProcessFetchError("Process fetch returned unexpected snapshot path")
+            if not _same_path(returned, self.destination):
+                raise ProcessFetchError(
+                    "Process fetch returned unexpected snapshot path")
             if (not isinstance(count, int) or isinstance(count, bool)
                     or count < 0):
                 raise ProcessFetchError("Process fetch size invalid")
@@ -199,12 +197,15 @@ class ProcessFetch:
                 raise ProcessFetchError("Process fetch digest invalid")
             actual_digest = _sha256_file(returned)
             if actual_digest != digest:
-                raise ProcessFetchError("Process fetch snapshot checksum mismatch")
+                raise ProcessFetchError(
+                    "Process fetch snapshot checksum mismatch")
+
             allowed_metadata = {
                 "active", "captured_bytes", "stored_bytes",
                 "dropped_tail_bytes", "listed_bytes"}
             if any(key not in allowed_metadata for key in metadata):
-                raise ProcessFetchError("Process fetch metadata contains unknown fields")
+                raise ProcessFetchError(
+                    "Process fetch metadata contains unknown fields")
             if "active" in metadata and not isinstance(metadata["active"], bool):
                 raise ProcessFetchError("Process fetch active flag invalid")
             for key in allowed_metadata - {"active"}:
@@ -213,11 +214,13 @@ class ProcessFetch:
                         or isinstance(metadata[key], bool)
                         or metadata[key] < 0):
                     raise ProcessFetchError("Process fetch metadata invalid")
+
             if self.expected_listed_bytes is not None:
                 expected = self.expected_listed_bytes
                 if (not isinstance(expected, int) or isinstance(expected, bool)
                         or expected < 0):
-                    raise ProcessFetchError("Process fetch expected size invalid")
+                    raise ProcessFetchError(
+                        "Process fetch expected size invalid")
                 if metadata.get("listed_bytes") != expected:
                     raise ProcessFetchError(
                         "Process fetch listed-size binding mismatch")
@@ -231,41 +234,80 @@ class ProcessFetch:
                 if metadata.get("active") is False and captured != count:
                     raise ProcessFetchError(
                         "Process fetch static snapshot size mismatch")
+
             if self.require_metrics:
                 if child_cpu is None or child_cpu <= 0:
-                    raise ProcessFetchError("Process fetch CPU evidence unavailable")
+                    raise ProcessFetchError(
+                        "Process fetch CPU evidence unavailable")
                 if child_fetch_wall is None or child_fetch_wall <= 0:
-                    raise ProcessFetchError("Process fetch wall evidence unavailable")
+                    raise ProcessFetchError(
+                        "Process fetch wall evidence unavailable")
+
             result = ProcessFetchResult(
                 path=returned,
                 digest=digest,
                 bytes=count,
                 child_cpu_s=(None if child_cpu is None else float(child_cpu)),
-                child_fetch_wall_s=(None if child_fetch_wall is None else float(child_fetch_wall)),
+                child_fetch_wall_s=(
+                    None if child_fetch_wall is None
+                    else float(child_fetch_wall)),
                 ready_latency_s=perf_counter() - self.started_at,
                 metadata=dict(metadata))
+
+            # Direct start()/finish() is a supported lifecycle. Do not rely on
+            # caller close()/context-manager exit to release the Job handle.
+            self._release_kill_job()
+            self._start_gate = None
             self._success = True
             return result
+        except BaseException as exc:
+            primary_error = exc
+            raise
         finally:
             receiver = self.receiver
             self.receiver = None
             if receiver is not None:
                 try:
                     receiver.close()
-                except OSError:
-                    # Pipe teardown must never skip process/file cleanup.
-                    pass
+                except OSError as close_exc:
+                    if primary_error is not None:
+                        try:
+                            primary_error.add_note(
+                                "Phase 11 pipe close also failed: " +
+                                type(close_exc).__name__)
+                        except BaseException:
+                            pass
             if not self._success:
-                self.abort()
+                try:
+                    self.abort()
+                except ProcessFetchUnsafeError:
+                    # A live child or unclosed Job makes serial fallback unsafe.
+                    raise
+                except Exception as cleanup_exc:
+                    # Preserve the original fetch/timeout failure as the main
+                    # diagnostic while still surfacing secondary cleanup facts.
+                    if primary_error is None:
+                        raise
+                    try:
+                        primary_error.add_note(
+                            "Phase 11 cleanup also failed: " +
+                            type(cleanup_exc).__name__ + ": " +
+                            str(cleanup_exc))
+                    except BaseException:
+                        pass
 
     def abort(self):
         child = self.child
         survivor = False
+        unsafe_error = None
+        pipe_error = None
         try:
             if child is not None:
                 if child.is_alive() and self._kill_job is not None:
-                    _close_windows_handle(self._kill_job)
-                    self._kill_job = None
+                    try:
+                        self._release_kill_job()
+                    except Exception as exc:
+                        unsafe_error = exc
                     child.join(timeout=self.kill_timeout_s)
                 if child.is_alive():
                     child.terminate()
@@ -275,26 +317,36 @@ class ProcessFetch:
                     child.join(timeout=self.kill_timeout_s)
                 survivor = child.is_alive()
                 if not survivor:
-                    # Reap an already-exited child as well; do not leave a
-                    # zombie/process handle solely because is_alive() was false.
                     child.join(timeout=0)
         finally:
             if self._kill_job is not None:
-                _close_windows_handle(self._kill_job)
-                self._kill_job = None
+                try:
+                    self._release_kill_job()
+                except Exception as exc:
+                    if unsafe_error is None:
+                        unsafe_error = exc
             self._start_gate = None
             if self.receiver is not None:
                 try:
                     self.receiver.close()
+                except OSError as exc:
+                    pipe_error = exc
                 finally:
                     self.receiver = None
+
         if survivor:
-            raise ProcessFetchError("Process fetch child could not be terminated")
-        # Only remove the owned file after the child/tree has been reaped and
-        # the kill Job Object handle has been closed. On Windows an exiting
-        # process may release its file handle a few milliseconds after join;
-        # retry rather than silently leaving a partial snapshot behind.
+            raise ProcessFetchUnsafeError(
+                "Process fetch child could not be terminated") from unsafe_error
+        if unsafe_error is not None:
+            raise ProcessFetchUnsafeError(
+                "Process fetch Windows Job handle could not be closed"
+            ) from unsafe_error
+
+        # Only remove the owned file after the child/tree has been reaped.
         remove_owned_snapshot(self.destination)
+        if pipe_error is not None:
+            raise ProcessFetchError(
+                "Process fetch pipe could not be closed") from pipe_error
 
     def close(self):
         if not self._success:
@@ -302,26 +354,33 @@ class ProcessFetch:
         if self.receiver is not None:
             self.receiver.close()
             self.receiver = None
-        if self._kill_job is not None:
-            _close_windows_handle(self._kill_job)
-            self._kill_job = None
+        self._release_kill_job()
         self._start_gate = None
 
     def __enter__(self):
         return self.start()
 
     def __exit__(self, exc_type, exc, tb):
-        if exc_type is None:
-            self.close()
-        else:
-            try:
-                self.close()
-            except Exception:
-                # Preserve the original parse/report failure. Any app-scoped
-                # prefetch temp left by an exceptional OS teardown is purged
-                # by the next build's orphan cleanup.
-                pass
+        # Do not hide cleanup failure while another exception is active.
+        # Python exception chaining preserves the original failure as context.
+        self.close()
         return False
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    left_value = os.path.normcase(os.path.normpath(str(Path(left).resolve())))
+    right_value = os.path.normcase(os.path.normpath(str(Path(right).resolve())))
+    return left_value == right_value
+
+
+def _windows_handle_value(handle) -> int:
+    value = getattr(handle, "value", handle)
+    if value is None:
+        raise ProcessFetchUnsafeError("Windows handle value unavailable")
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ProcessFetchUnsafeError("Windows handle value invalid") from exc
 
 
 def remove_owned_snapshot(path: Path, *, attempts=40, delay_s=0.10):
@@ -439,7 +498,7 @@ def _create_kill_on_close_job(child):
         if not kernel32.AssignProcessToJobObject(handle, process_handle):
             raise ProcessFetchError(
                 "Could not assign prefetch child to Windows kill Job Object")
-        return int(handle)
+        return _windows_handle_value(handle)
     except BaseException:
         _close_windows_handle(handle)
         raise
@@ -456,7 +515,9 @@ def _close_windows_handle(handle):
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel32.CloseHandle.restype = wintypes.BOOL
-    kernel32.CloseHandle(wintypes.HANDLE(int(handle)))
+    value = _windows_handle_value(handle)
+    if not kernel32.CloseHandle(wintypes.HANDLE(value)):
+        raise ProcessFetchUnsafeError("Could not close Windows handle")
 
 
 def _arm_parent_watchdog():
