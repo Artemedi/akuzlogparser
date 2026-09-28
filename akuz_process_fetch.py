@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 import os
+import pickle
+import re
 import threading
 from time import perf_counter, process_time
 
@@ -87,8 +89,8 @@ class ProcessFetch:
                 raise TimeoutError("Process fetch did not return")
             try:
                 message = self.receiver.recv()
-            except EOFError as exc:
-                raise ProcessFetchError("Process fetch pipe closed") from exc
+            except (EOFError, OSError, pickle.UnpicklingError) as exc:
+                raise ProcessFetchError("Process fetch pipe closed or invalid") from exc
             self.child.join(timeout=self.join_timeout_s)
             if self.child.is_alive():
                 raise TimeoutError("Process fetch did not exit")
@@ -106,7 +108,8 @@ class ProcessFetch:
                 raise ProcessFetchError("Process fetch returned unexpected snapshot path")
             if not returned.is_file() or returned.stat().st_size != count:
                 raise ProcessFetchError("Process fetch snapshot incomplete")
-            if not isinstance(digest, str) or len(digest) != 64:
+            if (not isinstance(digest, str) or
+                    re.fullmatch(r"[0-9a-f]{64}", digest) is None):
                 raise ProcessFetchError("Process fetch digest invalid")
             if self.require_metrics:
                 if child_cpu is None or child_cpu <= 0:
@@ -200,7 +203,14 @@ def ssh_fetch_child(cfg, remote: dict, destination: str, sender) -> None:
     target = Path(destination)
     fetched = None
     try:
-        _arm_parent_watchdog()
+        try:
+            _arm_parent_watchdog()
+        except BaseException:
+            # A process-prefetch child without parent-death supervision is not
+            # safe to continue on Windows: it could outlive a hard-exited
+            # portable parent. Exit without emitting remote/path details.
+            sender.close()
+            os._exit(88)
         started = perf_counter()
         cpu_started = process_time()
         child_cfg = replace(cfg, local_dest=target.parent)
@@ -212,9 +222,17 @@ def ssh_fetch_child(cfg, remote: dict, destination: str, sender) -> None:
             fetched.replace(target)
             fetched = target
         cpu = process_time() - cpu_started
+        # IPC carries only bounded snapshot facts. The parent already owns the
+        # trusted remote identity/path and reconstructs it for inventory.
+        safe_details = {
+            key: details[key] for key in (
+                "active", "captured_bytes", "stored_bytes",
+                "dropped_tail_bytes", "listed_bytes")
+            if key in details
+        }
         sender.send((
             "ok", str(target), digest, target.stat().st_size,
-            cpu, perf_counter() - started, details))
+            cpu, perf_counter() - started, safe_details))
     except BaseException as exc:
         try:
             sender.send(("error", type(exc).__name__))
