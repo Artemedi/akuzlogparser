@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from akuz_fetch import load_config
+from akuz_process_fetch import ProcessFetch
 from akuz_html_explorer import generate
 from scripts.bench_phase11_ssh_overlap import (
     SourceSpec, _discover, _fetch_fixed, _report_bytes, _run_mode)
@@ -146,55 +147,25 @@ def _process_pair_mode(cfg, specs: tuple[SourceSpec, ...], root: Path) -> dict:
         fetch_metrics[specs[0].day] = round(perf_counter() - first_start, 6)
         source_sha[specs[0].day] = first.digest
 
-        receiver, sender = ctx.Pipe(duplex=False)
         second_path = snapshots / specs[1].name
-        child = ctx.Process(
-            target=_child_fetch,
-            args=(cfg, specs[1], str(second_path), sender),
-            name="akuz-phase11-fetch")
-        second_start = perf_counter()
-        child.start()
-        sender.close()
-        child_cpu = None
-        child_fetch_wall = None
-        message = None
-        try:
+        with ProcessFetch(
+                ctx, _child_fetch, (cfg, specs[1]), second_path,
+                poll_timeout_s=300, join_timeout_s=20, kill_timeout_s=10
+        ) as prefetch:
             outputs.append(_parse_snapshot(first, reports, parse_metrics))
-            if not receiver.poll(300):
-                raise TimeoutError("Phase 11 process fetch did not return")
-            message = receiver.recv()
-            child.join(timeout=20)
-            if child.is_alive():
-                raise TimeoutError("Phase 11 process fetch did not exit")
-            if child.exitcode != 0 or not message or message[0] != "ok":
-                kind = message[1] if message and message[0] == "error" else "ChildExit"
-                raise RuntimeError("Phase 11 process fetch failed: " + kind)
-            _, returned_path, digest, count, child_cpu, child_fetch_wall = message
-            if Path(returned_path).resolve() != second_path.resolve():
-                raise AssertionError("Phase 11 child returned unexpected snapshot path")
-            second = CompletedSnapshot(
-                item=specs[1], path=second_path, digest=digest, bytes=count)
-            if not second.path.is_file() or second.path.stat().st_size != second.bytes:
-                raise AssertionError("Phase 11 child snapshot incomplete")
-            ready_latency = perf_counter() - second_start
-            if child_fetch_wall is None or child_fetch_wall <= 0:
-                raise AssertionError("Phase 11 child fetch wall evidence unavailable")
-            fetch_metrics[specs[1].day] = round(child_fetch_wall, 6)
-            ready_metrics = {
-                specs[0].day: fetch_metrics[specs[0].day],
-                specs[1].day: round(ready_latency, 6),
-            }
-            source_sha[specs[1].day] = second.digest
-            outputs.append(_parse_snapshot(second, reports, parse_metrics))
-        finally:
-            receiver.close()
-            if child.is_alive():
-                child.terminate()
-                child.join(timeout=10)
-                if child.is_alive():
-                    child.kill()
-                    child.join(timeout=10)
-                second_path.unlink(missing_ok=True)
+            result = prefetch.finish()
+        child_cpu = result.child_cpu_s
+        child_fetch_wall = result.child_fetch_wall_s
+        second = CompletedSnapshot(
+            item=specs[1], path=result.path,
+            digest=result.digest, bytes=result.bytes)
+        ready_metrics = {
+            specs[0].day: fetch_metrics[specs[0].day],
+            specs[1].day: round(result.ready_latency_s, 6),
+        }
+        fetch_metrics[specs[1].day] = round(result.child_fetch_wall_s, 6)
+        source_sha[specs[1].day] = result.digest
+        outputs.append(_parse_snapshot(second, reports, parse_metrics))
 
         wall_s = perf_counter() - started
 
