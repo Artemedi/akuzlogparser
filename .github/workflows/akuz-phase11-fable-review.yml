@@ -163,6 +163,7 @@ jobs:
               return match.group(1)
 
           process_code = Path('akuz_process_fetch.py').read_text(encoding='utf-8')
+          job_spawn_code = Path('akuz_win_job_spawn.py').read_text(encoding='utf-8')
           lifecycle_test_source = Path(
               'tests/test_phase11_process_lifecycle.py').read_text(encoding='utf-8')
           lifecycle_tests = '\n'.join(
@@ -209,26 +210,35 @@ jobs:
           Current hardening to review, not assume correct:
           - parent recomputes SHA-256 over the completed child snapshot;
           - child metadata is bound to parent-owned refreshed listed size;
-          - production Windows prefetch requires a KILL_ON_JOB_CLOSE Job Object;
-          - child I/O is start-gated until Job Object assignment succeeds;
-          - a parent-process watchdog remains defense-in-depth;
+          - production Windows prefetch requires a custom atomic Job-bound
+            spawn context;
+          - that context mirrors CPython spawn but calls CreateProcess with
+            CREATE_SUSPENDED, assigns the exact returned process HANDLE to a
+            KILL_ON_JOB_CLOSE Job Object before ResumeThread, then resumes;
+          - if Job assignment fails, the exact suspended process HANDLE is
+            terminated before cleanup;
+          - ProcessFetch refuses production require_kill_job unless the
+            supplied context advertises atomic Job-bound semantics;
+          - bounded JSON IPC remains the only production child IPC;
           - pipe EOF/OSError/crash paths fail fast and direct abort reaps child.
 
-          Previous Fable reviews BLOCKed older candidates on cleanup,
-          Job/handle lifetime, buffered-IPC timing and pickle IPC.
-          The current candidate now:
+          Previous Fable reviews BLOCKed older candidates because ordinary
+          multiprocessing spawn left a window between child.start() and Job
+          assignment, plus cleanup/handle/IPC issues. The current candidate
+          replaces that production architecture with atomic suspended spawn:
           - uses bounded UTF-8 JSON via send_bytes/recv_bytes for ALL
             ProcessFetch callers; safe_ipc=False is rejected and the module
             has no pickle receive path;
           - production prefetch is restricted to Windows where a
             KILL_ON_JOB_CLOSE Job Object is mandatory;
-          - duplicates the exact multiprocessing spawned process handle with
-            DuplicateHandle(DUPLICATE_SAME_ACCESS) and assigns that exact
-            handle to the Job Object; it does not reopen child.pid and does
-            not rely on sentinel handle rights;
-          - child I/O remains start-gated until Job assignment succeeds;
-          - converts ctypes HANDLEs through their pointer .value and verifies
-            CloseHandle success;
+          - JobBoundPopen owns the exact CreateProcess process/thread handles,
+            assigns the suspended child before any child instruction executes,
+            serializes the normal multiprocessing spawn payload, then resumes;
+          - assignment failure terminates the suspended child directly because
+            the Job does not yet own it;
+          - handle ownership is single-close through _JobOwner + Finalize;
+          - ProcessFetch receives the live Job owner from JobBoundPopen and
+            never performs PID lookup or post-start Job assignment;
           - direct start()/finish() releases the Job handle before success
             returns; context-manager exit does not swallow cleanup failure;
           - uses connection wait/poll logic that keeps the Pipe authoritative
@@ -239,9 +249,11 @@ jobs:
           - raises ProcessFetchUnsafeError for a surviving child or unclosed
             Job handle, and normal-app explicitly forbids serial fallback for
             that unsafe class;
-          - has hard-parent-exit, Job assignment failure, cleanup retry,
-            unsafe-context-exit, late-IPC, handle-width and oversized JSON
-            coverage plus packaged portable JSON-IPC self-check;
+          - has hard-parent-exit immediately after atomic start, suspended
+            Job-assignment failure, cleanup retry, unsafe-context-exit,
+            late-IPC, handle-width and oversized JSON coverage;
+          - packaged portable self-check exercises the atomic Job-bound spawn
+            path rather than only ordinary multiprocessing spawn;
           - production prefetch refuses an unbound/missing listed size.
 
           Treat regression evidence as evidence, not proof. Re-check the
@@ -254,6 +266,8 @@ jobs:
           VERDICT: ACCEPT|MODIFY|BLOCK
           The VERDICT line must be alone on its line.
 
+          ===== akuz_win_job_spawn.py =====
+          """ + job_spawn_code + """
           ===== akuz_process_fetch.py =====
           """ + process_code + """
           ===== lifecycle test names =====
