@@ -360,7 +360,8 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
         local_path = state.local_path
     process_requested = process_flag in ('1', 'true', 'yes', 'on')
     process_allowed = (
-        process_requested and source == 'linux' and len(selections) > 1
+        process_requested and os.name == 'nt'
+        and source == 'linux' and len(selections) > 1
         and getattr(fetch_fn, '_akuz_process_prefetch_compatible', False)
         and gen_fn is generate)
 
