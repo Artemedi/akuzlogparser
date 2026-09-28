@@ -572,7 +572,7 @@ class SSHChildContractTests(unittest.TestCase):
                     self.cfg(root), {"path": "/srv/akuz/a.log"},
                     str(target), sender)
             self.assertTrue(sender.closed)
-            self.assertEqual(sender.messages, [("error", "RuntimeError")])
+            self.assertEqual(sender.messages, [["error", "RuntimeError"]])
             self.assertFalse(target.exists())
 
 
