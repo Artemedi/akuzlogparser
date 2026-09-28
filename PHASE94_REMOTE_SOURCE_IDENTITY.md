@@ -1,6 +1,6 @@
 # Phase 9.4 — remote source identity gate
 
-Status: **SYNTHETIC NORMAL-APP SSH IDENTITY PASS; REAL SSH METADATA PROBE IN PROGRESS. No architecture selection.**
+Status: **SYNTHETIC NORMAL-APP SSH IDENTITY PASS; REAL SSH METADATA IDENTITY PASS. No architecture selection.**
 
 Scope is source identity and cache reconciliation only. This document does
 not authorize Tee/B-lite integration, derived-metadata persistence, or a
@@ -77,8 +77,23 @@ markers may enter the private Actions log.
 The first workflow revision `a35cfb5` failed before job creation because
 the embedded Python here-string was not indented as YAML block content.
 This is a workflow-format failure, **not** SSH evidence. Commit `7da765e`
-only corrects the YAML indentation and is the first executable probe
-candidate.
+only corrected that YAML indentation.
+
+The corrected read-only probe then completed SUCCESS:
+[Actions #36382815851](https://github.com/Artemedi/akuzlogparser/actions/runs/36382815851).
+For 2026-09-23 / 24 / 25 the real SSH server returned device+inode on both
+listings; `id/path/size/mtime/device/inode` were stable across the repeated
+listing and every path remained below the configured remote root. No payload
+was fetched and host/path/inode/digest values were not printed.
+
+Observed current remote sizes were 171,378,567 B; 140,361,291 B; and
+644,567,384 B respectively. The previously frozen real benchmark dataset
+used 644,034,993 B for 2026-09-25. Therefore the current 25-Sep remote file
+is already 532,391 B larger than that frozen benchmark snapshot. This is
+positive evidence that the stat-based inventory notices ordinary growth,
+but it also means **current remote data must not be described as the old
+exact-SHA dataset**. A future real-data gate needs a new frozen snapshot
+and its own SHA evidence.
 
 ## What this still cannot prove
 
