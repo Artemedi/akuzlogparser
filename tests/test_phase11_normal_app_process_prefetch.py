@@ -17,7 +17,8 @@ from unittest.mock import patch
 import akuz_app
 from akuz_app import State
 from akuz_fetch import ConnectConfig, selected_snapshot_path
-from akuz_process_fetch import ProcessFetchError, ProcessFetchResult
+from akuz_process_fetch import (ProcessFetchError, ProcessFetchResult,
+                                ProcessFetchUnsafeError)
 from akuz_store import load_store, save_store
 from scripts.bench_phase9_baseline import create_sources, inventory_manifest
 from scripts.phase9_semantic import semantic_exports, semantic_sql
@@ -100,6 +101,18 @@ class ValueErrorProcessFetch(FakeProcessFetch):
         raise ValueError("injected IPC validation failure")
 
 
+class UnsafeProcessFetch(FakeProcessFetch):
+    def finish(self):
+        self.destination.parent.mkdir(parents=True, exist_ok=True)
+        self.destination.write_bytes(b"still-owned")
+        type(self).active -= 1
+        self.finished = True
+        raise ProcessFetchUnsafeError("injected unsafe child survivor")
+
+    def close(self):
+        raise ProcessFetchUnsafeError("injected unsafe child survivor")
+
+
 class NormalAppProcessPrefetchTests(unittest.TestCase):
     def make_remote(self, home):
         source_dir = home / "source_payloads"
@@ -170,6 +183,59 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             inventory_manifest(root),
             semantic_sql(root),
             semantic_exports(root))
+
+    def test_phase11_policy_means_windows_client_plus_ssh_source(self):
+        marked_fetch = self.fake_fetch([])
+        rows = [object(), object()]
+        self.assertTrue(akuz_app._phase11_process_allowed(
+            True, "linux", rows, marked_fetch, akuz_app.generate,
+            client_os="nt"))
+        self.assertFalse(akuz_app._phase11_process_allowed(
+            True, "linux", rows, marked_fetch, akuz_app.generate,
+            client_os="posix"))
+        self.assertFalse(akuz_app._phase11_process_allowed(
+            True, "windows", rows, marked_fetch, akuz_app.generate,
+            client_os="nt"))
+        self.assertFalse(akuz_app._phase11_process_allowed(
+            True, "local", rows, marked_fetch, akuz_app.generate,
+            client_os="nt"))
+        self.assertFalse(akuz_app._phase11_process_allowed(
+            True, "linux", rows, marked_fetch, lambda *args: None,
+            client_os="nt"))
+
+    def test_phase11_env_absent_defaults_on_and_explicit_empty_is_invalid(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(akuz_app._phase11_process_requested())
+        with patch.dict(
+                os.environ, {"AKUZ_PHASE11_PROCESS_PREFETCH": ""}, clear=True):
+            with self.assertRaisesRegex(
+                    akuz_app.FetchError, "AKUZ_PHASE11_PROCESS_PREFETCH"):
+                akuz_app._phase11_process_requested()
+        for value in ("0", "false", "no", "off"):
+            with patch.dict(
+                    os.environ,
+                    {"AKUZ_PHASE11_PROCESS_PREFETCH": value}, clear=True):
+                self.assertFalse(akuz_app._phase11_process_requested())
+
+    def test_unsafe_prefetch_failure_never_falls_back_to_second_writer(self):
+        with TemporaryDirectory(prefix="akuz_p11_unsafe_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+
+            UnsafeProcessFetch.reset()
+            with self.assertRaisesRegex(
+                    ProcessFetchUnsafeError, "unsafe child survivor"):
+                self.build(
+                    root, rows, process=True,
+                    process_class=UnsafeProcessFetch)
+
+            # Only the first historical serial fetch ran. The next source was
+            # NOT fetched serially after the unsafe child failure.
+            self.assertEqual(UnsafeProcessFetch.starts, [rows[1]["name"]])
+            store = load_store(root)
+            self.assertEqual(len(store["downloads"]), 1)
+            self.assertEqual(len(store["reports"]), 1)
 
     def test_linux_multisource_prefetch_is_enabled_by_default(self):
         with TemporaryDirectory(prefix="akuz_p11_app_default_") as td:
@@ -432,6 +498,46 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             self.assertEqual(FakeProcessFetch.starts, [rows[2]["name"]])
             self.assertIsNotNone(recovered["combined"])
             self.assertEqual(len(load_store(root)["downloads"]), 3)
+
+    def test_publication_failure_preserved_as_cause_of_unsafe_cleanup(self):
+        with TemporaryDirectory(prefix="akuz_p11_publish_cleanup_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+            state = State()
+            state.source = "linux"
+            state.listing = [dict(row) for row in rows]
+            selected = [dict(id=row["id"], date="") for row in rows]
+            fetch_calls = []
+            fetch = self.fake_fetch(fetch_calls)
+
+            class UnsafeClose(FakeProcessFetch):
+                def close(self):
+                    raise ProcessFetchUnsafeError("unsafe close after publish")
+
+            real_publish = akuz_app._publish
+            calls = {"count": 0}
+            def fail_first_publish(*args, **kwargs):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    raise ValueError("injected report publication failure")
+                return real_publish(*args, **kwargs)
+
+            with patch.dict(
+                    os.environ,
+                    {"AKUZ_PHASE11_PROCESS_PREFETCH": "1"}),                  patch("akuz_app.source_config",
+                       return_value=self.config(root)),                  patch("akuz_app.source_list",
+                       side_effect=lambda cfg, source, notify:
+                           [dict(row) for row in rows]),                  patch("akuz_app.ProcessFetch", UnsafeClose),                  patch("akuz_app._publish", side_effect=fail_first_publish):
+                with self.assertRaisesRegex(
+                        ProcessFetchUnsafeError,
+                        "unsafe close after publish") as caught:
+                    akuz_app.perform_build(
+                        root, state, selected, fetch_fn=fetch,
+                        refresh_remote=True, use_derived_spool=True)
+            self.assertIsInstance(caught.exception.__cause__, ValueError)
+            self.assertIn(
+                "publication failure", str(caught.exception.__cause__))
 
     def test_prefetch_child_failure_falls_back_to_serial_and_completes(self):
         with TemporaryDirectory(prefix="akuz_p11_app_fault_fallback_") as td:
