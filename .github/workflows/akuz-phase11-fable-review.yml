@@ -63,7 +63,8 @@ jobs:
           import json
           import os
           from pathlib import Path
-          import urllib.request
+          import subprocess
+          import tempfile
           import sys
 
           token = os.environ.get('ANTHROPIC_AUTH_TOKEN', '')
@@ -173,17 +174,35 @@ jobs:
                   'role': 'user',
                   'content': prompt + ''.join(parts)
               }]
-          }).encode('utf-8')
-          req = urllib.request.Request(
-              base + '/chat/completions',
-              data=payload,
-              headers={
-                  'Authorization': 'Bearer ' + token,
-                  'Content-Type': 'application/json',
-              },
-              method='POST')
-          with urllib.request.urlopen(req, timeout=180) as response:
-              data = json.loads(response.read().decode('utf-8'))
+          }, ensure_ascii=False).encode('utf-8')
+
+          request_path = None
+          try:
+              with tempfile.NamedTemporaryFile(
+                      mode='wb', suffix='.json', delete=False) as request_file:
+                  request_file.write(payload)
+                  request_path = request_file.name
+              curl_config = (
+                  'url = "' + base + '/chat/completions"\n'
+                  'header = "Authorization: Bearer ' + token + '"\n'
+                  'header = "Content-Type: application/json"\n'
+                  'header = "User-Agent: curl/8"\n'
+                  'data-binary = "@' + request_path.replace('\\', '/') + '"\n'
+              )
+              proc = subprocess.run(
+                  ['curl', '--silent', '--show-error', '--fail',
+                   '--max-time', '180', '--config', '-'],
+                  input=curl_config.encode('utf-8'),
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  timeout=190)
+              if proc.returncode:
+                  raise SystemExit(
+                      'Fable curl failed with exit code ' + str(proc.returncode))
+              data = json.loads(proc.stdout.decode('utf-8'))
+          finally:
+              if request_path:
+                  Path(request_path).unlink(missing_ok=True)
           content = data['choices'][0]['message']['content']
           if not isinstance(content, str) or not content.strip():
               raise SystemExit('Fable returned empty review')
