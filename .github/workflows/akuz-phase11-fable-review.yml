@@ -215,22 +215,31 @@ jobs:
           - pipe EOF/OSError/crash paths fail fast and direct abort reaps child.
 
           Previous Fable reviews BLOCKed older candidates on cleanup,
-          Job/handle rights/lifetime, buffered-IPC races and pickle IPC.
-          The current candidate additionally:
-          - uses bounded UTF-8 JSON via send_bytes/recv_bytes for production
-            child IPC; no pickle deserialization on the production path;
+          Job/handle lifetime, buffered-IPC timing and pickle IPC.
+          The current candidate now:
+          - uses bounded UTF-8 JSON via send_bytes/recv_bytes for ALL
+            ProcessFetch callers; safe_ipc=False is rejected and the module
+            has no pickle receive path;
           - production prefetch is restricted to Windows where a
             KILL_ON_JOB_CLOSE Job Object is mandatory;
           - opens the spawned child explicitly with PROCESS_SET_QUOTA,
             PROCESS_TERMINATE and PROCESS_QUERY_LIMITED_INFORMATION before
             AssignProcessToJobObject; it does not use sentinel handle rights;
           - child I/O remains start-gated until Job assignment succeeds;
+          - converts ctypes HANDLEs through their pointer .value and verifies
+            CloseHandle success;
+          - direct start()/finish() releases the Job handle before success
+            returns; context-manager exit does not swallow cleanup failure;
+          - waits on the Pipe until the overall deadline instead of using a
+            100ms child-exit drain heuristic, so late buffered IPC is accepted;
+          - compares returned Windows paths with normcase+normpath;
           - retries owned temp deletion only after child/Job reaping;
-          - leaves app-scoped temp fail-closed if a child survives both
-            terminate and kill;
-          - drains buffered IPC before classifying a fast child exit;
-          - has Job assignment failure, hard-parent-exit and cleanup retry
-            tests plus packaged portable JSON-IPC self-check;
+          - raises ProcessFetchUnsafeError for a surviving child or unclosed
+            Job handle, and normal-app explicitly forbids serial fallback for
+            that unsafe class;
+          - has hard-parent-exit, Job assignment failure, cleanup retry,
+            unsafe-context-exit, late-IPC, handle-width and oversized JSON
+            coverage plus packaged portable JSON-IPC self-check;
           - production prefetch refuses an unbound/missing listed size.
 
           Treat regression evidence as evidence, not proof. Re-check the
