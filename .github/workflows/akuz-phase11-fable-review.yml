@@ -214,20 +214,27 @@ jobs:
           - a parent-process watchdog remains defense-in-depth;
           - pipe EOF/OSError/crash paths fail fast and direct abort reaps child.
 
-          Previous Fable review BLOCKed the candidate on cleanup,
-          Job/handle lifetime and buffered-IPC races. The current candidate
-          additionally:
+          Previous Fable reviews BLOCKed older candidates on cleanup,
+          Job/handle rights/lifetime, buffered-IPC races and pickle IPC.
+          The current candidate additionally:
+          - uses bounded UTF-8 JSON via send_bytes/recv_bytes for production
+            child IPC; no pickle deserialization on the production path;
+          - production prefetch is restricted to Windows where a
+            KILL_ON_JOB_CLOSE Job Object is mandatory;
+          - opens the spawned child explicitly with PROCESS_SET_QUOTA,
+            PROCESS_TERMINATE and PROCESS_QUERY_LIMITED_INFORMATION before
+            AssignProcessToJobObject; it does not use sentinel handle rights;
+          - child I/O remains start-gated until Job assignment succeeds;
           - retries owned temp deletion only after child/Job reaping;
-          - fails closed and leaves only app-scoped temp if a child survives
-            both terminate and kill;
-          - drains an already-buffered receiver before treating a signaled
-            child sentinel as "exited before IPC";
-          - has explicit Job assignment failure and cleanup-retry tests;
+          - leaves app-scoped temp fail-closed if a child survives both
+            terminate and kill;
+          - drains buffered IPC before classifying a fast child exit;
+          - has Job assignment failure, hard-parent-exit and cleanup retry
+            tests plus packaged portable JSON-IPC self-check;
           - production prefetch refuses an unbound/missing listed size.
 
-          Evidence: exact Windows suite b9ea0e3 ran 274 Python tests PASS
-          (2 skips), browser/diff PASS. Treat tests as evidence, not proof
-          and re-check the implementation rather than trusting this summary.
+          Treat regression evidence as evidence, not proof. Re-check the
+          implementation rather than trusting this summary.
 
           Return <=350 words:
           BLOCKERS
@@ -289,10 +296,12 @@ jobs:
           overwrite it; silently trusting or replacing it would weaken source
           integrity.
 
-          Current evidence: exact Windows suite b9ea0e3: 274 Python tests
-          PASS (2 skips), browser/diff PASS. Earlier real normal-app A/B has
+          Current candidate additionally uses inventory-intent-first plus
+          atomic no-overwrite hard-link promotion. An external final cannot
+          be replaced; unsupported hard-link promotion rolls the optimization
+          back to historical serial fetch. Earlier real normal-app A/B has
           inventory/analytics parity and portable spawn/smoke passed; both
-          will be repeated after this review on the final candidate.
+          will be repeated after this review on the final accepted candidate.
           Persistent B-lite is not used and SSH compression remains default OFF.
 
           Return <=400 words:
