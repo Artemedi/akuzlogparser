@@ -511,7 +511,11 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             operation.close()
             raise FetchError(
                 'Снимок следующего файла уже появился вне индекса. Проверьте downloads.')
-        details = result.metadata
+        details = dict(result.metadata)
+        # The child IPC intentionally omits the remote path. Reconstruct it
+        # from the trusted refreshed inventory in the parent so persisted
+        # snapshot metadata remains byte/semantic-compatible with serial fetch.
+        details["remote_path"] = next_remote["path"]
         # Commit inventory BEFORE promoting the completed temp snapshot.
         # If the parent hard-exits after this save but before replace(), the
         # indexed path is simply missing; cached_download() treats that as a
