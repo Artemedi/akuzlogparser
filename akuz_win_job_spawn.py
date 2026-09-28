@@ -37,10 +37,14 @@ if os.name == "nt":
             self.handle = int(handle)
 
         def close(self):
-            handle, self.handle = self.handle, None
+            handle = self.handle
             if handle is None:
                 return
+            # Do not relinquish ownership until CloseHandle succeeds. A
+            # failed close remains retryable and can never silently orphan a
+            # KILL_ON_JOB_CLOSE process tree.
             _winapi.CloseHandle(handle)
+            self.handle = None
 
         @property
         def closed(self):
@@ -368,16 +372,18 @@ if os.name == "nt":
         def close(self):
             if getattr(self, "_closed", False):
                 return
-            self._closed = True
+            process_handle = getattr(self, "_handle", None)
+            pipe_handle = getattr(self, "_pipe_handle", None)
+            _close_handles_strict(
+                self._akuz_job_owner, process_handle, pipe_handle)
+            # Only after every owned HANDLE closed successfully may the quiet
+            # GC fallback be cancelled and ownership state cleared.
             finalizer = getattr(self, "finalizer", None)
             if finalizer is not None and finalizer.still_active():
                 finalizer.cancel()
-            process_handle = getattr(self, "_handle", None)
-            pipe_handle = getattr(self, "_pipe_handle", None)
             self._handle = None
             self._pipe_handle = None
-            _close_handles_strict(
-                self._akuz_job_owner, process_handle, pipe_handle)
+            self._closed = True
 
 
     class JobBoundSpawnProcess(SpawnProcess):

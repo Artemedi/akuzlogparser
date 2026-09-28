@@ -23,6 +23,22 @@ from akuz_win_job_spawn import (JobBoundSpawnError,
                                 get_job_bound_spawn_context)
 
 
+class RetryingJobOwner:
+    def __init__(self, handle=123):
+        self.handle = handle
+        self.calls = 0
+
+    def close(self):
+        self.calls += 1
+        if self.calls == 1:
+            raise OSError("injected first Job close failure")
+        self.handle = None
+
+    @property
+    def closed(self):
+        return self.handle is None
+
+
 class FakeReceiver:
     def __init__(self, message=None, ready=True):
         self.message = message
@@ -608,6 +624,47 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
         self.assertTrue(popen._closed)
         self.assertIsNone(popen._handle)
         self.assertIsNone(popen._pipe_handle)
+
+    @unittest.skipUnless(os.name == "nt", "Windows parent identity binding")
+    def test_validated_parent_identity_change_blocks_cleanup(self):
+        with TemporaryDirectory(prefix="akuz_process_parent_identity_") as td:
+            target = Path(td) / "snapshot.log"
+            target.write_bytes(b"owned")
+            expected = _owned_snapshot_stat(target)
+            digest, cleanup_token = _sha256_owned_snapshot(
+                target, expected, return_cleanup_identity=True)
+            self.assertEqual(digest, hashlib.sha256(b"owned").hexdigest())
+            file_identity, parent_identity = cleanup_token
+            with patch(
+                    "akuz_process_fetch._windows_parent_identity",
+                    return_value=(parent_identity[0], parent_identity[1] + 1)):
+                with self.assertRaisesRegex(
+                        ProcessFetchUnsafeError, "parent changed before cleanup"):
+                    remove_owned_snapshot(
+                        target, attempts=1, delay_s=.01,
+                        expected_identity=(file_identity, parent_identity))
+            self.assertTrue(target.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows Job owner retry")
+    def test_job_owner_retains_handle_when_close_fails(self):
+        import akuz_win_job_spawn as job_spawn
+        owner = object.__new__(job_spawn._JobOwner)
+        owner.handle = 123
+        calls = {"count": 0}
+
+        def flaky_close(handle):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise OSError("injected close failure")
+
+        with patch("akuz_win_job_spawn._winapi.CloseHandle",
+                   side_effect=flaky_close):
+            with self.assertRaisesRegex(OSError, "close failure"):
+                owner.close()
+            self.assertEqual(owner.handle, 123)
+            owner.close()
+        self.assertIsNone(owner.handle)
+        self.assertEqual(calls["count"], 2)
 
     def test_pipe_oserror_is_normalized_and_cleans_snapshot(self):
         with TemporaryDirectory(prefix="akuz_process_fetch_pipe_") as td:

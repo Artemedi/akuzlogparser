@@ -113,31 +113,30 @@ class ProcessFetch:
             self.started_at = None
             remove_owned_snapshot(self.destination)
             raise
+        # Parent sender ownership ends immediately after start. Closing it
+        # before Job-owner validation makes child EOF/crash behavior
+        # authoritative and prevents a sender-close exception from masking an
+        # unsafe abort result.
+        try:
+            sender.close()
+        except BaseException as sender_exc:
+            try:
+                self.abort()
+            except ProcessFetchUnsafeError as unsafe_exc:
+                raise unsafe_exc from sender_exc
+            raise
+
         if self.require_kill_job:
             popen = getattr(child, "_popen", None)
             owner = getattr(popen, "_akuz_job_owner", None)
             if owner is None or getattr(owner, "closed", True):
                 try:
                     self.abort()
-                finally:
-                    try:
-                        sender.close()
-                    except BaseException:
-                        pass
+                except ProcessFetchUnsafeError:
+                    raise
                 raise ProcessFetchUnsafeError(
                     "Atomic Job-bound spawn did not expose live Job ownership")
             self._kill_job = owner
-        try:
-            sender.close()
-        except BaseException:
-            try:
-                self.abort()
-            finally:
-                try:
-                    sender.close()
-                except BaseException:
-                    pass
-            raise
         return self
 
     def _release_kill_job(self):
@@ -535,6 +534,77 @@ def _windows_cleanup_identity(handle):
     return int(info.dwVolumeSerialNumber), file_index, file_size
 
 
+def _windows_open_directory_identity_handle(path: Path):
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+        ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+
+    file_read_attributes = 0x00000080
+    share_all = 0x00000001 | 0x00000002 | 0x00000004
+    open_existing = 3
+    flags = 0x00200000 | 0x02000000  # OPEN_REPARSE_POINT | BACKUP_SEMANTICS
+    handle = kernel32.CreateFileW(
+        str(path), file_read_attributes, share_all,
+        None, open_existing, flags, None)
+    value = getattr(handle, "value", handle)
+    invalid = ctypes.c_void_p(-1).value
+    if value in (None, invalid):
+        error = ctypes.get_last_error()
+        raise OSError(error, "Could not open owned snapshot parent")
+    return handle
+
+
+def _windows_directory_identity(handle):
+    import ctypes
+    from ctypes import wintypes
+
+    class BY_HANDLE_FILE_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("dwFileAttributes", wintypes.DWORD),
+            ("ftCreationTime", wintypes.FILETIME),
+            ("ftLastAccessTime", wintypes.FILETIME),
+            ("ftLastWriteTime", wintypes.FILETIME),
+            ("dwVolumeSerialNumber", wintypes.DWORD),
+            ("nFileSizeHigh", wintypes.DWORD),
+            ("nFileSizeLow", wintypes.DWORD),
+            ("nNumberOfLinks", wintypes.DWORD),
+            ("nFileIndexHigh", wintypes.DWORD),
+            ("nFileIndexLow", wintypes.DWORD),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetFileInformationByHandle.argtypes = [
+        wintypes.HANDLE, ctypes.POINTER(BY_HANDLE_FILE_INFORMATION)]
+    kernel32.GetFileInformationByHandle.restype = wintypes.BOOL
+    info = BY_HANDLE_FILE_INFORMATION()
+    if not kernel32.GetFileInformationByHandle(
+            wintypes.HANDLE(_windows_handle_value(handle)),
+            ctypes.byref(info)):
+        raise ProcessFetchUnsafeError(
+            "Could not identify owned snapshot parent")
+    if info.dwFileAttributes & 0x0400:
+        raise ProcessFetchUnsafeError(
+            "Owned snapshot parent became a reparse point")
+    if not (info.dwFileAttributes & 0x0010):
+        raise ProcessFetchUnsafeError(
+            "Owned snapshot parent is not a directory")
+    file_index = (int(info.nFileIndexHigh) << 32) | int(info.nFileIndexLow)
+    return int(info.dwVolumeSerialNumber), file_index
+
+
+def _windows_parent_identity(path: Path):
+    handle = _windows_open_directory_identity_handle(Path(path))
+    try:
+        return _windows_directory_identity(handle)
+    finally:
+        _close_windows_handle(handle)
+
+
 def _windows_open_cleanup_handle(path: Path, access: int):
     import ctypes
     from ctypes import wintypes
@@ -577,10 +647,15 @@ def _remove_owned_snapshot_windows(
         return
     try:
         owned_identity = _windows_cleanup_identity(anchor)
-        if (expected_identity is not None
-                and owned_identity != expected_identity):
-            raise ProcessFetchUnsafeError(
-                "Owned process snapshot identity changed before cleanup")
+        parent_identity = _windows_parent_identity(target.parent)
+        if expected_identity is not None:
+            expected_file, expected_parent = expected_identity
+            if owned_identity != expected_file:
+                raise ProcessFetchUnsafeError(
+                    "Owned process snapshot identity changed before cleanup")
+            if parent_identity != expected_parent:
+                raise ProcessFetchUnsafeError(
+                    "Owned process snapshot parent changed before cleanup")
         last_error = None
 
         class FILE_DISPOSITION_INFO(ctypes.Structure):
@@ -602,6 +677,9 @@ def _remove_owned_snapshot_windows(
                 if _windows_cleanup_identity(delete_handle) != owned_identity:
                     raise ProcessFetchUnsafeError(
                         "Owned process snapshot pathname was replaced")
+                if _windows_parent_identity(target.parent) != parent_identity:
+                    raise ProcessFetchUnsafeError(
+                        "Owned process snapshot parent was replaced")
                 disposition = FILE_DISPOSITION_INFO(1)
                 if not kernel32.SetFileInformationByHandle(
                         wintypes.HANDLE(_windows_handle_value(delete_handle)),
@@ -884,6 +962,7 @@ def _sha256_owned_snapshot(
             "Process fetch snapshot could not be opened safely") from exc
 
     cleanup_identity = None
+    parent_cleanup_identity = None
     try:
         opened = os.fstat(fd)
         if _snapshot_identity(opened) != _snapshot_identity(expected_stat):
@@ -893,6 +972,7 @@ def _sha256_owned_snapshot(
             import msvcrt
             cleanup_identity = _windows_cleanup_identity(
                 msvcrt.get_osfhandle(fd))
+            parent_cleanup_identity = _windows_parent_identity(target.parent)
 
         digest = hashlib.sha256()
         while True:
@@ -912,6 +992,9 @@ def _sha256_owned_snapshot(
             if cleanup_after != cleanup_identity:
                 raise ProcessFetchError(
                     "Process fetch Windows identity changed while hashing")
+            if _windows_parent_identity(target.parent) != parent_cleanup_identity:
+                raise ProcessFetchError(
+                    "Process fetch parent identity changed while hashing")
     finally:
         os.close(fd)
 
@@ -921,7 +1004,8 @@ def _sha256_owned_snapshot(
             "Process fetch snapshot path changed while hashing")
     value = digest.hexdigest()
     if return_cleanup_identity:
-        return value, cleanup_identity
+        token = (cleanup_identity, parent_cleanup_identity)
+        return value, token
     return value
 
 
