@@ -337,6 +337,62 @@ source/report parity, process-tree memory + parent/child CPU, separate pure
 fetch/readiness timing, cleanup and compression OFF. It still does not
 authorize `perform_build` integration.
 
+## Three-source 23+24+25 large gate
+
+The corrected process-isolated candidate was extended to exactly three real
+sources, still benchmark-only and with **one spawned fetch child maximum**.
+Contract commit `89daa2a5c6c3f859729b2d70d71314509efbfbbf` passed
+[DBA-008D regression #36406054018](https://github.com/Artemedi/akuzlogparser/actions/runs/36406054018):
+**234 Python tests PASS, 2 Windows skips, 116.309 s**, Node browser controls
+and diff-check PASS.
+
+Real balanced workflow:
+[Actions #36406239299](https://github.com/Artemedi/akuzlogparser/actions/runs/36406239299),
+workflow commit `dd6f219`. Independent read-only audit:
+[Actions #36406284302](https://github.com/Artemedi/akuzlogparser/actions/runs/36406284302),
+audit commit `9ad19ac`. Both completed SUCCESS.
+
+Order was again `serial, process, process, serial`, compression forced OFF.
+Fixed prefixes were 171,378,567 + 140,361,291 + 644,567,384 bytes.
+All four trials used equal source SHA per fixed prefix and equal deterministic
+report manifests; workspace cleanup PASS; no raw payload retained; normal app
+cache and Release untouched.
+
+| Mode | Wall trials, s | Median wall, s | Median total CPU, s | Median process-tree private, B |
+|---|---|---:|---:|---:|
+| serial | 259.258158, 280.110036 | 269.684097 | 138.671875 | 399,509,504 |
+| process | 216.670384, 215.096836 | 215.883610 | 162.539062 | 356,929,536 |
+
+The three-source process candidate is **~19.9% faster by median wall** while
+measured parent+children CPU is **~17.2% higher**. Both process trials are
+faster than both serial trials. Process-tree private median is ~10.7% lower
+in this run; as with the pair gate, that memory direction is not generalized
+from two observations.
+
+Corrected child timing remains separated from parent readiness:
+
+| Next source | Serial fetch, s | Process pure child fetch, s | Process readiness, s |
+|---|---|---|---|
+| 24 Sep | 18.345334, 23.470378 | 32.010912, 20.856221 | 32.511390, 29.630600 |
+| 25 Sep | 87.478401, 104.360589 | 89.025576, 77.720484 | 89.551881, 78.004371 |
+
+The large-source evidence therefore confirms that one-child process
+isolation can hide useful SSH transfer time on this DBA-008D workload
+without changing source bytes or generated reports. It does **not** prove
+normal-app cache/failure semantics.
+
+### v4.7 release decision
+
+The process candidate is **accepted as a performance research result but
+deferred from the v4.7 runtime**. v4.7 keeps the already validated sequential
+fetch scheduler + ephemeral Phase 9 derived spool. This avoids introducing a
+new multiprocessing/cancellation/cache interaction immediately before the
+portable release.
+
+Future integration may resume from this exact evidence, but must first pass
+the remaining normal-app fault/mixed-cache/inventory/restart/portable gates
+below. The positive benchmark is not silently promoted into `perform_build`.
+
 ## Production gates still open
 
 Before integrating one-ahead fetch into `perform_build`:
