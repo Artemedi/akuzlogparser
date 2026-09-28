@@ -3,10 +3,11 @@
 from __future__ import annotations
 import argparse
 from collections import Counter
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import multiprocessing
 import os
 from pathlib import Path
 import secrets
@@ -17,7 +18,8 @@ from time import perf_counter
 from urllib.parse import unquote, urlsplit
 import webbrowser
 
-from akuz_fetch import FetchError, fetch_selected, list_remote, load_config
+from akuz_fetch import (FetchError, fetch_selected, list_remote, load_config,
+                        selected_snapshot_path)
 from akuz_windows import fetch_windows, list_windows, load_windows_config
 from akuz_local import fetch_local, list_local, load_local_config, verify_local_source_sha
 from akuz_html_explorer import generate
@@ -31,6 +33,7 @@ from akuz_store_lock import inventory_transaction
 
 from akuz_runtime import DOCUMENTS, app_root, prepare_runtime
 from akuz_instance_lock import InstanceBusy, exclusive_instance
+from akuz_process_fetch import ProcessFetch, ssh_fetch_child
 from akuz_version import __version__
 from akuz_diagnostics import event as perf_event, phase as perf_phase
 
@@ -292,18 +295,43 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
                   use_derived_spool=None):
     if use_derived_spool is None:
         use_derived_spool = os.environ.get('AKUZ_PHASE9_DERIVED_SPOOL', '1').strip().lower() not in ('0', 'false', 'no', 'off')
-    if not use_derived_spool or gen_fn is not generate or len(selections) < 2:
-        return _perform_build(root, state, selections, fetch_fn, gen_fn,
-                              refresh_remote, None)
+    process_flag = os.environ.get('AKUZ_PHASE11_PROCESS_PREFETCH', '0').strip().lower()
+    valid_flags = ('0', 'false', 'no', 'off', '', '1', 'true', 'yes', 'on')
+    if process_flag not in valid_flags:
+        raise FetchError('Неверное значение AKUZ_PHASE11_PROCESS_PREFETCH')
+    with state.lock:
+        source = state.source
+        local_path = state.local_path
+    process_requested = process_flag in ('1', 'true', 'yes', 'on')
+    process_allowed = (
+        process_requested and source == 'linux' and len(selections) > 1
+        and fetch_fn is fetch_selected and gen_fn is generate)
+
     (root/'cache').mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='akuz-phase9-derived-',
-                                     dir=root/'cache') as folder:
+    with ExitStack() as stack:
+        spool_root = None
+        if use_derived_spool and gen_fn is generate and len(selections) >= 2:
+            folder = stack.enter_context(tempfile.TemporaryDirectory(
+                prefix='akuz-phase9-derived-', dir=root/'cache'))
+            spool_root = Path(folder)
+
+        process_prefetch_root = None
+        if process_allowed:
+            cfg = source_config(root, source, local_path)
+            try:
+                cfg.local_dest.mkdir(parents=True, exist_ok=True)
+                folder = stack.enter_context(tempfile.TemporaryDirectory(
+                    prefix='.akuz-phase11-prefetch-', dir=cfg.local_dest))
+                process_prefetch_root = Path(folder)
+            except OSError:
+                perf_event(root, 'process.prefetch', 'setup_fallback', enabled=0)
+
         return _perform_build(root, state, selections, fetch_fn, gen_fn,
-                              refresh_remote, Path(folder))
+                              refresh_remote, spool_root, process_prefetch_root)
 
 
 def _perform_build(root, state, selections, fetch_fn, gen_fn,
-                   refresh_remote, spool_root):
+                   refresh_remote, spool_root, process_prefetch_root=None):
     build_started = perf_counter()
     with state.lock:
         source = state.source
