@@ -80,6 +80,16 @@ class FailingProcessFetch(FakeProcessFetch):
         raise ProcessFetchError("injected child failure")
 
 
+class TimeoutProcessFetch(FakeProcessFetch):
+    def finish(self):
+        self.destination.parent.mkdir(parents=True, exist_ok=True)
+        self.destination.write_bytes(b"partial")
+        type(self).active -= 1
+        self.finished = True
+        self.destination.unlink(missing_ok=True)
+        raise TimeoutError("injected child timeout")
+
+
 class NormalAppProcessPrefetchTests(unittest.TestCase):
     def make_remote(self, home):
         source_dir = home / "source_payloads"
@@ -323,36 +333,55 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             self.assertIsNotNone(recovered["combined"])
             self.assertEqual(len(load_store(root)["downloads"]), 3)
 
-    def test_prefetch_failure_keeps_completed_single_then_restart_recovers(self):
-        with TemporaryDirectory(prefix="akuz_p11_app_fault_") as td:
+    def test_prefetch_child_failure_falls_back_to_serial_and_completes(self):
+        with TemporaryDirectory(prefix="akuz_p11_app_fault_fallback_") as td:
             home = Path(td)
             rows = self.make_remote(home)
             root = home / "app"
 
             FailingProcessFetch.reset()
-            with self.assertRaisesRegex(ProcessFetchError, "injected child failure"):
-                self.build(root, rows, process=True,
-                           process_class=FailingProcessFetch)
-            store = load_store(root)
-            self.assertEqual(len(store["reports"]), 1)
-            self.assertEqual(len(store["downloads"]), 1)
-            self.assertTrue(all(
-                report["kind"] == "single"
-                for report in store["reports"].values()))
-            self.assertFalse(list((root / "reports").glob("*.building")))
+            result, calls = self.build(
+                root, rows, process=True, process_class=FailingProcessFetch)
+
+            # Every failed optimization attempt falls back to the historical
+            # serial fetch in the same build; no restart is required.
+            self.assertEqual(calls, [
+                rows[0]["name"], rows[1]["name"], rows[2]["name"]])
+            self.assertEqual(FailingProcessFetch.starts, [
+                rows[1]["name"], rows[2]["name"]])
+            self.assertEqual(FailingProcessFetch.active, 0)
+            self.assertFalse(result["reused"])
+            self.assertEqual(len(result["reports"]), 3)
+            self.assertIsNotNone(result["combined"])
+            self.assertEqual(len(load_store(root)["downloads"]), 3)
             self.assertFalse(list((root / "downloads").glob(
                 ".akuz-phase11-prefetch-*")))
 
             FakeProcessFetch.reset()
-            recovered, calls = self.build(root, rows, process=True)
-            self.assertTrue(recovered["reports"][0]["reused"])
-            self.assertEqual(calls, [rows[1]["name"]])
-            self.assertEqual(FakeProcessFetch.starts, [rows[2]["name"]])
-            self.assertIsNotNone(recovered["combined"])
-            warm, calls = self.build(root, rows, process=True)
+            warm, warm_calls = self.build(root, rows, process=True)
             self.assertTrue(warm["reused"])
-            self.assertEqual(calls, [])
-            self.assertEqual(FakeProcessFetch.starts, [rows[2]["name"]])
+            self.assertEqual(warm_calls, [])
+            self.assertEqual(FakeProcessFetch.starts, [])
+
+    def test_prefetch_timeout_falls_back_to_serial_and_completes(self):
+        with TemporaryDirectory(prefix="akuz_p11_app_timeout_fallback_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+
+            TimeoutProcessFetch.reset()
+            result, calls = self.build(
+                root, rows, process=True, process_class=TimeoutProcessFetch)
+
+            self.assertEqual(calls, [
+                rows[0]["name"], rows[1]["name"], rows[2]["name"]])
+            self.assertEqual(TimeoutProcessFetch.starts, [
+                rows[1]["name"], rows[2]["name"]])
+            self.assertEqual(TimeoutProcessFetch.active, 0)
+            self.assertEqual(len(result["reports"]), 3)
+            self.assertIsNotNone(result["combined"])
+            self.assertFalse(list((root / "downloads").glob(
+                ".akuz-phase11-prefetch-*")))
 
 
 if __name__ == "__main__":
