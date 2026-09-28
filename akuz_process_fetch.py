@@ -182,6 +182,11 @@ class ProcessFetch:
                     # zombie/process handle solely because is_alive() was false.
                     child.join(timeout=0)
         finally:
+            if self.receiver is not None:
+                try:
+                    self.receiver.close()
+                finally:
+                    self.receiver = None
             self.destination.unlink(missing_ok=True)
         if survivor:
             raise ProcessFetchError("Process fetch child could not be terminated")
