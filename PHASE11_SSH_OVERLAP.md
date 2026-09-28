@@ -1,6 +1,6 @@
 # Phase 11 — overlap SSH download and single-report generation
 
-Status: **ISOLATED CONTRACTS PASS; REAL 23+24 SMOKE PASS WITH SMALL WALL GAIN + HIGHER RAM; BALANCED REPLICATION IN PREPARATION; NOT PRODUCTION INTEGRATED**.
+Status: **THREAD ONE-AHEAD REJECTED BY BALANCED REAL REPLICATION; CORRECTNESS PASS; NOT PRODUCTION INTEGRATED**.
 
 No normal application scheduler, cache schema, compression default, Phase 9
 architecture, or GitHub Release is changed by this phase.
@@ -141,6 +141,66 @@ the 2.5% gain is stable. The next step is a balanced 2x2 order
 Do **not** escalate to the 644.6 MB source or production integration unless
 that replication shows a material and repeatable net benefit after memory
 cost.
+
+## Balanced 2x2 real replication result
+
+Balanced workflow:
+[Actions #36394213273](https://github.com/Artemedi/akuzlogparser/actions/runs/36394213273),
+exact benchmark workflow commit `e065dfa`.
+Independent numeric/private-JSON audit:
+[Actions #36394295913](https://github.com/Artemedi/akuzlogparser/actions/runs/36394295913),
+exact audit workflow commit `49223dd`.
+Both completed SUCCESS.
+
+Order was `serial, overlap, overlap, serial` against the same fixed
+23+24 Sep source prefixes with SSH compression forced OFF. Source SHA and
+deterministic report manifests matched in all four trials; workspace cleanup
+PASS; no raw payload persisted and normal app cache/Release were untouched.
+
+| Mode | Wall trials, s | Median wall, s | Median CPU, s | Median private, B |
+|---|---|---:|---:|---:|
+| serial | 121.787921, 100.138628 | 110.963274 | 58.781250 | 393,189,376 |
+| overlap | 136.705397, 125.393428 | 131.049413 | 59.226562 | 357,048,320 |
+
+The balanced result **reverses the smoke's apparent 2.5% wall gain**:
+one-ahead thread overlap is about **18.1% slower by median wall** than
+serial for this pair. Process CPU differs by only about +0.8% for overlap.
+Private-memory direction was not stable versus the original smoke: the
+balanced median is about 9.2% lower for overlap, whereas the smoke had
+shown about 17% higher private bytes. Therefore memory is not used as the
+causal explanation.
+
+The strongest repeatable contention signal is the second fetch:
+
+| Mode | 24-Sep fetch values, s | Mean, s |
+|---|---|---:|
+| serial | 30.498877, 18.470101 | 24.484489 |
+| overlap | 37.418625, 51.568935 | 44.493780 |
+
+The overlap second-fetch mean is about **81.7% slower** in these two
+replicated trials. First 23-Sep parse mean also increased modestly from
+25.860110 s serial to 26.691686 s overlap (~3.2%). This is consistent with
+resource contention when a Python-thread SSH fetch runs concurrently with
+CPU-heavy report generation, but the benchmark does **not** isolate GIL
+versus CPU, local disk writes, encryption, or scheduler effects. That causal
+split remains a hypothesis.
+
+### Decision for the current candidate
+
+The current `ThreadPoolExecutor(max_workers=1)` one-ahead implementation
+is **REJECTED as a production candidate** on the measured DBA-008D workload.
+Correctness is good, but replicated wall time regressed materially.
+
+Per the previously documented gate, the same thread-based approach is
+**not escalated to the 644.6 MB 25-Sep source** and is not integrated into
+`perform_build`. A larger run would add load without first resolving the
+observed contention.
+
+A future Phase 11 sub-experiment may test isolation of the fetch path from
+the CPU-heavy parser (for example a separate process or another bounded
+architecture), but it must be a new isolated candidate with its own
+snapshot ownership, cancellation, memory and byte-parity contracts. It
+must not be presented as an accepted fix for the cause before measurement.
 
 ## Production gates still open
 
