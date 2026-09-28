@@ -29,7 +29,8 @@ def main():
         multiprocessing.get_context("spawn"),
         job_child, (str(pid_file),), destination,
         poll_timeout_s=30, join_timeout_s=5, kill_timeout_s=5,
-        require_kill_job=True)
+        expected_listed_bytes=len(b"owned partial"),
+        require_kill_job=True, safe_ipc=True)
     op.start()
     deadline = time.time() + 15
     while not pid_file.is_file() and time.time() < deadline:
