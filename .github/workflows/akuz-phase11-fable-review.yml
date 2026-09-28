@@ -40,23 +40,24 @@ jobs:
             $matches = @(Get-ChildItem $projectRoot -Filter 'fable.env' -File -Recurse -ErrorAction SilentlyContinue)
             if ($matches.Count -eq 1) {
               $secretFile = $matches[0].FullName
-              Write-Host 'FABLE_ENV_DISCOVERY=ONE_MATCH'
+              Write-Host 'FABLE_SECRET_SOURCE=LOCAL_ENV_FILE'
             } elseif ($matches.Count -gt 1) {
               throw ('Multiple fable.env files found: ' + $matches.Count)
             }
           }
-          if (-not $secretFile) {
-            throw 'Fable env file not found under project root'
+          if ($secretFile) {
+            Get-Content $secretFile | ForEach-Object {
+              $line = $_.Trim()
+              if (-not $line -or $line.StartsWith('#') -or -not $line.Contains('=')) { return }
+              $pair = $line.Split('=', 2)
+              $name = $pair[0].Trim()
+              $value = $pair[1].Trim().Trim('"').Trim("'")
+              [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+            }
+          } else {
+            Write-Host 'FABLE_SECRET_SOURCE=ONE_TIME_RSA_BLOB'
           }
-
-          Get-Content $secretFile | ForEach-Object {
-            $line = $_.Trim()
-            if (-not $line -or $line.StartsWith('#') -or -not $line.Contains('=')) { return }
-            $pair = $line.Split('=', 2)
-            $name = $pair[0].Trim()
-            $value = $pair[1].Trim().Trim('"').Trim("'")
-            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
-          }
+          $env:FABLE_REVIEW_PRIVATE_KEY = 'E:\Software\Project\LogAkusExplorer\secrets\fable_review_ephemeral_private.pem'
 
           @'
           import json
@@ -68,6 +69,36 @@ jobs:
           token = os.environ.get('ANTHROPIC_AUTH_TOKEN', '')
           base = os.environ.get('ANTHROPIC_BASE_URL', '').rstrip('/')
           model = os.environ.get('ANTHROPIC_MODEL', 'claude-fable-5.1')
+          used_encrypted = False
+          private_path = Path(os.environ.get('FABLE_REVIEW_PRIVATE_KEY', ''))
+          encrypted_path = Path('.github/fable_review_secret.enc.b64')
+
+          if (not token or not base) and private_path.is_file() and encrypted_path.is_file():
+              import base64
+              from cryptography.hazmat.primitives import hashes, serialization
+              from cryptography.hazmat.primitives.asymmetric import padding
+              private = serialization.load_pem_private_key(
+                  private_path.read_bytes(), password=None)
+              ciphertext = base64.b64decode(
+                  encrypted_path.read_text(encoding='ascii').strip())
+              plaintext = private.decrypt(
+                  ciphertext,
+                  padding.OAEP(
+                      mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                      algorithm=hashes.SHA256(),
+                      label=None)).decode('utf-8')
+              values = {}
+              for raw in plaintext.splitlines():
+                  raw = raw.strip()
+                  if not raw or raw.startswith('#') or '=' not in raw:
+                      continue
+                  name, value = raw.split('=', 1)
+                  values[name.strip()] = value.strip().strip('"').strip("'")
+              token = values.get('ANTHROPIC_AUTH_TOKEN', '')
+              base = values.get('ANTHROPIC_BASE_URL', '').rstrip('/')
+              model = values.get('ANTHROPIC_MODEL', model)
+              used_encrypted = True
+
           if not token or not base:
               raise SystemExit('Fable API environment incomplete')
 
@@ -161,5 +192,8 @@ jobs:
           print('FABLE_REVIEW_END')
           print('FABLE_MODEL=' + model)
           print('NO_PRIVATE_LOGS_OR_SECRETS_SENT=PASS')
+          if used_encrypted:
+              private_path.unlink(missing_ok=True)
+              print('FABLE_EPHEMERAL_PRIVATE_KEY_DESTROYED=PASS')
           '@ | python -B -
           if ($LASTEXITCODE -ne 0) { throw 'Fable independent review failed' }
