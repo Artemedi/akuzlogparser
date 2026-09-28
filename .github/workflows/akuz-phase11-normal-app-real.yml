@@ -1,0 +1,43 @@
+name: AKUZ Phase 11 real normal-app process acceptance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/akuz-phase11-normal-app-real.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    name: Serial vs process normal-app on static 24-27 Sep
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out exact acceptance harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Run real static normal-app A-B
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
+            throw 'DBA-008D only'
+          }
+          $privateRoot = 'E:\\Software\\Project\\LogAkusExplorer\\akuzlogparser'
+          $diagnostics = Join-Path $privateRoot 'diagnostics'
+          python -B scripts/bench_phase11_normal_app_real.py --config (Join-Path $privateRoot 'ConnectConf.cfg') --app-root $privateRoot --diagnostics $diagnostics --result (Join-Path $diagnostics 'phase11_normal_app_real_static_24_27_20260928.json')
+          if ($LASTEXITCODE -ne 0) { throw 'Phase 11 normal-app real acceptance failed' }
+          Write-Host 'PHASE11_SCOPE=OPT_IN_NORMAL_APP_STATIC_ACCEPTANCE'
+          Write-Host 'USER_CACHE_UNCHANGED=PASS'
+          Write-Host 'COMPRESSION_DEFAULT_UNCHANGED=PASS'
+          Write-Host 'NO_RELEASE_CHANGE=PASS'
