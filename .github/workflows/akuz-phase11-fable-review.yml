@@ -285,6 +285,20 @@ jobs:
             the remaining overall poll_timeout deadline;
           - supported portable target is Windows x64 only.
 
+          Since the previous Fable BLOCK, the current code additionally:
+          - tracks CreatePipe -> CRT fd ownership explicitly and resumes the
+            already Job-bound suspended child before writing the spawn payload,
+            avoiding anonymous-pipe buffer deadlock;
+          - closes empty Job/process/pipe ownership on early spawn failures;
+          - hashes the completed snapshot through one stable file identity
+            rather than lstat-then-reopen pathname validation;
+          - binds cleanup retries to the initially owned Windows file identity;
+          - deletes the owned Windows temp through an exact DELETE handle with
+            SetFileInformationByHandle and rejects a mismatched reopened path
+            identity instead of unlinking a replacement by pathname.
+          Re-evaluate the actual code for residual handle leaks, TOCTOU, pipe
+          lifetime, or unsafe fallback; do not assume these changes are sufficient.
+
           Treat regression evidence as evidence, not proof. Re-check the
           implementation rather than trusting this summary.
 
