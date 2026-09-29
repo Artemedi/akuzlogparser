@@ -18,7 +18,8 @@ import akuz_app
 from akuz_app import State
 from akuz_fetch import ConnectConfig, selected_snapshot_path
 from akuz_process_fetch import (ProcessFetchError, ProcessFetchResult,
-                                ProcessFetchUnsafeError)
+                                ProcessFetchUnsafeError,
+                                _owned_snapshot_stat, _sha256_owned_snapshot)
 from akuz_store import load_store, save_store
 from scripts.bench_phase9_baseline import create_sources, inventory_manifest
 from scripts.phase9_semantic import semantic_exports, semantic_sql
@@ -54,7 +55,9 @@ class FakeProcessFetch:
         self.destination.write_bytes(payload)
         self.finished = True
         type(self).active -= 1
-        digest = hashlib.sha256(payload).hexdigest()
+        expected = _owned_snapshot_stat(self.destination)
+        digest, cleanup_identity = _sha256_owned_snapshot(
+            self.destination, expected, return_cleanup_identity=True)
         return ProcessFetchResult(
             path=self.destination, digest=digest, bytes=len(payload),
             child_cpu_s=.1, child_fetch_wall_s=.2, ready_latency_s=.3,
@@ -62,7 +65,8 @@ class FakeProcessFetch:
                 "active": False, "captured_bytes": len(payload),
                 "stored_bytes": len(payload), "dropped_tail_bytes": 0,
                 "listed_bytes": len(payload),
-                "remote_path": self.remote["path"]})
+                "remote_path": self.remote["path"]},
+            cleanup_identity=cleanup_identity)
 
     def close(self):
         if self.started and not self.finished:
