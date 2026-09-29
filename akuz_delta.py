@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import errno
 import hashlib
 import os
+import tempfile
 from pathlib import Path
 
 
@@ -187,13 +188,17 @@ def assemble_delta_final_proof(
     Bytes beyond publish_size (an unfinished active-file tail) are validated as
     part of the downloaded delta length but are never written to the published
     candidate.
+
+    The temporary candidate is owner-unique. A hard process exit may leave an
+    orphan, but that orphan cannot block a later retry and is never treated as
+    trusted state. Publication itself remains same-directory/no-overwrite.
     """
     previous = Path(previous)
     delta = Path(delta)
     final = Path(final)
-    part = final.with_name(final.name + ".part")
+    part: Path | None = None
 
-    if final.exists() or final.is_symlink() or part.exists() or part.is_symlink():
+    if final.exists() or final.is_symlink():
         raise ResumeRejected("target already exists")
     if previous.is_symlink() or not previous.is_file():
         raise ResumeRejected("previous snapshot is not a regular file")
@@ -243,7 +248,10 @@ def assemble_delta_final_proof(
 
     try:
         final.parent.mkdir(parents=True, exist_ok=True)
-        with part.open("xb") as output:
+        fd, part_name = tempfile.mkstemp(
+            prefix=final.name + ".part-", dir=final.parent)
+        part = Path(part_name)
+        with os.fdopen(fd, "wb") as output:
             with previous.open("rb") as old:
                 while True:
                     block = old.read(1024 * 1024)
@@ -289,6 +297,6 @@ def assemble_delta_final_proof(
             pass
         return publish_size, published_sha
     except BaseException:
-        if not linked:
+        if not linked and part is not None:
             part.unlink(missing_ok=True)
         raise
