@@ -15,7 +15,10 @@ import unittest
 from unittest.mock import patch
 
 import akuz_delta
-from akuz_delta import RemoteMeta, ResumeRejected, assemble_delta_contract
+from akuz_delta import (
+    RemoteMeta, ResumeRejected, assemble_delta_contract,
+    assemble_delta_final_proof,
+)
 from scripts import bench_phase12_delta_resume_smoke as delta_smoke
 from scripts import bench_phase12_delta_resume_ab as delta_ab
 
@@ -65,6 +68,41 @@ class Phase12DeltaResumeContractTests(unittest.TestCase):
             previous_inode=self.inode,
             before=before,
             remote_previous_prefix_sha256=digest_bytes(remote_old),
+            delta=self.delta,
+            transfer_bound=len(remote),
+            publish_size=publish_size,
+            after=after,
+            remote_published_prefix_sha256=digest_bytes(remote_published),
+            final=self.final,
+            fail_after_written=fail_after_written,
+        )
+
+    def run_contract_v2(
+        self,
+        old: bytes,
+        remote: bytes,
+        *,
+        publish_size: int | None = None,
+        after: RemoteMeta | None = None,
+        remote_published: bytes | None = None,
+        delta_bytes: bytes | None = None,
+        fail_after_written: int | None = None,
+    ):
+        self.previous.write_bytes(old)
+        publish_size = len(remote) if publish_size is None else publish_size
+        before = RemoteMeta(self.device, self.inode, len(remote), 200)
+        after = after or RemoteMeta(self.device, self.inode, len(remote), 200)
+        remote_published = (
+            remote[:publish_size] if remote_published is None else remote_published
+        )
+        delta_bytes = remote[len(old):] if delta_bytes is None else delta_bytes
+        self.delta.write_bytes(delta_bytes)
+        return assemble_delta_final_proof(
+            self.previous,
+            previous_sha256=digest_bytes(old),
+            previous_device=self.device,
+            previous_inode=self.inode,
+            before=before,
             delta=self.delta,
             transfer_bound=len(remote),
             publish_size=publish_size,
@@ -200,6 +238,49 @@ class Phase12DeltaResumeContractTests(unittest.TestCase):
         self.assertEqual(len(replay), len(remote) - len(old))
         with self.assertRaisesRegex(ResumeRejected, "new remote prefix proof"):
             self.run_contract(old, remote, delta_bytes=replay)
+        self.assert_failure_preserves_previous(old)
+
+    def test_v2_single_final_proof_publishes_byte_exact_snapshot(self):
+        old = b"event-1\nevent-2\n"
+        remote = old + b"event-3\nevent-4\n"
+        with patch.object(
+                akuz_delta, "digest_file",
+                side_effect=AssertionError("v2 must not reread full files")):
+            size, sha = self.run_contract_v2(old, remote)
+        self.assertEqual(size, len(remote))
+        self.assertEqual(sha, digest_bytes(remote))
+        self.assertEqual(self.final.read_bytes(), remote)
+        self.assertEqual(self.previous.read_bytes(), old)
+
+    def test_v2_final_proof_detects_same_inode_old_prefix_rewrite(self):
+        old = b"event-A\nevent-B\n"
+        remote_downloaded = old + b"event-C\n"
+        remote_actual = b"event-X\nevent-B\nevent-C\n"
+        self.assertEqual(len(remote_downloaded), len(remote_actual))
+        with self.assertRaisesRegex(ResumeRejected, "new remote prefix proof"):
+            self.run_contract_v2(
+                old, remote_downloaded, remote_published=remote_actual)
+        self.assert_failure_preserves_previous(old)
+
+    def test_v2_active_tail_writes_only_verified_complete_prefix(self):
+        old = b"12:00 old\n"
+        remote = old + b"13:00 complete\n14:00 unfinished"
+        publish_size = remote.rfind(b"\n") + 1
+        size, sha = self.run_contract_v2(
+            old, remote, publish_size=publish_size)
+        expected = remote[:publish_size]
+        self.assertEqual(size, len(expected))
+        self.assertEqual(sha, digest_bytes(expected))
+        self.assertEqual(self.final.read_bytes(), expected)
+        self.assertFalse(self.final.with_name(self.final.name + ".part").exists())
+
+    def test_v2_disk_full_cleans_owned_part(self):
+        old = b"event-1\n"
+        remote = old + b"event-2\n"
+        with self.assertRaises(OSError) as caught:
+            self.run_contract_v2(
+                old, remote, fail_after_written=len(old) + 2)
+        self.assertEqual(caught.exception.errno, errno.ENOSPC)
         self.assert_failure_preserves_previous(old)
 
     def test_existing_target_is_never_overwritten(self):
