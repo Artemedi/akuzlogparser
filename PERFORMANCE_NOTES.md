@@ -3444,3 +3444,25 @@ Phase 13 is therefore **DONE**. Final production analytics configuration:
 No published Release or public asset was changed. No raw AKUZ log payload,
 credentials, private paths or private source identifiers were uploaded.
 P14-00 may now begin as measurement-only instrumentation.
+
+
+## Phase 14 P14-00 serialization measurement baseline
+
+Phase 14 starts with instrumentation only. The report writer now measures raw
+shard JSON serialization, JS escaping and filesystem/write+producer-hash time
+separately; catalog serialization receives the same split. It also records raw
+shard bytes, catalog bytes, total report output bytes/file count and Windows
+process memory through the existing Phase 9 memory sampler.
+
+The compatibility contract is explicit:
+- `js_json` is refactored into compact JSON + JS escaping helpers;
+- synthetic tests compare the new helper output byte-for-byte with the previous
+  implementation, including HTML-sensitive characters and U+2028/U+2029;
+- measured byte counters must equal actual generated files;
+- performance traces contain numeric counters only, never raw log text;
+- this step is not an optimization and does not select a new encoding,
+  escaping implementation, shard size or browser strategy.
+
+The real P14-00 gate uses the same disposable trusted 23/24/25 Sep source set,
+with Phase 11 process-prefetch and Phase 12 delta disabled by the inherited
+setup. No raw log artifact, credentials or private source evidence is uploaded.
