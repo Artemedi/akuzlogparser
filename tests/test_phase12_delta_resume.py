@@ -361,7 +361,7 @@ class Phase12DeltaResumeContractTests(unittest.TestCase):
             ("full", "strict_delta", "strict_delta",
              "full", "full", "strict_delta"))
 
-    def test_remote_sha_cpu_parser_uses_bash_time(self):
+    def test_remote_sha_cpu_parser_uses_posix_bash_time(self):
         class Channel:
             def shutdown_write(self):
                 pass
@@ -379,7 +379,7 @@ class Phase12DeltaResumeContractTests(unittest.TestCase):
                 return (
                     Stream(),
                     Stream((b"a" * 64) + b"  -\n"),
-                    Stream(b"AKUZ_PHASE12_SHA_CPU 1.250 0.750\n"),
+                    Stream(b"real 3.000\nuser 1.250\nsys 0.750\n"),
                 )
 
         cfg = type("Cfg", (), {"sudo_password": ""})()
@@ -388,7 +388,8 @@ class Phase12DeltaResumeContractTests(unittest.TestCase):
             client, cfg, "'/srv/hidden.log'", 123, False)
         self.assertEqual(digest, "a" * 64)
         self.assertEqual(server_cpu, 2.0)
-        self.assertIn("bash -c", client.command)
+        self.assertIn("env LC_ALL=C bash -c", client.command)
+        self.assertIn("time -p", client.command)
         self.assertNotIn("/usr/bin/time", client.command)
 
     def test_v2_ab_public_summary_redacts_trial_digests(self):
