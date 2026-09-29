@@ -1,0 +1,31 @@
+name: AKUZ dispatch final Fable review
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/akuz-dispatch-final-fable.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Dispatch existing Fable review on current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') { throw 'DBA-008D only' }
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          $body = @{ ref = 'main' } | ConvertTo-Json
+          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows/akuz-phase11-fable-review.yml/dispatches"
+          Invoke-RestMethod -Uri $uri -Headers $headers -Method Post -ContentType 'application/json' -Body $body
+          Write-Host 'FINAL_FABLE_DISPATCH=PASS'
