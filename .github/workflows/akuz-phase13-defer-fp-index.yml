@@ -1,5 +1,5 @@
-name: AKUZ Phase 13 deferred ix-fp A-B
-# Rerun after stage-duration parsing and metrics SQLite handle fixes.
+name: AKUZ Phase 13 deferred ix-fp replicated A-B
+# Balanced B/C/C/B/B/C replication after the corrected single real A/B.
 
 on:
   push:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   ab:
-    name: Real catalog-index plus deferred ix-fp A-B
+    name: Replicated catalog-index plus deferred ix-fp A-B
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 40
@@ -47,19 +47,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Analytics contract failed' }
           & python -B -m unittest discover -s tests -p 'test_phase13_defer_fp_index.py' -q
           if ($LASTEXITCODE -ne 0) { throw 'P13-03 benchmark guard failed' }
+          & python -B -m unittest discover -s tests -p 'test_phase13_defer_fp_index_replicated.py' -q
+          if ($LASTEXITCODE -ne 0) { throw 'P13-03 replicated harness guard failed' }
           Write-Host "EXACT_SHA=$actual"
           Write-Host 'PHASE13_DEFER_FP_PRE_GATE=PASS'
 
-      - name: Run real 23-24-25 deferred ix-fp A-B
+      - name: Run real 23-24-25 replicated deferred ix-fp A-B
         run: |
           $ErrorActionPreference = 'Stop'
           $privateRoot = 'E:\Software\Project\LogAkusExplorer\akuzlogparser'
           $result = Join-Path $privateRoot ("diagnostics\phase13_defer_fp_" + $env:GITHUB_RUN_ID + ".json")
-          & python -B scripts/bench_phase13_defer_fp_index.py `
+          & python -B scripts/bench_phase13_defer_fp_index_replicated.py `
             --config (Join-Path $privateRoot 'ConnectConf.cfg') `
             --app-root $privateRoot `
             --result $result
-          if ($LASTEXITCODE -ne 0) { throw 'P13-03 real A-B failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'P13-03 replicated real A-B failed' }
+          Write-Host 'REPLICATED_ORDER=B_C_C_B_B_C'
           Write-Host 'REAL_REPORTS=23_24_25_SEP'
           Write-Host 'CATALOG_ERROR_INDEX=ON_BOTH_MODES'
           Write-Host 'IX_LINE_UNCHANGED=YES'
