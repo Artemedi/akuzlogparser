@@ -222,8 +222,8 @@ runtime switches/harnesses/workflows removed. Final post-removal exact
 **362 Python PASS, 3 skipped**, browser **9/9 PASS**, diff/no-publish PASS.
 Phase 13 is closed; subsequent work begins with P14-00 measurement only.
 
-### Phase 14 — JS serialization, catalog, browser usability [OPEN]
-1. Разделить `shard_write_s` на CPU `json.dumps`/escaping и файловую запись, замерить output bytes и RSS.
+### Phase 14 — JS serialization, catalog, browser usability [IN PROGRESS]
+1. **P14-00 measurement-only — TEST.** Разделить `shard_write_s` на CPU `json.dumps`/escaping и файловую запись, замерить output bytes и RSS. Формат `raw_*.js`/`catalog.js` не менять; byte-equivalence обязателен до любых оптимизаций.
 2. Проверить наличие лишних проходов `raw.count("\ufffd")`, повторных преобразований, стоимости каталога и большого `rows`, не меняя `raw_*.js` и `catalog.js` вслепую.
 3. Измерить время первого открытия и интерактивности браузера для 657 738 событий, фильтры, даты, повторяющиеся ошибки, графики, память вкладки. Lazy loading/виртуализация — отдельный проект с проверкой совместимости standalone/offline UI.
 4. Предыдущий `str.translate` вместо JS escaping не подтвердил устойчивый выигрыш; не повторять без новой гипотезы.
