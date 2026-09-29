@@ -580,10 +580,13 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
         class FailingOwner:
             def __init__(self):
                 self.calls = 0
+                self.closed = False
 
             def close(self):
                 self.calls += 1
-                raise ProcessFetchUnsafeError("close failed")
+                if self.calls == 1:
+                    raise ProcessFetchUnsafeError("close failed")
+                self.closed = True
 
         with TemporaryDirectory(prefix="akuz_process_job_close_") as td:
             root = Path(td)
@@ -601,11 +604,12 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                     ProcessFetchUnsafeError,
                     "Could not close Windows kill Job Object"):
                 op.finish()
-            self.assertEqual(owner.calls, 1)
+            self.assertEqual(owner.calls, 2)
+            self.assertTrue(owner.closed)
             self.assertIsNone(op._kill_job)
-            # Handle teardown failed after the snapshot had already passed
-            # size/SHA/metadata validation. Fail closed, but do not destroy
-            # that validated temp in the generic abort finally path.
+            # The first close failure remains the primary result even though
+            # abort() successfully retries the exact retained owner. The
+            # already validated temp stays fail-closed and unpromoted.
             self.assertTrue(dest.exists())
 
     @unittest.skipIf(os.name == "nt", "POSIX fallback cleanup race")
@@ -773,6 +777,38 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             self.assertTrue(target.exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows Job owner retry")
+    def test_process_fetch_retains_job_alias_when_release_fails(self):
+        class RetryOwner:
+            def __init__(self):
+                self.calls = 0
+                self.closed = False
+
+            def close(self):
+                self.calls += 1
+                if self.calls == 1:
+                    raise OSError("injected owner close failure")
+                self.closed = True
+
+        with TemporaryDirectory(prefix="akuz_process_owner_alias_") as td:
+            root = Path(td)
+            op = ProcessFetch(
+                FakeContext(FakeReceiver(ready=False), FakeChild()),
+                lambda *args: None, (), root / "snapshot.log",
+                poll_timeout_s=.01, join_timeout_s=.01, kill_timeout_s=.01)
+            owner = RetryOwner()
+            op._kill_job = owner
+            with self.assertRaisesRegex(
+                    ProcessFetchUnsafeError,
+                    "Could not close Windows kill Job Object"):
+                op._release_kill_job()
+            self.assertIs(op._kill_job, owner)
+            self.assertEqual(owner.calls, 1)
+
+            op._release_kill_job()
+            self.assertTrue(owner.closed)
+            self.assertEqual(owner.calls, 2)
+            self.assertIsNone(op._kill_job)
+
     def test_job_owner_retains_handle_when_close_fails(self):
         import akuz_win_job_spawn as job_spawn
         owner = object.__new__(job_spawn._JobOwner)
@@ -1285,6 +1321,41 @@ class RealSpawnLifecycleTests(unittest.TestCase):
             self.assertEqual(
                 sorted(closed), sorted(created["handles"]))
             self.assertIsNone(op.child)
+            self.assertFalse(target.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
+    def test_atomic_finalize_creation_failure_terminates_assigned_child_sync(self):
+        import akuz_win_job_spawn as job_spawn
+
+        with TemporaryDirectory(prefix="akuz_process_finalize_fail_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            real_terminate = job_spawn._terminate_job_and_wait
+            terminated = []
+
+            def terminate_and_record(owner, process_handle, timeout_ms=10000):
+                terminated.append(int(process_handle))
+                return real_terminate(owner, process_handle, timeout_ms)
+
+            op = ProcessFetch(
+                get_job_bound_spawn_context(),
+                real_spawn_hanging_child, (), target,
+                poll_timeout_s=5, join_timeout_s=2, kill_timeout_s=2,
+                expected_listed_bytes=1,
+                require_kill_job=True, safe_ipc=True)
+            with patch(
+                    "akuz_win_job_spawn.util.Finalize",
+                    side_effect=RuntimeError("injected Finalize failure")), \
+                 patch(
+                    "akuz_win_job_spawn._terminate_job_and_wait",
+                    side_effect=terminate_and_record):
+                with self.assertRaisesRegex(
+                        RuntimeError, "Finalize failure"):
+                    op.start()
+
+            self.assertEqual(len(terminated), 1)
+            self.assertIsNone(op.child)
+            self.assertIsNone(op._kill_job)
             self.assertFalse(target.exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
