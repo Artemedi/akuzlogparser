@@ -45,11 +45,11 @@ class Phase14OrjsonEquivalenceTests(unittest.TestCase):
             )
             baseline = root / "baseline"
             candidate = root / "candidate"
-            generate(log, baseline, None, 2, 10)
+            generate(log, baseline, None, 10, 10)
             with patch.object(
                     akuz_html_explorer, "_json_compact",
                     benchmark._orjson_compact):
-                generate(log, candidate, None, 2, 10)
+                generate(log, candidate, None, 10, 10)
 
             baseline_files = {
                 path.relative_to(baseline).as_posix(): path.read_bytes()
