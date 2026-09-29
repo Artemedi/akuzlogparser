@@ -1,85 +1,103 @@
-# AKUZ Log Explorer 4.7.1 — Windows 10/11 x64 portable
+# AKUZ Log Explorer 4.8.0 — Windows 10/11 x64 portable
 
-Релиз анализирует **только файловые журналы AKUZ `.log`**. Системные
-журналы Windows/Linux и VCLib не собираются. Portable EXE включает Python,
-Paramiko и необходимые зависимости.
+## Главное в v4.8.0
 
-## Hotfix v4.7.1
+### Быстрее обработка нескольких SSH-журналов
 
-- Исправлено восстановление связи UI с локальным сервисом при единичном
-  transient `fetch('/api/status')` failure во время долгой обработки.
-  Раньше один такой сбой оставлял страницу навсегда в состоянии
-  «Нет связи с локальным сервисом: Failed to fetch», даже если backend
-  продолжал строить отчёты. Теперь UI автоматически повторяет только
-  read-only status polling с ограниченным backoff и восстанавливает
-  состояние после ответа сервиса.
-- Команда `/api/build` при этом **не повторяется**, поэтому hotfix не может
-  запустить вторую обработку той же пачки.
-- Добавлен browser regression, который воспроизводит один `Failed to fetch`
-  и подтверждает последующее восстановление UI.
+На Windows при выборе двух и более файлов источника Linux/SSH Explorer теперь
+по умолчанию получает следующий snapshot отдельным process одновременно с
+разбором уже скачанного файла. Одновременно работает не более одного
+fetch-child. Local и SMB/UNC источники не менялись.
 
-## База v4.7.0
+На предфинальном реальном A/B наборе из 857,563,363 байт:
 
-- **Быстрее multi-source fresh build:** normal-app использует проверенный
-  временный derived spool для свежих single-отчётов и повторно применяет
-  уже вычисленные производные поля при построении combined. Spool существует
-  только внутри текущей операции и удаляется после завершения/ошибки.
-  Постоянный B-lite sidecar и persistent derived clinical metadata не включены.
-- **Надёжнее публикация и кэш:** inventory сериализован OS-backed lock,
-  один app-root обслуживается одним экземпляром Explorer, отчёты публикуются
-  через `.building` + recovery intent. Ошибка combined не должна удалять
-  уже успешно готовые single-отчёты.
-- **Идентичность источников:** перед reuse SSH-источника stale browser
-  selection сверяется с новым server inventory; рост получает новую identity,
-  device/inode rotation отклоняется. Для локального файла можно явно включить
-  `AKUZ_VERIFY_LOCAL_SOURCE_SHA=1` — полный SHA исходника перед warm reuse.
-  По умолчанию дополнительного полного чтения нет.
-- **Парсинг:** один `casefold(message)` переиспользуется классификацией и
-  извлечением длительности; сохранены прежние Unicode fallback и приоритеты.
-  Добавлена numeric-only диагностика распознавания ошибок без текста событий.
-- **SSH compression остаётся opt-in.** На replicated fixed-prefix A/B реальных
-  журналов 23/24/25 Sep compression уменьшила медианное время передачи примерно
-  на 67,6–71,0% и socket RX на 72,1–76,9%, но measured parent `sshd` CPU вырос
-  приблизительно в 5,2–6,1 раза. Поэтому `compression=false` остаётся default.
-- Экспериментальные Phase 11 thread/process overlap harness **не подключены к
-  обычному приложению v4.7.1**. Thread-вариант отклонён. Process-isolated
-  23+24+25 benchmark на тех же fixed-prefix данных дал ~19,9% меньший median
-  wall при ~17,2% большем total CPU и полной source/report parity, но normal-app
-  cancellation/cache/restart integration не закрыта; поэтому runtime scheduler
-  этого релиза сознательно остаётся последовательным.
+- последовательный normal-app: **329.511 с**;
+- process-prefetch: **277.482 с**;
+- wall уменьшился примерно на **15.8%**;
+- inventory parity — PASS;
+- analytics SQL parity — PASS;
+- analytics exports parity — PASS.
 
-## Совместимость и обновление
+Это измерение конкретной рабочей нагрузки DBA-008D, а не гарантированный
+процент ускорения на любом сервере.
 
-Закройте работающий Explorer. Для обновления существующей установки достаточно
-заменить `AKUZLogExplorer.exe`; сохраняйте ваш `ConnectConf.cfg`,
-`downloads/`, `reports/`, `cache/` и `data/`. Не распаковывайте
-конфиг-пример поверх рабочего конфига.
+### Fail-closed Windows process lifecycle
 
-Старые готовые отчёты и inventory поддерживаются. Для обновления только UI уже
-созданных v4-отчётов из исходников существует
-`scripts/refresh_report_ui.py`; данные отчётов он не переписывает.
+Дочерний процесс создаётся приостановленным, помещается в Windows
+`KILL_ON_JOB_CLOSE` Job Object **до начала исполнения**, затем запускается.
+Это закрывает окно, в котором child мог пережить аварийное завершение parent.
 
-## Проверки
+IPC — ограниченный JSON. Parent заново проверяет скачанный snapshot полным
+SHA-256, размером и exact Windows file/parent identity. Hashing, promotion и
+удаление owned temp используют reparse-safe HANDLE semantics.
 
-Перед публикацией релизный commit должен пройти полный Python regression,
-Node browser controls, `git diff --check`, сборку Windows portable, self-test
-EXE и packaged smoke: запуск без Python в child PATH, localhost UI, локальный
-`.log` через API, сохранение исходника/конфига и создание inventory/SQLite/
-analytics рядом с EXE. `BUILD_INFO.json` содержит точный Git SHA сборки,
-а `SHA256SUMS.txt` — SHA-256 EXE и ZIP.
+Обычная ошибка предзагрузки возвращает приложение к прежней
+последовательной загрузке. Если невозможно доказать безопасное завершение
+child/Job Object или корректную очистку, Explorer завершает операцию с
+ошибкой вместо запуска второго writer.
 
-Подробная методика real-source и performance gate:
-`PERFORMANCE_NOTES.md`, `ROADMAP_PERFORMANCE.md`,
-`PHASE94_OWNER_ARCHITECTURE_GATE.md`, `PHASE10_SSH_COMPRESSION.md` и
-`PHASE11_SSH_OVERLAP.md`.
+Для немедленного отключения оптимизации:
+
+```powershell
+$env:AKUZ_PHASE11_PROCESS_PREFETCH = '0'
+.\AKUZLogExplorer.exe
+```
+
+Удалите переменную, чтобы вернуть default-on режим.
+
+### Cache / crash / promotion
+
+Prefetch child не пишет inventory. Parent принимает только полностью
+проверенный snapshot. Promotion — atomic no-overwrite hard-link после
+durable inventory intent. Внешний файл назначения не перезаписывается.
+
+Restart после crash проверяет warm download по существованию файла, точному
+размеру и полному SHA-256. Отсутствующий final или same-size внешний файл с
+неверным SHA не считается валидным кэшем.
+
+Unsupported/cross-volume hard-link может откатить только оптимизацию и
+продолжить serial path. Permission, disk-full и другие реальные I/O ошибки
+не маскируются повторной загрузкой.
+
+### Независимое ревью и проверки
+
+Финальное независимое Claude Fable review:
+Actions #36538397765 — **LIFECYCLE=ACCEPT,
+TRANSACTION=ACCEPT, OVERALL=ACCEPT**.
+
+До version bump полный Windows suite:
+Actions #36537874019 — **318 Python tests PASS, 3 skips**,
+browser controls PASS, `git diff --check` PASS.
+
+Перед публикацией v4.8.0 тот же production candidate дополнительно проходит
+финальный exact-SHA regression, real normal-app A/B, numeric evidence audit,
+frozen portable spawn/self-test, packaged smoke, BUILD_INFO и SHA256SUMS.
+
+## Остальное поведение
+
+- Phase 9 ephemeral derived spool остаётся production-архитектурой combined.
+  Persistent B-lite metadata не создаётся.
+- SSH compression остаётся `compression=false` по умолчанию и включается
+  только явно.
+- Hotfix v4.7.1 status-polling сохранён: transient `Failed to fetch` не
+  останавливает UI polling, а POST-команда build автоматически не повторяется.
+- Старые reports, inventory, downloads, analytics и ConnectConf.cfg
+  совместимы.
+
+## Обновление
+
+Закройте работающий Explorer. Для существующей portable-папки достаточно
+заменить `AKUZLogExplorer.exe`. Сохраните свой `ConnectConf.cfg`,
+`downloads/`, `reports/`, `cache/` и `data/`.
+
+В поставку не входят заполненный конфиг, реальные журналы, медицинские
+данные, рабочие отчёты или private diagnostics.
 
 ## Файлы выпуска
 
-- `AKUZLogExplorer-windows-x64.zip` — EXE, конфиг-пример,
-  `README_PORTABLE.md` и `BUILD_INFO.json`.
-- `AKUZLogExplorer.exe` — отдельно для обновления существующей установки.
-- `SHA256SUMS.txt` — контрольные суммы EXE и ZIP.
+- `AKUZLogExplorer.exe`
+- `AKUZLogExplorer-windows-x64.zip`
+- `SHA256SUMS.txt`
 
-В поставку не входят заполненный `ConnectConf.cfg`, реальные журналы,
-медицинские данные, рабочие отчёты, приватные diagnostics или benchmark JSON.
-EXE не подписан Authenticode.
+Архив содержит `BUILD_INFO.json` с точным Git SHA сборки. EXE не подписан
+Authenticode.
