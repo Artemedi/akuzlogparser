@@ -127,3 +127,5 @@ jobs:
           '@ | python -B -
           if ($LASTEXITCODE -ne 0) { throw 'Actions cleanup failed' }
 # Retention rerun requested after v4.8.0 release; safety policy unchanged.
+
+# Obsolete workflow cleanup requested after workflow pruning.
