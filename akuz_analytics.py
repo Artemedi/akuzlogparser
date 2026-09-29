@@ -8,6 +8,7 @@ from akuz_store import load_store, source_date, sha256
 from akuz_store_lock import inventory_transaction
 LOCK=threading.RLock()
 VERSION=5
+ERROR_FINGERPRINT_VERSION=1
 REPORT_ID=re.compile(r"^v4_[A-Za-z0-9_-]{1,74}$")
 EXCEPTION=re.compile(r"(?<![\w.])(?:[A-Za-z_]\w*\.)*([A-Z][A-Za-z0-9_]*(?:Exception|Error))\b\s*:?",re.I)
 SERIAL=re.compile(r"ошибк[а-я]*\s+сериализац[а-я]*|serialization\s+(?:failed|error)|сбой\s+сериализац[а-я]*",re.I)
@@ -166,6 +167,8 @@ def _trusted_catalog_error_index(info, catalog_path, catalog, requested):
     """Use negative fingerprint lookups only for an integrity-proven catalog."""
     if not requested:
         return None
+    if info.get("error_fingerprint_version") != ERROR_FINGERPRINT_VERSION:
+        return None
     index = catalog.get("errorFingerprints")
     integrity = info.get("integrity")
     expected = (
@@ -250,7 +253,11 @@ def ingest(db,rid,info,catalog_path,aliases,use_catalog_error_index=False):
     index_skipped_no_error=0
     recognize_calls=0
     raw_shards_loaded=0
+    raw_shard_bytes_loaded=0
     matched_errors=0
+    raw_sha_lookup_calls=0
+    insert_attempts=0
+    ambiguous_update_calls=0
     rows = catalog["rows"]
     for index, row in enumerate(rows, 1):
         if index % 50000 == 0:
@@ -270,7 +277,9 @@ def ingest(db,rid,info,catalog_path,aliases,use_catalog_error_index=False):
             continue
         number=int(row[10])
         if part!=number:
-            raw_shard=read_js(catalog_path.parent/("raw_%05d.js"%number),"window.AKUZ_RAW=")
+            raw_path=catalog_path.parent/("raw_%05d.js"%number)
+            raw_shard_bytes_loaded += raw_path.stat().st_size
+            raw_shard=read_js(raw_path,"window.AKUZ_RAW=")
             part=number
             raw_shards_loaded += 1
         raw=raw_shard[int(row[11])]
@@ -285,10 +294,12 @@ def ingest(db,rid,info,catalog_path,aliases,use_catalog_error_index=False):
         matched_errors += 1
         line,end=int(row[8]),int(row[9])
         raw_sha=hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        raw_sha_lookup_calls += 1
         prior=db.execute("SELECT raw_sha FROM errors WHERE source_key=? AND line_no=?",
                          (key,line)).fetchall()
         ambiguous=any(r["raw_sha"]!=raw_sha for r in prior)
         if ambiguous:
+            ambiguous_update_calls += 1
             db.execute("UPDATE errors SET ambiguous=1 WHERE source_key=? AND line_no=?",
                        (key,line))
         merged_offset=int(row[1])
@@ -307,6 +318,7 @@ def ingest(db,rid,info,catalog_path,aliases,use_catalog_error_index=False):
         calendar_day=(source_day+timedelta(days=relative_day)
                       if source_day else None)
         when=(calendar_day.isoformat() if calendar_day and not date_conflict else None)
+        insert_attempts += 1
         db.execute("""INSERT OR IGNORE INTO errors
           (fp,exception,family,template,method,source_key,line_no,end_line,raw_sha,
            day,clock,report_id,event_id,ambiguous,relative_day)
@@ -321,7 +333,11 @@ def ingest(db,rid,info,catalog_path,aliases,use_catalog_error_index=False):
         index_skipped_no_error=index_skipped_no_error,
         recognize_calls=recognize_calls,
         raw_shards_loaded=raw_shards_loaded,
+        raw_shard_bytes_loaded=raw_shard_bytes_loaded,
         matched_errors=matched_errors,
+        raw_sha_lookup_calls=raw_sha_lookup_calls,
+        insert_attempts=insert_attempts,
+        ambiguous_update_calls=ambiguous_update_calls,
         catalog_verify_s=round(catalog_verify_s, 6),
         elapsed_s=round(perf_counter()-started, 6))
 def signature_label(number):

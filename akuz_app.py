@@ -206,6 +206,9 @@ def _publish(root, store, key, raw_path, base, sources, label, kind,
         # Do not trust hashes from an injected/custom generator.
         producer_hashes = meta.pop('_output_hashes', None)
         trusted = gen_fn is generate or getattr(gen_fn, '_akuz_builtin_generator', False)
+        if trusted:
+            from akuz_analytics import ERROR_FINGERPRINT_VERSION
+            value['error_fingerprint_version'] = ERROR_FINGERPRINT_VERSION
         intent = write_intent(root, value, temp/'provenance.json',
                               output_hashes=producer_hashes if trusted else None)
         temp.rename(final)

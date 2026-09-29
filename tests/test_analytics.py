@@ -155,6 +155,45 @@ class ErrorAnalyticsTests(unittest.TestCase):
             server.server_close()
             worker.join(timeout=3)
 
+    def test_phase13_switch_and_fingerprint_version_gate(self):
+        from akuz_analytics import (
+            ERROR_FINGERPRINT_VERSION,
+            _phase13_catalog_error_index_requested,
+            _trusted_catalog_error_index,
+        )
+        self.assertFalse(_phase13_catalog_error_index_requested({}))
+        for value in ("1", "true", "YES", "on"):
+            self.assertTrue(_phase13_catalog_error_index_requested(
+                {"AKUZ_PHASE13_CATALOG_ERROR_INDEX": value}))
+        for value in ("0", "false", "NO", "off"):
+            self.assertFalse(_phase13_catalog_error_index_requested(
+                {"AKUZ_PHASE13_CATALOG_ERROR_INDEX": value}))
+        with self.assertRaisesRegex(
+                ValueError, "AKUZ_PHASE13_CATALOG_ERROR_INDEX"):
+            _phase13_catalog_error_index_requested(
+                {"AKUZ_PHASE13_CATALOG_ERROR_INDEX": "maybe"})
+
+        report = self.report(
+            "phase13_version_gate",
+            "12:00:00.100,AKUZ,session,user: normal\n"
+            + self.event("13:00:00.100", "1234"))
+        info = load_store(self.root)["reports"][report["id"]]
+        self.assertEqual(
+            info.get("error_fingerprint_version"),
+            ERROR_FINGERPRINT_VERSION)
+        catalog_path = (
+            self.root / "reports" / report["id"] / "data" / "catalog.js")
+        catalog = read_js(catalog_path, "window.AKUZ_DATA=")
+        self.assertIsNotNone(_trusted_catalog_error_index(
+            info, catalog_path, catalog, True))
+        legacy = dict(info)
+        legacy.pop("error_fingerprint_version", None)
+        self.assertIsNone(_trusted_catalog_error_index(
+            legacy, catalog_path, catalog, True))
+        future = dict(info, error_fingerprint_version=999)
+        self.assertIsNone(_trusted_catalog_error_index(
+            future, catalog_path, catalog, True))
+
     def test_catalog_error_index_candidate_is_sql_and_export_equivalent(self):
         normal = "".join(
             f"12:{n:02}:00.100,AKUZ,session,user: normal event {n}\n"
@@ -184,6 +223,9 @@ class ErrorAnalyticsTests(unittest.TestCase):
         self.assertIn("catalog_error_index=1", summaries[-1])
         self.assertIn("recognize_calls=2", summaries[-1])
         self.assertIn("index_skipped_no_error=12", summaries[-1])
+        self.assertIn("raw_shard_bytes_loaded=", summaries[-1])
+        self.assertIn("raw_sha_lookup_calls=2", summaries[-1])
+        self.assertIn("insert_attempts=2", summaries[-1])
 
     def test_catalog_error_index_never_trusts_corrupt_catalog(self):
         report = self.report(
