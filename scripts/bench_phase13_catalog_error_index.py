@@ -97,7 +97,7 @@ def _db_metrics(root: Path):
     )
 
 
-def _run_refresh(root: Path, use_index: bool):
+def _run_refresh(root: Path, use_index: bool | None):
     offset = _trace_count(root)
     wall0, cpu0 = perf_counter(), process_time()
     overview = refresh(root, use_catalog_error_index=use_index)
@@ -216,7 +216,8 @@ def run(config_path: Path, app_root: Path):
         baseline = _run_refresh(root, False)
 
         _reset_analytics(root)
-        candidate = _run_refresh(root, True)
+        # Acceptance of the production default, not an explicit forced-on path.
+        candidate = _run_refresh(root, None)
 
         if baseline["overview"] != candidate["overview"]:
             raise AssertionError("Overview differs")
@@ -242,7 +243,7 @@ def run(config_path: Path, app_root: Path):
         b = baseline["metrics"]
         c = candidate["metrics"]
         return dict(
-            status="PHASE13_REAL_CATALOG_INDEX_AB",
+            status="PHASE13_REAL_DEFAULT_CATALOG_INDEX_AB",
             setup=setup,
             baseline=b,
             candidate=c,
@@ -299,7 +300,7 @@ def main():
         args.result.write_text(
             json.dumps(result, ensure_ascii=False, indent=2),
             encoding="utf-8")
-        print("PHASE13_REAL_CATALOG_INDEX_AB=PASS")
+        print("PHASE13_REAL_DEFAULT_CATALOG_INDEX_AB=PASS")
         print("PUBLIC_SUMMARY", json.dumps(_public(result), sort_keys=True))
         print("EXACT_SQL_EQUIVALENCE=PASS")
         print("EXACT_EXPORT_EQUIVALENCE=PASS")

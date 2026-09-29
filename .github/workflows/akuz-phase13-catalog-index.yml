@@ -1,4 +1,5 @@
 name: AKUZ Phase 13 catalog error-index A-B
+# Default-on acceptance rerun after replicated 3x3 PASS.
 
 on:
   push:
