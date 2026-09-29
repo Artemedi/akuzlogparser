@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import io
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -359,6 +360,36 @@ class Phase12DeltaResumeContractTests(unittest.TestCase):
             delta_ab.ORDER,
             ("full", "strict_delta", "strict_delta",
              "full", "full", "strict_delta"))
+
+    def test_remote_sha_cpu_parser_uses_bash_time(self):
+        class Channel:
+            def shutdown_write(self):
+                pass
+            def recv_exit_status(self):
+                return 0
+
+        class Stream(io.BytesIO):
+            def __init__(self, data=b""):
+                super().__init__(data)
+                self.channel = Channel()
+
+        class Client:
+            def exec_command(self, command, timeout=600, get_pty=False):
+                self.command = command
+                return (
+                    Stream(),
+                    Stream((b"a" * 64) + b"  -\n"),
+                    Stream(b"AKUZ_PHASE12_SHA_CPU 1.250 0.750\n"),
+                )
+
+        cfg = type("Cfg", (), {"sudo_password": ""})()
+        client = Client()
+        digest, _, _, server_cpu = delta_smoke._remote_prefix_sha(
+            client, cfg, "'/srv/hidden.log'", 123, False)
+        self.assertEqual(digest, "a" * 64)
+        self.assertEqual(server_cpu, 2.0)
+        self.assertIn("bash -c", client.command)
+        self.assertNotIn("/usr/bin/time", client.command)
 
     def test_v2_ab_public_summary_redacts_trial_digests(self):
         result = dict(
