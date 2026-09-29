@@ -984,40 +984,60 @@ def _snapshot_identity(st):
 
 def _sha256_owned_snapshot(
         path: Path, expected_stat, *, return_cleanup_identity=False):
-    """Hash the exact regular file identity validated by lstat.
+    """Hash one exact regular-file identity without following reparse points.
 
-    The descriptor identity must match the pre-open lstat and remain stable
-    for the whole read. A post-read owned-path check also proves the pathname
-    still resolves to that same file rather than a swapped symlink/reparse
-    target. O_NOFOLLOW is used where the platform exposes it; Windows is bound
-    by file identity because os.open does not provide O_NOFOLLOW there.
+    On Windows the file and its parent directory are opened with explicit
+    OPEN_REPARSE_POINT identity guards before any bytes are read. The exact
+    file HANDLE is transferred to a CRT fd for streaming SHA-256, so a
+    pathname swap/symlink cannot redirect the hash after the pre-open lstat.
     """
     target = Path(path)
-    flags = os.O_RDONLY
-    flags |= getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_NOINHERIT", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-
-    try:
-        fd = os.open(target, flags)
-    except OSError as exc:
-        raise ProcessFetchError(
-            "Process fetch snapshot could not be opened safely") from exc
-
     cleanup_identity = None
     parent_cleanup_identity = None
+    parent_guard = None
+    file_handle = None
+    fd = None
+    after = None
+    digest = hashlib.sha256()
+
     try:
+        if os.name == "nt":
+            import msvcrt
+            parent_guard = _windows_open_promotion_guard_handle(
+                target.parent, directory=True)
+            parent_cleanup_identity = _windows_directory_identity(parent_guard)
+
+            file_handle = _windows_open_promotion_guard_handle(
+                target, directory=False)
+            cleanup_identity = _windows_cleanup_identity(file_handle)
+
+            raw_handle = _windows_handle_value(file_handle)
+            flags = os.O_RDONLY
+            flags |= getattr(os, "O_BINARY", 0)
+            flags |= getattr(os, "O_NOINHERIT", 0)
+            try:
+                fd = msvcrt.open_osfhandle(raw_handle, flags)
+            except OSError as exc:
+                raise ProcessFetchUnsafeError(
+                    "Process fetch snapshot HANDLE could not become fd") from exc
+            # The CRT fd now owns the exact Windows HANDLE.
+            file_handle = None
+        else:
+            flags = os.O_RDONLY
+            flags |= getattr(os, "O_BINARY", 0)
+            flags |= getattr(os, "O_NOINHERIT", 0)
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+            try:
+                fd = os.open(target, flags)
+            except OSError as exc:
+                raise ProcessFetchError(
+                    "Process fetch snapshot could not be opened safely") from exc
+
         opened = os.fstat(fd)
         if _snapshot_identity(opened) != _snapshot_identity(expected_stat):
             raise ProcessFetchError(
                 "Process fetch snapshot identity changed before hashing")
-        if os.name == "nt":
-            import msvcrt
-            cleanup_identity = _windows_cleanup_identity(
-                msvcrt.get_osfhandle(fd))
-            parent_cleanup_identity = _windows_parent_identity(target.parent)
 
-        digest = hashlib.sha256()
         while True:
             chunk = os.read(fd, 1024 * 1024)
             if not chunk:
@@ -1028,6 +1048,7 @@ def _sha256_owned_snapshot(
         if _snapshot_identity(after) != _snapshot_identity(opened):
             raise ProcessFetchError(
                 "Process fetch snapshot changed while hashing")
+
         if os.name == "nt":
             import msvcrt
             cleanup_after = _windows_cleanup_identity(
@@ -1035,17 +1056,26 @@ def _sha256_owned_snapshot(
             if cleanup_after != cleanup_identity:
                 raise ProcessFetchError(
                     "Process fetch Windows identity changed while hashing")
-            if _windows_parent_identity(target.parent) != parent_cleanup_identity:
+            if (_windows_directory_identity(parent_guard)
+                    != parent_cleanup_identity):
                 raise ProcessFetchError(
                     "Process fetch parent identity changed while hashing")
     finally:
-        os.close(fd)
+        if fd is not None:
+            os.close(fd)
+        elif file_handle is not None:
+            _close_windows_handle(file_handle)
+        if parent_guard is not None:
+            _close_windows_handle(parent_guard)
+
+    if after is None:
+        raise ProcessFetchUnsafeError(
+            "Process fetch snapshot hash did not complete")
 
     token = (cleanup_identity, parent_cleanup_identity)
     if os.name == "nt":
-        # Re-open authoritative file+parent HANDLE identities after the hash
-        # descriptor closes. The returned token is later held again across
-        # os.link() by owned_snapshot_promotion_guard().
+        # Re-open authoritative file+parent HANDLE identities after hashing.
+        # The same token is later held across hard-link promotion and cleanup.
         with owned_snapshot_promotion_guard(target, token):
             visible = _owned_snapshot_stat(target)
             if _snapshot_identity(visible) != _snapshot_identity(after):
@@ -1056,6 +1086,7 @@ def _sha256_owned_snapshot(
         if _snapshot_identity(visible) != _snapshot_identity(after):
             raise ProcessFetchError(
                 "Process fetch snapshot path changed while hashing")
+
     value = digest.hexdigest()
     if return_cleanup_identity:
         return value, token
