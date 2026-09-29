@@ -1,0 +1,86 @@
+name: AKUZ Phase 12 opt-in final acceptance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/akuz-phase12-final-optin.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akuz-phase12-final-optin
+  cancel-in-progress: true
+
+jobs:
+  acceptance:
+    name: Real normal-app delta + portable on DBA-008D
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out exact Phase 12 opt-in revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify exact runner and Phase 12 focused contract
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
+            throw 'DBA-008D only'
+          }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:GITHUB_SHA) {
+            throw 'Checkout does not match GITHUB_SHA'
+          }
+          & python -B -m unittest discover -s tests -p 'test_phase12*.py' -q
+          if ($LASTEXITCODE -ne 0) { throw 'Phase 12 focused contract failed' }
+          Write-Host "EXACT_SHA=$actual"
+          Write-Host 'PHASE12_FOCUSED_PRE_GATE=PASS'
+
+      - name: Run real normal-app full vs opt-in delta integration gate
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $privateRoot = 'E:\Software\Project\LogAkusExplorer\akuzlogparser'
+          $result = Join-Path $privateRoot ("diagnostics\phase12_normal_app_real_20260925_" + $env:GITHUB_RUN_ID + ".json")
+          & python -B scripts/bench_phase12_normal_app_real.py `
+            --config (Join-Path $privateRoot 'ConnectConf.cfg') `
+            --app-root $privateRoot `
+            --day 20260925 `
+            --previous-bytes 644034993 `
+            --result $result
+          if ($LASTEXITCODE -ne 0) { throw 'Phase 12 real normal-app gate failed' }
+          Write-Host 'NORMAL_APP_SCOPE=OWNED_TEMP_WORKSPACES'
+          Write-Host 'RAW_LOG_ARTIFACT_UPLOAD=NO'
+          Write-Host 'NO_RELEASE_CHANGE=PASS'
+
+      - name: Build portable with Phase 12 module
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & python -B scripts/build_portable.py
+          if ($LASTEXITCODE -ne 0) { throw 'Portable build failed' }
+          Write-Host 'PORTABLE_BUILD=PASS'
+
+      - name: Run packaged portable smoke including Phase 12 delta self-test
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & python -B scripts/smoke_portable.py dist/AKUZLogExplorer-windows-x64.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Portable smoke failed' }
+          Write-Host 'PORTABLE_PHASE12_SELF_TEST=PASS'
+          Write-Host 'RELEASE_CHANGED=NO'
+
+      - name: Diff hygiene
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
+          Write-Host 'DIFF_CHECK=PASS'

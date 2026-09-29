@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import patch
 
 import akuz_app as app
+from scripts import bench_phase12_normal_app_real as phase12_real
 from akuz_fetch import ConnectConfig, DeltaResumeFallback
 from akuz_store import load_store, sha256
 
@@ -230,6 +231,32 @@ class Phase12NormalAppTests(unittest.TestCase):
             Path(__file__).resolve().parents[1]
             / "scripts" / "build_portable.py").read_text("utf-8")
         self.assertIn("'--hidden-import', 'akuz_delta'", script)
+
+    def test_real_gate_public_summary_is_sanitized(self):
+        result = dict(
+            fixed_prefix_bytes=100,
+            previous_bytes=80,
+            delta_bytes=20,
+            control_wall_s=10.0,
+            control_cpu_s=3.0,
+            delta_wall_s=5.0,
+            delta_cpu_s=2.0,
+            wall_reduction_pct=50.0,
+            snapshot_equivalence=True,
+            report_equivalence=True,
+            semantic_sql_equivalence=True,
+            semantic_export_equivalence=True,
+            delta_resume_downloads=1,
+            delta_resume_fallbacks=0,
+            host="secret-host",
+            remote_path="/secret/path",
+            snapshot_sha256="secret-digest",
+        )
+        public = phase12_real._public(result)
+        rendered = repr(public)
+        self.assertNotIn("secret-host", rendered)
+        self.assertNotIn("/secret/path", rendered)
+        self.assertNotIn("secret-digest", rendered)
 
     def test_invalid_delta_switch_fails_before_fetch(self):
         state, selected = self.prepare()
