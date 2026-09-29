@@ -31,7 +31,7 @@ jobs:
           from pathlib import Path
           import sys
 
-          path = Path(r'E:\Software\Project\LogAkusExplorer\akuzlogparser\diagnostics\phase11_normal_app_real_static_24_27_rc_20260929.json')
+          path = Path(r'E:\Software\Project\LogAkusExplorer\akuzlogparser\diagnostics\phase11_normal_app_real_static_24_27_v480_final_20260929.json')
           try:
               data = json.loads(path.read_text(encoding='utf-8'))
               if data.get('status') != 'PHASE11_NORMAL_APP_REAL_STATIC_ACCEPTANCE':
@@ -75,7 +75,7 @@ jobs:
               print('PHASE11_RC_WORKSPACE_CLEANED=PASS')
               print('NO_SHA_PATH_HOST_OR_PAYLOAD_PRINTED=PASS')
           except BaseException as exc:
-              print('PHASE11_FINAL_DEFAULT_EVIDENCE_FAILED', type(exc).__name__)
+              print('PHASE11_V480_FINAL_EVIDENCE_FAILED', type(exc).__name__)
               sys.exit(1)
           '@ | python -B -
           if ($LASTEXITCODE -ne 0) { throw 'Phase 11 normal-app evidence audit failed' }
