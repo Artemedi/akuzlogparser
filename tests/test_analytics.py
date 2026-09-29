@@ -12,6 +12,26 @@ from akuz_analytics import recognize_error,refresh,connect,detail,read_js,source
 from akuz_store import load_store,save_store,sha256
 
 
+def _analytics_db_snapshot(root: Path):
+    path = root / "cache" / "error_analytics.sqlite"
+    with closing(sqlite3.connect(path)) as db:
+        tables = sorted(row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%'"))
+        return {
+            name: list(db.execute('SELECT * FROM "' + name + '" ORDER BY rowid'))
+            for name in tables
+        }
+
+
+def _analytics_js_snapshot(root: Path):
+    folder = root / "data"
+    return {
+        path.name: path.read_bytes()
+        for path in sorted(folder.glob("*.js"))
+    }
+
+
 class ErrorAnalyticsTests(unittest.TestCase):
     def setUp(self):
         self.temp=TemporaryDirectory()
@@ -133,6 +153,60 @@ class ErrorAnalyticsTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             worker.join(timeout=3)
+
+    def test_catalog_error_index_candidate_is_sql_and_export_equivalent(self):
+        normal = "".join(
+            f"12:{n:02}:00.100,AKUZ,session,user: normal event {n}\n"
+            for n in range(12))
+        self.report(
+            "phase13_index",
+            normal + self.event("13:00:00.100", "1234")
+            + self.event("13:01:00.100", "5678"))
+
+        baseline = refresh(self.root, use_catalog_error_index=False)
+        baseline_db = _analytics_db_snapshot(self.root)
+        baseline_js = _analytics_js_snapshot(self.root)
+
+        (self.root / "cache" / "error_analytics.sqlite").unlink()
+        shutil.rmtree(self.root / "data")
+        candidate = refresh(self.root, use_catalog_error_index=True)
+
+        self.assertEqual(candidate, baseline)
+        self.assertEqual(_analytics_db_snapshot(self.root), baseline_db)
+        self.assertEqual(_analytics_js_snapshot(self.root), baseline_js)
+        trace = (self.root / "diagnostics" / "performance.txt").read_text("utf-8")
+        summaries = [
+            line for line in trace.splitlines()
+            if "stage=analytics.ingest status=summary" in line
+        ]
+        self.assertTrue(summaries)
+        self.assertIn("catalog_error_index=1", summaries[-1])
+        self.assertIn("recognize_calls=2", summaries[-1])
+        self.assertIn("index_skipped_no_error=12", summaries[-1])
+
+    def test_catalog_error_index_never_trusts_corrupt_catalog(self):
+        report = self.report(
+            "phase13_corrupt",
+            "12:00:00.100,AKUZ,session,user: normal\n"
+            + self.event("13:00:00.100", "1234"))
+        baseline = refresh(self.root, use_catalog_error_index=False)
+        catalog = self.root / "reports" / report["id"] / "data" / "catalog.js"
+        data = read_js(catalog, "window.AKUZ_DATA=")
+        data["errorFingerprints"] = {}
+        catalog.write_text(
+            "window.AKUZ_DATA=" + json.dumps(
+                data, ensure_ascii=False, separators=(",", ":")) + ";\n",
+            encoding="utf-8")
+        (self.root / "cache" / "error_analytics.sqlite").unlink()
+        shutil.rmtree(self.root / "data")
+        candidate = refresh(self.root, use_catalog_error_index=True)
+        self.assertEqual(candidate["distinct_errors"], baseline["distinct_errors"])
+        trace = (self.root / "diagnostics" / "performance.txt").read_text("utf-8")
+        summaries = [
+            line for line in trace.splitlines()
+            if "stage=analytics.ingest status=summary" in line
+        ]
+        self.assertIn("catalog_error_index=0", summaries[-1])
 
     def test_normalized_fingerprint_and_family(self):
         first=recognize_error(self.event("12:00:00.100", "1234"))

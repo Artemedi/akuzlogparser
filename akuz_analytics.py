@@ -2,9 +2,9 @@
 from __future__ import annotations
 from collections import Counter
 from datetime import date,timedelta
-import hashlib,json,re,sqlite3,threading
+import hashlib,json,os,re,sqlite3,threading
 from pathlib import Path
-from akuz_store import load_store, source_date
+from akuz_store import load_store, source_date, sha256
 from akuz_store_lock import inventory_transaction
 LOCK=threading.RLock()
 VERSION=5
@@ -148,6 +148,44 @@ def source_identity(info):
     return hashlib.sha256(("\0".join((host,path,sha))).encode("utf-8")).hexdigest()
 
 
+def _phase13_catalog_error_index_requested(env=None):
+    """Parse Phase 13 experimental switch; default remains historical scan."""
+    values = os.environ if env is None else env
+    name = "AKUZ_PHASE13_CATALOG_ERROR_INDEX"
+    if name not in values:
+        return False
+    flag = str(values[name]).strip().lower()
+    if flag in ("1", "true", "yes", "on"):
+        return True
+    if flag in ("0", "false", "no", "off"):
+        return False
+    raise ValueError("Неверное значение AKUZ_PHASE13_CATALOG_ERROR_INDEX")
+
+
+def _trusted_catalog_error_index(info, catalog_path, catalog, requested):
+    """Use negative fingerprint lookups only for an integrity-proven catalog."""
+    if not requested:
+        return None
+    index = catalog.get("errorFingerprints")
+    integrity = info.get("integrity")
+    expected = (
+        integrity.get("required_sha256", {}).get("data/catalog.js")
+        if isinstance(integrity, dict) else None)
+    if (not isinstance(index, dict) or not isinstance(expected, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected) is None):
+        return None
+    # The index is only safe for negative lookups when the immutable catalog
+    # matches the publication-time SHA. Legacy/unproven reports use baseline.
+    if sha256(catalog_path) != expected:
+        return None
+    for key, value in index.items():
+        if (not isinstance(key, str) or not key.isdigit() or int(key) <= 0
+                or not isinstance(value, str)
+                or re.fullmatch(r"[0-9a-f]{24}", value) is None):
+            return None
+    return index
+
+
 def source_key(info,rid,sid,aliases):
     path=str(info.get("remote_path") or "")
     host=str(info.get("host") or "")
@@ -160,12 +198,16 @@ def source_key(info,rid,sid,aliases):
         aliases[identity]=key
     return key
 
-def ingest(db,rid,info,catalog_path,aliases):
+def ingest(db,rid,info,catalog_path,aliases,use_catalog_error_index=False):
     from akuz_diagnostics import event as perf_event
     from time import perf_counter
     started = perf_counter()
     perf_root = catalog_path.parent.parent.parent.parent
     catalog=read_js(catalog_path,"window.AKUZ_DATA=")
+    verify_started = perf_counter()
+    error_index = _trusted_catalog_error_index(
+        info, catalog_path, catalog, use_catalog_error_index)
+    catalog_verify_s = perf_counter() - verify_started
     base=catalog["meta"].get("base_date")
     base_day=date.fromisoformat(base) if base else None
     provenance=info.get("sources") or []
@@ -205,7 +247,12 @@ def ingest(db,rid,info,catalog_path,aliases):
             (identity,)).fetchone()["conflict"]),has_source_date,chosen)
     part=None
     raw_shard=[]
-    for index, row in enumerate(catalog["rows"], 1):
+    index_skipped_no_error=0
+    recognize_calls=0
+    raw_shards_loaded=0
+    matched_errors=0
+    rows = catalog["rows"]
+    for index, row in enumerate(rows, 1):
         if index % 50000 == 0:
             perf_event(perf_root, 'analytics.ingest', 'progress', events=index,
                        elapsed_s=round(perf_counter()-started, 3))
@@ -214,14 +261,28 @@ def ingest(db,rid,info,catalog_path,aliases):
             sid,(rid+":"+str(sid),False,False,False,""))
         if skip:
             continue
+        event_id = int(row[0])
+        expected_fp = (
+            error_index.get(str(event_id))
+            if error_index is not None else None)
+        if error_index is not None and expected_fp is None:
+            index_skipped_no_error += 1
+            continue
         number=int(row[10])
         if part!=number:
             raw_shard=read_js(catalog_path.parent/("raw_%05d.js"%number),"window.AKUZ_RAW=")
             part=number
+            raw_shards_loaded += 1
         raw=raw_shard[int(row[11])]
+        recognize_calls += 1
         match=recognize_error(raw)
         if match is None:
+            if expected_fp is not None:
+                raise ValueError("Trusted catalog error index mismatch")
             continue
+        if expected_fp is not None and match["fp"] != expected_fp:
+            raise ValueError("Trusted catalog error fingerprint mismatch")
+        matched_errors += 1
         line,end=int(row[8]),int(row[9])
         raw_sha=hashlib.sha256(raw.encode("utf-8")).hexdigest()
         prior=db.execute("SELECT raw_sha FROM errors WHERE source_key=? AND line_no=?",
@@ -252,7 +313,17 @@ def ingest(db,rid,info,catalog_path,aliases):
            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
           (match["fp"],match["exception"],match["family"],match["template"],
            match["method"],key,line,end,raw_sha,when,str(row[2]),
-           rid,int(row[0]),int(ambiguous),relative_day))
+           rid,event_id,int(ambiguous),relative_day))
+    perf_event(
+        perf_root, 'analytics.ingest', 'summary',
+        events=len(rows),
+        catalog_error_index=int(error_index is not None),
+        index_skipped_no_error=index_skipped_no_error,
+        recognize_calls=recognize_calls,
+        raw_shards_loaded=raw_shards_loaded,
+        matched_errors=matched_errors,
+        catalog_verify_s=round(catalog_verify_s, 6),
+        elapsed_s=round(perf_counter()-started, 6))
 def signature_label(number):
     """Human-readable number of exact templates in a broad group."""
     ending=("шаблон" if number%10==1 and number%100!=11 else
@@ -440,10 +511,12 @@ def update_source_date(root,identity,first_date):
         return dict(updated_reports=changed,overview=overview)
 
 
-def refresh(root):
+def refresh(root,use_catalog_error_index=None):
     """Idempotent processing of *reports*, never a network operation."""
     from akuz_diagnostics import event as perf_event, phase as perf_phase
     root=Path(root)
+    if use_catalog_error_index is None:
+        use_catalog_error_index = _phase13_catalog_error_index_requested()
     with LOCK:
         db=connect(root)
         try:
@@ -467,7 +540,9 @@ def refresh(root):
                     continue
                 with perf_phase(root, 'analytics.ingest', report_index=report_index):
                     with db:
-                        ingest(db,rid,info,catalog,aliases)
+                        ingest(
+                            db,rid,info,catalog,aliases,
+                            use_catalog_error_index=use_catalog_error_index)
                         db.execute("INSERT INTO indexed VALUES(?,?)",(rid,stamp))
                         for sha,key in aliases.items():
                             db.execute("INSERT OR IGNORE INTO source_files VALUES(?,?)",(sha,key))
