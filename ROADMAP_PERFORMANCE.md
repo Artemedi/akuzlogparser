@@ -225,9 +225,9 @@ Phase 13 is closed; subsequent work begins with P14-00 measurement only.
 ### Phase 14 — JS serialization, catalog, browser usability [IN PROGRESS]
 1. **P14-00 measurement-only — PASS.** Exact `06a1838`, real #36645492759 on 956,307,242 B / 4 reports: generation **161.202 s**, parse **154.065 s**; JSON **17.064567 s**, JS escaping **7.799368 s**, write+producer-hash **11.761352 s**, combined measured serialization **36.625287 s (~22.7% generation)**. Output: **2,275,367,801 B** total, raw shards **1,922,217,314 B**, catalogs **352,429,783 B**; peak working set **1,874,276,352 B**, peak pagefile **1,856,688,128 B**. Exact Windows #36645492672: **365 Python PASS, 3 skipped**, browser 9/9, diff PASS. Byte-equivalence and numeric-only trace PASS.
 2. **P14-01 JSON encoder — TEST.** Because JSON encoding is the largest measured serialization CPU subphase, compare stdlib `json.dumps` with an isolated `orjson` candidate. Candidate dependency is experiment-only; production/default remains stdlib. Real A/B must regenerate reports from the same cached immutable snapshots, require byte-identical report manifests, and only then decide whether packaging complexity is justified.
-2. Проверить наличие лишних проходов `raw.count("\ufffd")`, повторных преобразований, стоимости каталога и большого `rows`, не меняя `raw_*.js` и `catalog.js` вслепую.
-3. Измерить время первого открытия и интерактивности браузера для 657 738 событий, фильтры, даты, повторяющиеся ошибки, графики, память вкладки. Lazy loading/виртуализация — отдельный проект с проверкой совместимости standalone/offline UI.
-4. Предыдущий `str.translate` вместо JS escaping не подтвердил устойчивый выигрыш; не повторять без новой гипотезы.
+3. Проверить наличие лишних проходов `raw.count("\ufffd")`, повторных преобразований, стоимости каталога и большого `rows`, не меняя `raw_*.js` и `catalog.js` вслепую.
+4. Измерить время первого открытия и интерактивности браузера для 657 738 событий, фильтры, даты, повторяющиеся ошибки, графики, память вкладки. Lazy loading/виртуализация — отдельный проект с проверкой совместимости standalone/offline UI.
+5. Предыдущий `str.translate` вместо JS escaping не подтвердил устойчивый выигрыш; не повторять без новой гипотезы.
 
 ### Phase 15 — concurrency / multiprocessing [OPEN, низкий приоритет до устранения лишних проходов]
 1. После Phase 9 и A/B I/O-измерений проверить, остался ли CPU bottleneck; сравнить процессы против IPC/serialization/memory, Windows spawn и PyInstaller.
