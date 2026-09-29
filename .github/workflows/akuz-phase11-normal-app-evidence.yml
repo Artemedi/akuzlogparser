@@ -31,7 +31,7 @@ jobs:
           from pathlib import Path
           import sys
 
-          path = Path(r'E:\Software\Project\LogAkusExplorer\akuzlogparser\diagnostics\phase11_normal_app_real_static_24_27_final_default_20260928.json')
+          path = Path(r'E:\Software\Project\LogAkusExplorer\akuzlogparser\diagnostics\phase11_normal_app_real_static_24_27_rc_20260929.json')
           try:
               data = json.loads(path.read_text(encoding='utf-8'))
               if data.get('status') != 'PHASE11_NORMAL_APP_REAL_STATIC_ACCEPTANCE':
@@ -69,10 +69,10 @@ jobs:
                         f"prefetch_downloads={row['build']['prefetch_downloads']}")
               delta = 100.0 * (process['wall_s'] / serial['wall_s'] - 1.0)
               print(f'PHASE11_NORMAL_APP_WALL_DELTA_PCT={delta:.3f}')
-              print('PHASE11_FINAL_DEFAULT_INVENTORY_PARITY=PASS')
-              print('PHASE11_FINAL_DEFAULT_SQL_PARITY=PASS')
-              print('PHASE11_FINAL_DEFAULT_EXPORT_PARITY=PASS')
-              print('PHASE11_FINAL_DEFAULT_WORKSPACE_CLEANED=PASS')
+              print('PHASE11_RC_INVENTORY_PARITY=PASS')
+              print('PHASE11_RC_SQL_PARITY=PASS')
+              print('PHASE11_RC_EXPORT_PARITY=PASS')
+              print('PHASE11_RC_WORKSPACE_CLEANED=PASS')
               print('NO_SHA_PATH_HOST_OR_PAYLOAD_PRINTED=PASS')
           except BaseException as exc:
               print('PHASE11_FINAL_DEFAULT_EVIDENCE_FAILED', type(exc).__name__)
