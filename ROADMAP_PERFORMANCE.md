@@ -197,7 +197,7 @@ disabled while opt-in is active, and published v4.8.0 Release is unchanged.
 See `PHASE12_DELTA_RESUME.md`. Final exact-SHA Windows regression
 [Actions #36563631352](https://github.com/Artemedi/akuzlogparser/actions/runs/36563631352): 354 Python PASS, 3 skipped, browser/diff PASS. Default-on and combined Phase-11+12 scheduling remain future decisions.
 
-### Phase 13 — аналитика SQLite и третий проход [IN PROGRESS]
+### Phase 13 — аналитика SQLite и третий проход [DONE]
 1. **P13-01 catalog error index — replicated candidate PASS.** Новый отчёт уже содержит publication-integrity-proven `errorFingerprints`; аналитика использует его только как отрицательный фильтр. Положительные события всё ещё читают raw и повторно проходят `recognize_error` с проверкой fingerprint. Legacy, version-mismatch и corrupt/unproven catalog автоматически возвращаются к историческому full scan.
 2. Real 23/24/25 Sep, 956,307,242 B sources, 4 immutable reports, balanced order B/C/C/B/B/C, Actions #36572002301 exact `d097321`: median wall **37.928692 → 23.881659 s (-37.035%)**, CPU **37.625 → 23.5625 s (-37.375%)**, `recognize_error` **657,738 → 37,852 (-94.245%)**. Exact SQL/export + semantic SQL/export + inventory parity **6/6 PASS**. Logical error SELECT/INSERT count remains 37,852; DB size/page count identical. Raw-shard bytes fell only 0.673%, so выигрыш относится к CPU/recognition, а не к меньшему объёму raw I/O.
 3. **P13-01 default-on ACCEPTED.** Rollback: `AKUZ_PHASE13_CATALOG_ERROR_INDEX=0`. Exact `e8118a8`: real default-path A/B #36575345791 **39.308057 → 25.178127 s (-35.947% wall)**, exact/semantic SQL+JS parity PASS, inventory unchanged; full Windows #36575345743 **360 tests PASS, 3 skipped**, browser/diff PASS.
@@ -209,6 +209,18 @@ See `PHASE12_DELTA_RESUME.md`. Final exact-SHA Windows regression
 6. **P13-04 SQLite WAL — REJECTED.** Isolated single A/B exact `51b9b33`, Actions #36621442133: DELETE **24.643096 s** vs WAL **23.642129 s** (apparent **-4.062% wall**), CPU identical at **23.359375 s**, final SQLite/storage identical at **32,649,216 B / 7,971 pages**, exact/semantic SQL+JS, inventory and index schema PASS. Exact Windows #36621442139: **365 Python PASS, 3 skipped**, browser 9/9 and diff PASS. Balanced D/W/W/D/D/W replication exact `93c6fe6`, Actions #36628486389: median DELETE **23.576693 s** vs WAL **23.801427 s**, so WAL **regressed 0.953% wall**; CPU **23.312500 → 23.500000 s (+0.804%)**; ingest essentially flat (**19.701132 → 19.684389 s, -0.085%**); final DB/storage identical and WAL/SHM/journal sidecars 0 after clean close. Parity, inventory and final schema PASS. Exact Windows #36628486403: **367 Python PASS, 3 skipped**, browser 9/9 and diff PASS. Decision: REJECTED; WAL switch/runtime/harness/workflow are removed and production remains `journal_mode=DELETE`. Post-removal exact `6a691b3`, Windows #36629956908: **362 Python PASS, 3 skipped**, browser 9/9 and diff/no-publish PASS.
 
 7. **P13-05 single transaction — REJECTED.** Isolated single A/B exact `ed80553`, Actions #36630531695: report commits **4 → 1 (-75%)**, wall **24.066619 → 23.516938 s (-2.284%)**, but CPU **23.187500 → 23.453125 s (+1.146%)**; exact/semantic outputs, inventory and final SQLite **32,649,216 B / 7,971 pages** PASS. Exact Windows #36630531565: **365 Python PASS, 3 skipped**, browser 9/9 and diff PASS; injected second-report failure proved full batch rollback and equivalent retry. Balanced B/C/C/B/B/C replication exact `3976e99`, Actions #36631816238: median wall **23.523164 → 23.587496 s (+0.273%)**, CPU **23.343750 → 23.406250 s (+0.268%)**, ingest **19.679112 → 19.781481 s (+0.520%)**; commit count remained **4 → 1**, DB/page_count identical, parity/inventory PASS. Exact Windows #36631815949: **367 Python PASS, 3 skipped**, browser 9/9 and diff PASS. Decision: REJECTED; transaction switch/runtime/harness/workflow are removed. Production Phase 13 remains P13-01 catalog index ON, per-report commits, `journal_mode=DELETE`, normal `ix_fp` maintenance.
+
+
+**Phase 13 final production configuration:** P13-01 catalog error index is the
+only accepted SQLite/analytics optimization and remains default ON with
+rollback `AKUZ_PHASE13_CATALOG_ERROR_INDEX=0`. Production keeps per-report
+transactions, `journal_mode=DELETE`, normal `ix_fp` maintenance and the
+historical insert/ambiguity strategy. P13-02 SQL batching, P13-03 deferred
+`ix_fp`, P13-04 WAL and P13-05 single transaction are all REJECTED and their
+runtime switches/harnesses/workflows removed. Final post-removal exact
+`79756356ccf90e575b97f634dcf842e926db34e4`, Windows #36645052727:
+**362 Python PASS, 3 skipped**, browser **9/9 PASS**, diff/no-publish PASS.
+Phase 13 is closed; subsequent work begins with P14-00 measurement only.
 
 ### Phase 14 — JS serialization, catalog, browser usability [OPEN]
 1. Разделить `shard_write_s` на CPU `json.dumps`/escaping и файловую запись, замерить output bytes и RSS.
