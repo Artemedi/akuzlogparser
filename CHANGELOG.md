@@ -1,5 +1,41 @@
 # История изменений AKUZ Log Explorer
 
+## 4.8.0 — 2026-09-29
+
+- **Phase 11 process-prefetch принят в production.** На Windows при выборе
+  двух и более журналов источника Linux/SSH следующий snapshot по умолчанию
+  загружается одним отдельным process, пока основной процесс разбирает
+  предыдущий. Local и SMB/UNC остаются на последовательном scheduler.
+- Production child создаётся через атомарный Windows Job-bound spawn:
+  `CREATE_SUSPENDED` → включение точного process HANDLE в
+  `KILL_ON_JOB_CLOSE` Job Object → `ResumeThread`. Одновременно работает
+  максимум один fetch-child.
+- IPC ограничен bounded JSON. Parent не доверяет child-данным: snapshot
+  перепроверяется полным SHA-256, размером, metadata binding и точной Windows
+  file/parent identity. Hashing/promotion/cleanup используют reparse-safe
+  HANDLE semantics.
+- Предзагруженный snapshot принимается через inventory intent и атомарный
+  no-overwrite hard-link. Внешний final не перезаписывается. Cross-volume /
+  unsupported hard-link может безопасно откатиться к serial path; permission,
+  ENOSPC и другие реальные I/O ошибки остаются видимыми ошибками.
+- Обычная ошибка child/fetch/IPC приводит к безопасному serial fallback.
+  `ProcessFetchUnsafeError` (невозможно доказать завершение Job/cleanup)
+  **не** запускает второго writer и завершает операцию fail-closed.
+- Добавлен аварийный rollback switch
+  `AKUZ_PHASE11_PROCESS_PREFETCH=0`; отсутствие переменной означает ON,
+  неверное/пустое явное значение отклоняется.
+- Независимое ревью Claude Fable:
+  Actions #36538397765 — **LIFECYCLE=ACCEPT,
+  TRANSACTION=ACCEPT, OVERALL=ACCEPT**.
+- Предфинальный real normal-app A/B на 857,563,363 байт:
+  329.511 s serial против 277.482 s process (~15.8% меньше wall),
+  inventory/analytics SQL/export parity PASS. Финальные A/B и portable
+  проверки повторяются на versioned release SHA перед публикацией.
+- SSH compression остаётся отдельным opt-in и по умолчанию выключена.
+  Persistent B-lite/derived clinical metadata не включены.
+- Сохранён hotfix v4.7.1 для восстановления UI status-polling после
+  transient `Failed to fetch`.
+
 ## 4.7.1 — 2026-09-28
 
 - Исправлен UI polling локального сервиса: единичный transient
