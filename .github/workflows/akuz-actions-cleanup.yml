@@ -126,4 +126,4 @@ jobs:
           print('ACTIONS_RETENTION_CLEANUP=PASS')
           '@ | python -B -
           if ($LASTEXITCODE -ne 0) { throw 'Actions cleanup failed' }
-# Retention rerun requested 2026-09-29; safety policy unchanged.
+# Retention rerun requested after v4.8.0 release; safety policy unchanged.
