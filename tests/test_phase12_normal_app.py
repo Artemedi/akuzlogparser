@@ -225,6 +225,12 @@ class Phase12NormalAppTests(unittest.TestCase):
         self.assertTrue(foreign.exists())
         self.assertTrue(arbitrary.exists())
 
+    def test_portable_build_explicitly_includes_delta_module(self):
+        script = (
+            Path(__file__).resolve().parents[1]
+            / "scripts" / "build_portable.py").read_text("utf-8")
+        self.assertIn("'--hidden-import', 'akuz_delta'", script)
+
     def test_invalid_delta_switch_fails_before_fetch(self):
         state, selected = self.prepare()
         with patch.dict(

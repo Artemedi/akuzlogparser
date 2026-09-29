@@ -20,7 +20,9 @@ def main():
                '--onefile', '--console', '--name', 'AKUZLogExplorer',
                '--distpath', str(ROOT/'dist'), '--workpath', str(ROOT/'build'),
                '--specpath', str(ROOT/'build'), '--noupx',
-               '--collect-submodules', 'paramiko', '--python-option', 'X utf8']
+               '--collect-submodules', 'paramiko',
+               '--hidden-import', 'akuz_delta',
+               '--python-option', 'X utf8']
     for name in ASSETS:
         command += ['--add-data', str(ROOT/name)+':.']
     command.append(str(ROOT/'akuz_app.py'))
