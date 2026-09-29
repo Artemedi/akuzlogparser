@@ -3250,3 +3250,64 @@ P13-03 remains default OFF / TEST pending a corrected real A/B and Windows
 exact-SHA gate. The real failure log suppresses assertion details, so the
 parser defect is proven in code but is not claimed as the uniquely identified
 exception site of #36584151066. No production runtime or Release change.
+
+
+## Phase 13 P13-03 deferred ix_fp — rejected (2026-09-29)
+
+Hypothesis: keep `ix_line`, UNIQUE, per-report transactions and
+`journal_mode=DELETE` unchanged, but remove only secondary `ix_fp` during
+bulk analytics ingest and rebuild it once before export/overview. The
+experimental switch was `AKUZ_PHASE13_DEFER_FP_INDEX`, default OFF.
+
+The first two real attempts (#36581527908 and #36584151066) were invalid
+performance evidence because the benchmark had Windows SQLite-handle and
+stage-parsing defects. Those defects were reproduced synthetically and fixed
+without changing production semantics: SQLite metric handles are closed
+deterministically, and diagnostic stage names survive parsing.
+
+Corrected single A/B:
+- exact SHA `e9390b44faba3dce2c36a7ea36bff4da1bdf7720`;
+- real Actions #36611282416 on 23/24/25 Sep, 956,307,242 B and 4 immutable
+  reports;
+- baseline wall/CPU/ingest: 23.751520 / 23.546875 / 19.852710 s;
+- candidate wall/CPU/ingest: 23.391317 / 23.203125 / 19.454131 s;
+- wall -1.517%, CPU -1.460%, ingest -2.008%;
+- candidate final index build: 0.047 s;
+- SQLite 32,649,216 B / 7,971 pages -> 32,497,664 B / 7,934 pages;
+- exact SQL/JS, semantic SQL/JS, inventory and final index schema PASS.
+Exact-SHA Windows #36611282584: 366 Python tests PASS, 3 skipped, browser
+9/9 and diff PASS.
+
+Because the single-run benefit was small, it was not accepted. A new harness
+reused one immutable disposable report set and ran balanced order
+`B/C/C/B/B/C` with a full analytics reset before every trial.
+
+Replicated A/B:
+- exact SHA `6f7d4f1bde7e153ea5dba857dfbfcda8459f7a78`;
+- real Actions #36618875573;
+- baseline median wall/CPU/ingest:
+  23.584698 / 23.390625 / 19.733015 s;
+- candidate median wall/CPU/ingest:
+  23.457143 / 23.265625 / 19.582580 s;
+- wall -0.541%, CPU -0.534%, ingest -0.762%;
+- candidate index-build median 0.044 s;
+- SQLite 32,649,216 -> 32,497,664 B (-0.464%);
+  page_count 7,971 -> 7,934;
+- matched errors 37,852, recognize calls 37,852, raw-SHA lookups 37,852 and
+  insert attempts 37,852 in both modes;
+- exact outputs, semantic outputs, inventory and final index schema PASS;
+- no raw payload/artifact and no Release mutation.
+Exact-SHA Windows #36618875565: 368 Python tests PASS, 3 skipped, browser
+9/9 and diff PASS.
+
+Decision: **REJECTED**. The measured direction stayed slightly positive, but
+the replicated end-to-end effect shrank from 1.517% to 0.541%. That is not a
+clear enough production win to justify another runtime switch, an explicit
+DROP/rebuild lifecycle and recovery surface. The P13-03 runtime candidate,
+switch, experiment-specific tests, both A/B harnesses and workflow are removed
+from `main`. Production analytics returns to the accepted P13-01 baseline.
+
+The benchmark correctness fixes are not P13-03 optimizations and remain:
+stage-duration parsing keeps the stage name, and SQLite metrics connections are
+closed deterministically. Their red-to-green tests were moved into the generic
+Phase 13 benchmark test surface.
