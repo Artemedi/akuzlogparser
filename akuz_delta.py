@@ -69,7 +69,6 @@ def assemble_delta_contract(
     remote_published_prefix_sha256: str,
     final: Path,
     fail_after_written: int | None = None,
-    temp_prefix: str | None = None,
 ) -> tuple[int, str]:
     """Assemble and atomically publish one proven immutable snapshot.
 
@@ -176,6 +175,7 @@ def assemble_delta_final_proof(
     remote_published_prefix_sha256: str,
     final: Path,
     fail_after_written: int | None = None,
+    temp_prefix: str | None = None,
 ) -> tuple[int, str]:
     """Phase 12 v2: one final remote proof + producer-fed local hashes.
 
