@@ -84,11 +84,13 @@ def run(config_path: Path, app_root: Path, day: str, previous_bytes: int):
             trial = workspace / f"trial_{index:02d}_{mode}"
             trial.mkdir()
             if mode == "full":
-                row = _full_trial(cfg, day, expected_identity, trial)
+                row = _full_trial(
+                    cfg, day, expected_identity, trial,
+                    fixed_bound=fixed_bound)
             else:
                 row = _delta_trial(
                     cfg, day, previous, previous_sha, previous_bytes,
-                    expected_identity, trial)
+                    expected_identity, trial, fixed_bound=fixed_bound)
             if row["bound_bytes"] != fixed_bound:
                 raise AssertionError(
                     "Remote size changed; immutable repeated gate aborted")
@@ -179,7 +181,8 @@ def main():
         print("APP_CACHE_CHANGED=NO")
         print("RELEASE_CHANGED=NO")
     except BaseException as exc:
-        print("PHASE12_REPLICATED_AB=FAILED", type(exc).__name__)
+        reason = str(exc)[:180] if isinstance(exc, AssertionError) else ""
+        print("PHASE12_REPLICATED_AB=FAILED", type(exc).__name__, reason)
         raise SystemExit(1)
 
 
