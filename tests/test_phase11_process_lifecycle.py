@@ -848,7 +848,7 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             self.assertEqual(digest, hashlib.sha256(b"owned").hexdigest())
             file_identity, parent_identity = cleanup_token
             with patch(
-                    "akuz_process_fetch._windows_parent_identity",
+                    "akuz_process_fetch._windows_directory_identity",
                     return_value=(parent_identity[0], parent_identity[1] + 1)):
                 with self.assertRaisesRegex(
                         ProcessFetchUnsafeError, "parent changed before cleanup"):
