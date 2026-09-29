@@ -197,10 +197,11 @@ disabled while opt-in is active, and published v4.8.0 Release is unchanged.
 See `PHASE12_DELTA_RESUME.md`. Final exact-SHA Windows regression
 [Actions #36563631352](https://github.com/Artemedi/akuzlogparser/actions/runs/36563631352): 354 Python PASS, 3 skipped, browser/diff PASS. Default-on and combined Phase-11+12 scheduling remain future decisions.
 
-### Phase 13 — аналитика SQLite и третий проход [OPEN]
-1. Измерить `analytics.ingest/export/overview`, SELECT/INSERT, индексы, транзакции, write amplification и повторное распознавание ошибок по raw; baseline refresh ≈37.58 s.
-2. Проверить возможность передавать сохранённые error fingerprint/derived без нарушения dedup/source identity, ambiguous dates, relative_day, migration и атомарного экспорта.
-3. Исследовать batch inserts и индексы, SQLite `journal_mode=DELETE` vs WAL ТОЛЬКО отдельным A/B; не переносить старый несовместимый модуль `error_events`. Сравнить exact SQL outputs и `analytics.js`.
+### Phase 13 — аналитика SQLite и третий проход [IN PROGRESS]
+1. **P13-01 catalog error index — replicated candidate PASS.** Новый отчёт уже содержит publication-integrity-proven `errorFingerprints`; аналитика использует его только как отрицательный фильтр. Положительные события всё ещё читают raw и повторно проходят `recognize_error` с проверкой fingerprint. Legacy, version-mismatch и corrupt/unproven catalog автоматически возвращаются к историческому full scan.
+2. Real 23/24/25 Sep, 956,307,242 B sources, 4 immutable reports, balanced order B/C/C/B/B/C, Actions #36572002301 exact `d097321`: median wall **37.928692 → 23.881659 s (-37.035%)**, CPU **37.625 → 23.5625 s (-37.375%)**, `recognize_error` **657,738 → 37,852 (-94.245%)**. Exact SQL/export + semantic SQL/export + inventory parity **6/6 PASS**. Logical error SELECT/INSERT count remains 37,852; DB size/page count identical. Raw-shard bytes fell only 0.673%, so выигрыш относится к CPU/recognition, а не к меньшему объёму raw I/O.
+3. Default-on acceptance с rollback `AKUZ_PHASE13_CATALOG_ERROR_INDEX=0` — **TEST** на exact `e8118a8`; не считать production-default PASS до завершения real default-path A/B + full Windows regression.
+4. Следующий независимый P13-02: preload ambiguity-map + batch `executemany` для устранения 37,852 point-SELECT/execute calls. Индексы и `journal_mode=DELETE` vs WAL исследовать **отдельными** A/B; не переносить старый несовместимый `error_events`.
 
 ### Phase 14 — JS serialization, catalog, browser usability [OPEN]
 1. Разделить `shard_write_s` на CPU `json.dumps`/escaping и файловую запись, замерить output bytes и RSS.

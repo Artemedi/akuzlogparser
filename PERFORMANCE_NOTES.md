@@ -3133,3 +3133,51 @@ Final exact-SHA Windows regression #36563631352 on `73d194d`:
 **354 Python tests PASS, 3 skipped**, browser controls PASS, diff-check PASS.
 Evidence URL:
 https://github.com/Artemedi/akuzlogparser/actions/runs/36563631352
+
+
+## Phase 13 P13-01 replicated catalog error-index candidate (2026-09-29)
+
+The first Phase 13 optimization reuses the already generated report
+`errorFingerprints` map only as a **negative event filter**. It is accepted
+only when the report inventory contains the expected fingerprint algorithm
+version and the immutable `data/catalog.js` matches the publication-time SHA.
+Legacy reports, version mismatch, malformed index data, or a changed catalog
+fall back to the historical raw scan. For every indexed positive event,
+analytics still loads the raw event, runs the existing `recognize_error()`,
+and verifies that the resulting fingerprint equals the catalog value.
+
+Synthetic Windows regression exact `2b6d826`, Actions #36565726268: Python,
+browser controls and diff hygiene PASS. Corrupt-catalog and fingerprint-version
+guards PASS.
+
+Single real A/B #36570260640 on the same disposable 23/24/25 Sep build:
+baseline 39.611123 s wall / 39.234375 s CPU; candidate 24.787638 s wall /
+24.343750 s CPU. Exact SQL, exact analytics JS, semantic SQL and semantic JS
+equivalence PASS; inventory unchanged.
+
+Balanced replicated A/B #36572002301, exact `d097321`, order
+B/C/C/B/B/C, four immutable reports from 956,307,242 B of source snapshots:
+
+- baseline median wall 37.928692 s; CPU 37.625000 s; ingest 34.103066 s;
+- candidate median wall 23.881659 s; CPU 23.562500 s; ingest 20.022486 s;
+- wall reduction 37.035%; CPU reduction 37.375%;
+- `recognize_error` calls 657,738 -> 37,852 (-94.245%);
+- raw shards 660 -> 626; raw-shard bytes 961,108,677 -> 954,636,916
+  (-0.673%);
+- matched errors 37,852 in both modes;
+- point raw-SHA SELECT attempts 37,852 in both modes;
+- INSERT attempts 37,852 in both modes;
+- SQLite file 32,649,216 B and page_count 7,971 in both modes;
+- exact SQL/export and semantic SQL/export equivalence 6/6 PASS;
+- inventory unchanged 6/6 PASS; no raw payload retained; Release unchanged.
+
+Interpretation: the reproducible gain comes from removing repeated error
+recognition on 619,886 known non-error events, not from material raw I/O or
+SQLite write reduction. The catalog SHA verification itself costs about
+0.84 s median and is already included in candidate wall time.
+
+Decision at this checkpoint: **candidate accepted; default-on gate pending**.
+The default path has been switched to the accepted candidate with explicit
+rollback `AKUZ_PHASE13_CATALOG_ERROR_INDEX=0`, but production-default status
+remains TEST until exact `e8118a8` completes both full Windows regression and
+the real default-path A/B. P13-02 (SQL preload/batching) remains independent.
