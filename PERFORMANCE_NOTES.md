@@ -3322,3 +3322,41 @@ P13-03 post-removal cleanup gate:
 
 This confirms the accepted P13-01 production baseline after all P13-03 runtime,
 switch, harness and workflow code was removed.
+
+
+## Phase 13 P13-04 SQLite WAL — rejected (2026-09-29)
+
+Hypothesis: change only SQLite `journal_mode` from production `DELETE` to
+`WAL`; catalog error index, indexes, transaction boundaries, `synchronous`,
+SQL semantics and export semantics stay unchanged. The experiment used
+`AKUZ_PHASE13_JOURNAL_MODE=DELETE|WAL`; default remained `DELETE`.
+
+Single real A/B, exact `51b9b33b3c5a67cafcde775be0f43fc9da9696e5`,
+Actions #36621442133, trusted 23/24/25 Sep, 956,307,242 B / 4 immutable
+reports:
+- DELETE wall/CPU/ingest: 24.643096 / 23.359375 / 19.827651 s;
+- WAL wall/CPU/ingest: 23.642129 / 23.359375 / 19.503650 s;
+- apparent wall improvement 4.062%, CPU 0.000%;
+- DB/storage identical: 32,649,216 B / 7,971 pages;
+- final WAL/SHM/journal sidecars 0 B after clean close;
+- exact SQL/JS, semantic SQL/export, inventory and final index schema PASS.
+Exact Windows #36621442139: 365 Python PASS, 3 skipped, browser 9/9,
+diff/no-publish PASS.
+
+Because one result was insufficient, balanced D/W/W/D/D/W replication reused
+one immutable disposable report set. Exact
+`93c6fe61923bfc1efaffa7242fc8b78ffeed8c69`, Actions #36628486389:
+- DELETE median wall/CPU/ingest: 23.576693 / 23.312500 / 19.701132 s;
+- WAL median wall/CPU/ingest: 23.801427 / 23.500000 / 19.684389 s;
+- WAL regressed 0.953% wall and 0.804% CPU;
+- ingest differed only 0.085% in WAL's favor;
+- DB/storage remained 32,649,216 B / 7,971 pages in both modes;
+- final WAL/SHM/journal sidecars remained 0 B after clean close;
+- exact/semantic outputs, inventory, logical counts and final schema PASS;
+- no raw payload/artifact and no Release mutation.
+
+Decision: **REJECTED**. The single-run gain did not reproduce; balanced evidence
+shows a small wall/CPU regression with no persistent-storage benefit. Remove
+the WAL switch/runtime, experiment tests, harnesses and workflow. Production
+remains `journal_mode=DELETE` with accepted P13-01 catalog error index.
+P13-05 single-transaction is the next independent SQLite candidate.
