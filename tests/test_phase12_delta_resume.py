@@ -1,148 +1,23 @@
 """Phase 12 delta/resume contract probe; no production runtime integration.
 
 This suite models the minimum correctness contract before fetch_selected() may
-reuse an older SSH snapshot.  All data is synthetic.  The deliberately strict
+reuse an older SSH snapshot. All data is synthetic. The deliberately strict
 prototype requires a cryptographic proof of the old remote prefix and of the
 new published prefix; performance/segment sampling is a later gate.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 import errno
 import hashlib
 from pathlib import Path
-import shutil
 from tempfile import TemporaryDirectory
 import unittest
 
-
-class ResumeRejected(RuntimeError):
-    pass
-
-
-@dataclass(frozen=True)
-class RemoteMeta:
-    device: int
-    inode: int
-    size: int
-    mtime: int
+from akuz_delta import RemoteMeta, ResumeRejected, assemble_delta_contract
 
 
 def digest_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-def digest_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(64 * 1024), b""):
-            h.update(block)
-    return h.hexdigest()
-
-
-def assemble_delta_contract(
-    previous: Path,
-    *,
-    previous_sha256: str,
-    previous_device: int,
-    previous_inode: int,
-    before: RemoteMeta,
-    remote_previous_prefix_sha256: str,
-    delta: Path,
-    transfer_bound: int,
-    publish_size: int,
-    after: RemoteMeta,
-    remote_published_prefix_sha256: str,
-    final: Path,
-    fail_after_written: int | None = None,
-) -> tuple[int, str]:
-    """Strict Phase-12 prototype contract.
-
-    The final file is a complete immutable snapshot, not a delta artifact.
-    Nothing is published until all identity, length and SHA proofs pass.
-    """
-    previous = Path(previous)
-    delta = Path(delta)
-    final = Path(final)
-    part = final.with_name(final.name + ".part")
-
-    if final.exists() or final.is_symlink() or part.exists() or part.is_symlink():
-        raise ResumeRejected("target already exists")
-    if previous.is_symlink() or not previous.is_file():
-        raise ResumeRejected("previous snapshot is not a regular file")
-    if delta.is_symlink() or not delta.is_file():
-        raise ResumeRejected("delta is not a regular file")
-
-    old_size = previous.stat().st_size
-    if old_size <= 0:
-        raise ResumeRejected("empty previous snapshot")
-    if before.device != previous_device or before.inode != previous_inode:
-        raise ResumeRejected("remote identity changed before transfer")
-    if before.size < old_size:
-        raise ResumeRejected("remote source was truncated")
-    if transfer_bound != before.size:
-        raise ResumeRejected("transfer bound must equal trusted before.size")
-    if transfer_bound <= old_size:
-        raise ResumeRejected("no append delta to resume")
-    if not old_size <= publish_size <= transfer_bound:
-        raise ResumeRejected("invalid published prefix boundary")
-
-    local_old_sha = digest_file(previous)
-    if local_old_sha != previous_sha256:
-        raise ResumeRejected("previous local snapshot failed SHA")
-    if remote_previous_prefix_sha256 != previous_sha256:
-        raise ResumeRejected("remote saved prefix no longer matches")
-
-    expected_delta = transfer_bound - old_size
-    if delta.stat().st_size != expected_delta:
-        raise ResumeRejected("delta length is incomplete or replayed")
-
-    written = 0
-
-    def copy_checked(src, dst):
-        nonlocal written
-        while True:
-            block = src.read(64 * 1024)
-            if not block:
-                return
-            if fail_after_written is not None and written + len(block) > fail_after_written:
-                allowed = max(0, fail_after_written - written)
-                if allowed:
-                    dst.write(block[:allowed])
-                    written += allowed
-                raise OSError(errno.ENOSPC, "synthetic disk full")
-            dst.write(block)
-            written += len(block)
-
-    try:
-        final.parent.mkdir(parents=True, exist_ok=True)
-        with part.open("xb") as out, previous.open("rb") as old, delta.open("rb") as tail:
-            copy_checked(old, out)
-            copy_checked(tail, out)
-        if written != transfer_bound or part.stat().st_size != transfer_bound:
-            raise ResumeRejected("assembled transfer length mismatch")
-
-        if after.device != before.device or after.inode != before.inode:
-            raise ResumeRejected("remote identity changed during transfer")
-        if after.size < transfer_bound:
-            raise ResumeRejected("remote source shrank during transfer")
-
-        # The active source can end with an unfinished physical line.  The
-        # caller publishes only the verified complete prefix and resumes from
-        # that exact stored byte count next time.
-        if publish_size != transfer_bound:
-            with part.open("r+b") as stream:
-                stream.truncate(publish_size)
-
-        published_sha = digest_file(part)
-        if published_sha != remote_published_prefix_sha256:
-            raise ResumeRejected("new remote prefix proof does not match assembled snapshot")
-
-        part.replace(final)
-        return publish_size, published_sha
-    except BaseException:
-        part.unlink(missing_ok=True)
-        raise
 
 
 class Phase12DeltaResumeContractTests(unittest.TestCase):
@@ -292,7 +167,7 @@ class Phase12DeltaResumeContractTests(unittest.TestCase):
 
     def test_resume_offset_is_stored_bytes_not_old_capture_bound(self):
         # Prior active capture ended inside UTF-8 and an unfinished physical
-        # line.  Existing fetch semantics keep only the previous newline.
+        # line. Existing fetch semantics keep only the previous newline.
         old_stored = b"12:00 old event\n"
         old_transfer_bound = old_stored + b"partial " + b"\xd0"
         remote = old_stored + "partial ж\n13:00 next\n".encode("utf-8")
