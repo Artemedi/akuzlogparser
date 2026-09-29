@@ -114,19 +114,10 @@ class ProcessFetch:
             self.started_at = None
             remove_owned_snapshot(self.destination)
             raise
-        # Parent sender ownership ends immediately after start. Closing it
-        # before Job-owner validation makes child EOF/crash behavior
-        # authoritative and prevents a sender-close exception from masking an
-        # unsafe abort result.
-        try:
-            sender.close()
-        except BaseException as sender_exc:
-            try:
-                self.abort()
-            except ProcessFetchUnsafeError as unsafe_exc:
-                raise unsafe_exc from sender_exc
-            raise
-
+        # Capture the authoritative Job owner immediately after the atomic
+        # start returns, before any fallible parent-side pipe cleanup. If
+        # sender.close() fails, abort() must still tear down the whole Job
+        # tree rather than only the direct process.
         if self.require_kill_job:
             popen = getattr(child, "_popen", None)
             owner = getattr(popen, "_akuz_job_owner", None)
@@ -138,6 +129,18 @@ class ProcessFetch:
                 raise ProcessFetchUnsafeError(
                     "Atomic Job-bound spawn did not expose live Job ownership")
             self._kill_job = owner
+
+        # Parent sender ownership ends immediately after start. Child EOF/crash
+        # behavior remains authoritative; a sender-close exception is allowed
+        # to surface only after Job-aware abort has completed.
+        try:
+            sender.close()
+        except BaseException as sender_exc:
+            try:
+                self.abort()
+            except ProcessFetchUnsafeError as unsafe_exc:
+                raise unsafe_exc from sender_exc
+            raise
         return self
 
     def _release_kill_job(self):
