@@ -20,7 +20,7 @@ from akuz_fetch import ConnectConfig, selected_snapshot_path
 from akuz_process_fetch import (ProcessFetchError, ProcessFetchResult,
                                 ProcessFetchUnsafeError,
                                 _owned_snapshot_stat, _sha256_owned_snapshot)
-from akuz_store import load_store, save_store
+from akuz_store import cached_download, load_store, save_store
 from scripts.bench_phase9_baseline import create_sources, inventory_manifest
 from scripts.phase9_semantic import semantic_exports, semantic_sql
 
@@ -501,6 +501,57 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             self.assertEqual(len(load_store(root)["downloads"]), 3)
             self.assertFalse(list((root / "downloads").glob(
                 ".akuz-phase11-prefetch-*")))
+
+    def test_crash_intent_external_final_is_never_warm_reused(self):
+        with TemporaryDirectory(prefix="akuz_p11_external_after_intent_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+            root.mkdir(parents=True)
+            cfg = self.config(root)
+            row = rows[1]
+            final = selected_snapshot_path(cfg, row)
+            final.parent.mkdir(parents=True, exist_ok=True)
+
+            expected_payload = row["_payload"]
+            external = bytes(
+                ((byte + 1) & 0xff) for byte in expected_payload)
+            self.assertEqual(len(external), len(expected_payload))
+            self.assertNotEqual(
+                hashlib.sha256(external).hexdigest(),
+                hashlib.sha256(expected_payload).hexdigest())
+            final.write_bytes(external)
+
+            store = load_store(root)
+            store["downloads"][row["id"]] = dict(
+                path=str(final),
+                sha256=hashlib.sha256(expected_payload).hexdigest(),
+                size=len(expected_payload),
+                host=cfg.host,
+                remote=row["path"],
+                mtime=row["mtime"],
+                snapshot={
+                    "active": False,
+                    "captured_bytes": len(expected_payload),
+                    "stored_bytes": len(expected_payload),
+                    "dropped_tail_bytes": 0,
+                    "listed_bytes": len(expected_payload),
+                    "remote_path": row["path"],
+                })
+            save_store(root, store)
+
+            # Warm-cache validation must reject the externally created file
+            # even though its path and size match the durable crash intent.
+            reloaded = load_store(root)
+            self.assertIsNone(cached_download(reloaded, row["id"]))
+
+            FakeProcessFetch.reset()
+            with self.assertRaisesRegex(
+                    AssertionError, "would overwrite"):
+                self.build(root, rows, process=False, subset=[1])
+
+            self.assertEqual(final.read_bytes(), external)
+            self.assertEqual(FakeProcessFetch.starts, [])
 
     def test_restart_recovers_inventory_committed_before_prefetch_promotion(self):
         with TemporaryDirectory(prefix="akuz_p11_inventory_before_promote_") as td:
