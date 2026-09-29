@@ -37,6 +37,36 @@ class FakeSSH:
         self.closed = True
 
 
+class DeltaFakeSSH:
+    def __init__(self, data: bytes):
+        self.data = data
+        self.closed = False
+        self.commands = []
+
+    def exec_command(self, command, timeout=120, get_pty=False):
+        import re
+        self.commands.append(command)
+        if "sha256sum" in command:
+            match = re.search(r"head -c (\d+) -- ", command)
+            if match is None:
+                return FakeOutput(b""), FakeOutput(b""), FakeOutput(b"bad sha command")
+            size = int(match.group(1))
+            digest = hashlib.sha256(self.data[:size]).hexdigest().encode("ascii")
+            return FakeOutput(b""), FakeOutput(digest + b"  -\n"), FakeOutput(b"")
+        if "tail -c +" in command:
+            start = int(re.search(r"tail -c \+(\d+) -- ", command).group(1)) - 1
+            length = int(re.search(r"\| head -c (\d+)", command).group(1))
+            return (
+                FakeOutput(b""),
+                FakeOutput(self.data[start:start + length]),
+                FakeOutput(b""),
+            )
+        raise AssertionError("unexpected synthetic SSH command")
+
+    def close(self):
+        self.closed = True
+
+
 class SSHTraceTests(unittest.TestCase):
     def snapshot(self, data, active=False):
         with TemporaryDirectory() as tmp:
@@ -70,6 +100,150 @@ class SSHTraceTests(unittest.TestCase):
             self.assertIn("compression=0", trace)
             self.assertIn("mib_per_s=", trace)
             return trace
+
+    def test_delta_resume_fetches_only_append_and_publishes_exact_snapshot(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            downloads = root / "downloads"
+            downloads.mkdir()
+            old = b"12:00:00.000,AKUZ,s,user: old\n"
+            tail = b"12:01:00.000,AKUZ,s,user: new\n"
+            remote_data = old + tail
+            previous = downloads / "previous.log"
+            previous.write_bytes(old)
+            cfg = fetch.ConnectConfig(
+                "example.test", 22, "reader", "", "", "",
+                "/srv/akuz", downloads, "*.log", "")
+            selected = dict(
+                id="d" * 64, path="/srv/akuz/test.log", name="test.log",
+                size=len(remote_data), device=1, inode=2, mtime=100)
+            resume = dict(
+                path=str(previous), sha256=hashlib.sha256(old).hexdigest(),
+                size=len(old), host=cfg.host, remote=selected["path"],
+                snapshot=dict(device=1, inode=2, stored_bytes=len(old)))
+            ssh = DeltaFakeSSH(remote_data)
+            meta = ((1, 2, len(remote_data), 100), "")
+            with patch.object(fetch, "_connect", return_value=ssh), \
+                 patch.object(fetch, "_listing", return_value=[selected]), \
+                 patch.object(fetch, "_remote_metadata",
+                              side_effect=[meta, meta, meta]):
+                path, digest, details = fetch.fetch_selected(
+                    cfg, selected, trace_root=root, resume=resume)
+            self.assertEqual(path.read_bytes(), remote_data)
+            self.assertEqual(digest, hashlib.sha256(remote_data).hexdigest())
+            self.assertEqual(previous.read_bytes(), old)
+            self.assertTrue(details["delta_resume"])
+            self.assertEqual(details["previous_bytes"], len(old))
+            self.assertEqual(details["stored_bytes"], len(remote_data))
+            delta_commands = [x for x in ssh.commands if "tail -c +" in x]
+            self.assertEqual(len(delta_commands), 1)
+            self.assertIn(f"| head -c {len(tail)}", delta_commands[0])
+            self.assertFalse(list(downloads.glob("*.delta-*")))
+            self.assertFalse(list(downloads.glob("*.part-*")))
+            self.assertTrue(ssh.closed)
+
+    def test_delta_resume_final_sha_mismatch_falls_back_without_publish(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            downloads = root / "downloads"
+            downloads.mkdir()
+            old = b"old-line\n"
+            remote_data = old + b"new-line\n"
+            previous = downloads / "previous.log"
+            previous.write_bytes(old)
+            cfg = fetch.ConnectConfig(
+                "example.test", 22, "reader", "", "", "",
+                "/srv/akuz", downloads, "*.log", "")
+            selected = dict(
+                id="e" * 64, path="/srv/akuz/test.log", name="test.log",
+                size=len(remote_data), device=1, inode=2, mtime=100)
+            resume = dict(
+                path=str(previous), sha256=hashlib.sha256(old).hexdigest(),
+                size=len(old), host=cfg.host, remote=selected["path"],
+                snapshot=dict(device=1, inode=2, stored_bytes=len(old)))
+            ssh = DeltaFakeSSH(remote_data)
+            meta = ((1, 2, len(remote_data), 100), "")
+            with patch.object(fetch, "_connect", return_value=ssh), \
+                 patch.object(fetch, "_listing", return_value=[selected]), \
+                 patch.object(fetch, "_remote_metadata",
+                              side_effect=[meta, meta, meta]), \
+                 patch.object(fetch, "_remote_prefix_sha256",
+                              return_value="0" * 64):
+                with self.assertRaises(fetch.DeltaResumeFallback):
+                    fetch.fetch_selected(cfg, selected, resume=resume)
+            self.assertEqual(previous.read_bytes(), old)
+            self.assertEqual(
+                [p for p in downloads.iterdir() if p.name != previous.name], [])
+            self.assertTrue(ssh.closed)
+
+    def test_delta_resume_active_tail_keeps_only_complete_prefix(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            downloads = root / "downloads"
+            downloads.mkdir()
+            old = b"old-line\n"
+            complete = b"complete-line\n"
+            unfinished = b"unfinished"
+            remote_data = old + complete + unfinished
+            previous = downloads / "previous.log"
+            previous.write_bytes(old)
+            cfg = fetch.ConnectConfig(
+                "example.test", 22, "reader", "", "", "",
+                "/srv/akuz", downloads, "*.log", "")
+            selected = dict(
+                id="f" * 64, path="/srv/akuz/test.log", name="test.log",
+                size=len(remote_data), device=1, inode=2, mtime=100)
+            resume = dict(
+                path=str(previous), sha256=hashlib.sha256(old).hexdigest(),
+                size=len(old), host=cfg.host, remote=selected["path"],
+                snapshot=dict(device=1, inode=2, stored_bytes=len(old)))
+            ssh = DeltaFakeSSH(remote_data)
+            before = ((1, 2, len(remote_data), 100), "")
+            after = ((1, 2, len(remote_data) + 5, 101), "")
+            with patch.object(fetch, "_connect", return_value=ssh), \
+                 patch.object(fetch, "_listing", return_value=[selected]), \
+                 patch.object(fetch, "_remote_metadata",
+                              side_effect=[before, after, after]):
+                path, digest, details = fetch.fetch_selected(
+                    cfg, selected, resume=resume)
+            expected = old + complete
+            self.assertEqual(path.read_bytes(), expected)
+            self.assertEqual(digest, hashlib.sha256(expected).hexdigest())
+            self.assertTrue(details["active"])
+            self.assertEqual(details["stored_bytes"], len(expected))
+            self.assertEqual(
+                details["dropped_tail_bytes"], len(remote_data) - len(expected))
+
+    def test_delta_resume_rejects_legacy_or_external_previous_snapshot(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            downloads = root / "downloads"
+            downloads.mkdir()
+            external = root / "outside.log"
+            external.write_bytes(b"old\n")
+            cfg = fetch.ConnectConfig(
+                "example.test", 22, "reader", "", "", "",
+                "/srv/akuz", downloads, "*.log", "")
+            selected = dict(
+                id="1" * 64, path="/srv/akuz/test.log", name="test.log",
+                size=10, device=1, inode=2, mtime=100)
+            meta = ((1, 2, 10, 100), "")
+            for resume in (
+                dict(path=str(external), sha256=hashlib.sha256(b"old\n").hexdigest(),
+                     size=4, host=cfg.host, remote=selected["path"],
+                     snapshot=dict(stored_bytes=4)),
+                dict(path=str(external), sha256=hashlib.sha256(b"old\n").hexdigest(),
+                     size=4, host=cfg.host, remote=selected["path"],
+                     snapshot=dict(device=1, inode=2, stored_bytes=4)),
+            ):
+                ssh = DeltaFakeSSH(b"old\nmore\n")
+                with patch.object(fetch, "_connect", return_value=ssh), \
+                     patch.object(fetch, "_listing", return_value=[selected]), \
+                     patch.object(fetch, "_remote_metadata", return_value=meta):
+                    with self.assertRaises(fetch.DeltaResumeFallback):
+                        fetch.fetch_selected(cfg, selected, resume=resume)
+                self.assertTrue(ssh.closed)
+            self.assertEqual(list(downloads.iterdir()), [])
 
     def test_ssh_compression_is_opt_in(self):
         class Client:
