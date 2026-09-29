@@ -3466,3 +3466,43 @@ The compatibility contract is explicit:
 The real P14-00 gate uses the same disposable trusted 23/24/25 Sep source set,
 with Phase 11 process-prefetch and Phase 12 delta disabled by the inherited
 setup. No raw log artifact, credentials or private source evidence is uploaded.
+
+
+## Phase 14 P14-00 real serialization baseline
+
+Exact SHA `06a1838ea822797ec15204c9237bc5d8d47f4ead`.
+Windows regression #36645492672: **365 Python tests PASS, 3 skipped**,
+browser **9/9 PASS**, diff/no-production-publish PASS.
+
+Real measurement #36645492759 on the trusted disposable 23/24/25 Sep set,
+956,307,242 source bytes / 4 reports:
+- total report generation: **161.202 s**;
+- parse phase: **154.065 s**;
+- raw shard JSON encoding: **13.154682 s**;
+- catalog JSON encoding: **3.909885 s**;
+- combined JSON encoding: **17.064567 s** (~10.6% of generation);
+- raw shard JS escaping: **6.369494 s**;
+- catalog JS escaping: **1.429874 s**;
+- combined escaping: **7.799368 s** (~4.8%);
+- raw shard write + producer hashing: **10.134064 s**;
+- catalog write + producer hashing: **1.627288 s**;
+- combined write/hash: **11.761352 s** (~7.3%);
+- combined measured serialization path:
+  **36.625287 s** (~22.7% of generation);
+- report output: **2,275,367,801 B / 1,390 files**;
+- raw shards: **1,922,217,314 B / 1,318 shards**;
+- catalogs: **352,429,783 B**;
+- current process working set at sample: **477,384,704 B**;
+- private bytes at sample: **455,544,832 B**;
+- peak working set: **1,874,276,352 B**;
+- peak pagefile: **1,856,688,128 B**.
+
+Interpretation: serialization is material, but not synonymous with disk I/O.
+The largest measured CPU subphase is JSON encoding, then write/hash, then JS
+escaping. P14-01 therefore tests only the JSON encoder. The existing output
+format, shard size, escaping rules and browser contract remain frozen.
+
+P14-01 candidate policy: evaluate `orjson` only as an experiment dependency.
+Default/production remains stdlib until a real same-snapshot A/B proves both
+byte-identical report manifests and a material end-to-end gain sufficient to
+justify portable packaging complexity.
