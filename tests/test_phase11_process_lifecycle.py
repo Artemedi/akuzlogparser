@@ -279,14 +279,23 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                 "ok", str(dest), digest, len(payload), .25, 1.5)
             op, _ = self.make(root, receiver, child)
             op._kill_job = 123
-            with patch("akuz_process_fetch._close_windows_handle") as close_handle:
+            import akuz_process_fetch as process_fetch
+            real_close = process_fetch._close_windows_handle
+            job_calls = []
+
+            def close_handle(value):
+                if value == 123:
+                    job_calls.append(value)
+                    return
+                return real_close(value)
+
+            with patch(
+                    "akuz_process_fetch._close_windows_handle",
+                    side_effect=close_handle):
                 op.start()
                 result = op.finish()
             self.assertEqual(result.digest, digest)
-            job_calls = [
-                call for call in close_handle.call_args_list
-                if call.args == (123,)]
-            self.assertEqual(len(job_calls), 1)
+            self.assertEqual(job_calls, [123])
             self.assertIsNone(op._kill_job)
             self.assertIsNone(op._start_gate)
 
