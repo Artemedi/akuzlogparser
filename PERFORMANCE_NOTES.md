@@ -3086,3 +3086,44 @@ This is the final hardened production evidence for v4.8.0. The measured
 speedup is workload-specific; the release claim is the demonstrated ~8.8%
 wall reduction on this final DBA-008D workload, not the larger figures from
 earlier less-hardened candidates.
+
+
+## Phase 12 opt-in acceptance (2026-09-29)
+
+Phase 12 remote delta/resume is now gated through an opt-in normal-app path;
+published v4.8.0 is unchanged and the default remains full bounded fetch.
+
+P12-03 replicated transport evidence, Actions #36556610689, exact `8a95a5b`:
+fixed 25-Sep prefix 644,567,384 B, previous prefix 644,034,993 B, append
+532,391 B. Balanced F/D/D/F/F/D: full wall median 120.066999 s vs
+single-proof delta 7.214775 s (-93.991%); logical payload and socket RX
+-99.917%. Delta final-prefix remote SHA wall median 3.314393 s and measured
+server CPU median 3.670000 s; local assemble/verify median 2.935482 s.
+Byte equivalence 6/6 and source identity stability PASS.
+
+P12-04 exact `9ef6aed`, Actions #36557160723: 342 Python tests PASS
+(3 skipped), browser/diff PASS. Unique candidate names plus subprocess
+hard-exit test prove retry does not trust or delete a foreign orphan.
+
+P12-05 synthetic normal-app gate exact `9384e4f`, Actions #36562739994:
+352 Python tests PASS (3 skipped), browser controls and diff PASS. Default-off
+mode does not seed/use delta metadata. Opt-in seeds device/inode/proof version,
+uses the largest proven same-source prefix, falls back to a fresh full fetch on
+ordinary delta rejection, disables Phase 11 process-prefetch, and cleans only
+its app-root-owned temp namespace.
+
+Final opt-in acceptance exact `73d194d`, Actions #36563631303:
+32 focused Phase 12 tests PASS, then real normal-app control/delta on the same
+644,567,384-B 25-Sep snapshot. Full wall/CPU 265.223218/96.109375 s; delta
+92.686492/83.437500 s (-65.053% wall); one delta resume, zero fallbacks.
+Snapshot SHA, deterministic report manifest, semantic SQLite and semantic
+analytics exports all PASS. Test payload lived only in owned TemporaryDirectory
+workspaces; normal user cache was not a destination and no raw artifact was
+uploaded.
+
+The same Action built the Windows x64 ZIP. PyInstaller explicitly includes
+`akuz_delta`; frozen self-test executes `assemble_delta_final_proof` and the
+standard portable smoke PASS. No Release mutation occurred.
+
+Acceptance is deliberately limited to `AKUZ_PHASE12_DELTA_RESUME=1`.
+Default-on and Phase-11+12 overlap are not approved by this evidence.

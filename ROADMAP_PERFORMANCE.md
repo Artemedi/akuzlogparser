@@ -167,7 +167,7 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 
 **2026-09-29 v4.8.0 production acceptance:** one-ahead process-isolated SSH prefetch is accepted for the Windows portable normal-app path after failure/restart/cache/rollback/portable gates and independent Fable review. Production scope is Windows client + SSH/Linux source + built-in compatible fetch/generator + multi-source only; one child maximum; `AKUZ_PHASE11_PROCESS_PREFETCH=0` is the rollback switch. Atomic suspended Windows spawn assigns the child to KILL_ON_JOB_CLOSE before ResumeThread; bounded JSON IPC, exact-HANDLE SHA/cleanup, inventory-intent + no-overwrite hard-link promotion and unsafe-no-second-writer semantics are enforced. Final Fable #36538397765: LIFECYCLE=ACCEPT, TRANSACTION=ACCEPT. Latest pre-version-bump Windows suite #36537874019: 318 Python PASS (3 skips), browser/diff PASS. Final real/portable gates are repeated on the v4.8.0 versioned SHA before release. Thread candidate remains rejected; compression remains default OFF. See `PHASE11_SSH_OVERLAP.md`.
 
-### Phase 12 — delta/resume для удалённого .log [OPEN, повышенный риск]
+### Phase 12 — delta/resume для удалённого .log [OPT-IN PASS; DEFAULT OFF]
 1. Разделить append-only активный журнал, удалённый архив, новый файл с тем же именем, truncated/replaced/rotated file.
 2. Доказать идентичность сохранённого префикса криптографически/надёжными сегментами, проверять before/after stat, дату, inode/identity по доступности, file size и границу multiline; делать atomic commit offset **только после** успешной фиксации полного снимка/отчёта.
 3. Fault-injection для network loss, source mutation, disk full, checksum mismatch, replay, partial UTF-8 и незавершённого события. При сомнении — полный snapshot; никогда не пропускать/не дублировать события.
@@ -182,6 +182,20 @@ rewrite, short transfer, disk-full, replay, partial UTF-8/unfinished tail,
 publication race and post-publish temp-cleanup failure. Full Windows regression
 is still a required gate; remote SHA acquisition/cost and replicated real A/B
 remain OPEN. See `PHASE12_DELTA_RESUME.md`.
+
+**2026-09-29 P12-01..05 acceptance:** single-proof v2 passed balanced
+3+3 transport A/B on a fixed 644,567,384-B 25-Sep prefix: median
+120.066999 s full vs 7.214775 s delta (-93.991% wall), 99.917% less
+logical/socket payload; final remote SHA server CPU median 3.67 s.
+Hard-exit/restart synthetic gate and owner-scoped temp cleanup PASS.
+Normal-app opt-in `AKUZ_PHASE12_DELTA_RESUME=1` then passed real
+end-to-end integration on the same snapshot: 265.223218 s full vs
+92.686492 s delta (-65.053% wall), snapshot/report/semantic SQLite/export
+equivalence PASS, delta fallback count 0. Frozen portable includes and executes
+`akuz_delta` in self-test. Default remains OFF, Phase 11 process-prefetch is
+disabled while opt-in is active, and published v4.8.0 Release is unchanged.
+See `PHASE12_DELTA_RESUME.md`. Default-on and combined Phase-11+12 scheduling
+remain future decisions.
 
 ### Phase 13 — аналитика SQLite и третий проход [OPEN]
 1. Измерить `analytics.ingest/export/overview`, SELECT/INSERT, индексы, транзакции, write amplification и повторное распознавание ошибок по raw; baseline refresh ≈37.58 s.

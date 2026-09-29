@@ -1,8 +1,8 @@
 # Phase 12 — remote .log delta/resume
 
-**Status:** EXPERIMENTAL / NOT WIRED INTO NORMAL APP  
+**Status:** P12-01..P12-05 PASS for an opt-in normal-app path; default remains OFF  
 **Started:** 2026-09-29  
-**Release:** unchanged; v4.8.0 runtime does not import or call this prototype.
+**Release:** unchanged; published v4.8.0 is not modified by this work.
 
 ## Goal
 
@@ -87,10 +87,12 @@ The current tests cover:
 All failure cases are intended to be fail-closed: no new unproven snapshot is
 published and the previous known-good snapshot remains intact.
 
-## Deliberate non-goals at this checkpoint
+## Historical P12-00 non-goals
 
-The prototype is **not** imported by `akuz_fetch.py`, `akuz_app.py`, or the
-portable runtime. It does not yet:
+The list below describes the initial isolated checkpoint before P12-01..05.
+It is retained as history; SSH range reads, normal-app opt-in wiring, owner-scoped
+temp cleanup and portable inclusion were implemented and gated later.
+At P12-00 the prototype did not yet:
 
 - issue SSH range reads;
 - acquire remote prefix SHA proofs;
@@ -269,3 +271,76 @@ tail and no-overwrite race gates remain green.
 
 This closes the isolated P12-04 restart contract. Normal-app fallback,
 inventory metadata and portable integration remain P12-05 work.
+
+
+## P12-05 opt-in normal-app + portable acceptance — PASS
+
+Exact acceptance SHA `73d194dbe3d5ccf69342032a1e49804e3b24dcae`,
+Actions `#36563631303`, DBA-008D.
+
+The production code path is wired behind an explicit, default-OFF rollback
+switch:
+
+`AKUZ_PHASE12_DELTA_RESUME=1`
+
+Eligibility is fail-closed. A previous snapshot is used only when its inventory
+row already proves the same SSH host/path, local path+SHA+stored byte count and
+remote device/inode, with `delta_proof_version=1`. Legacy rows are never
+upgraded by guessing. The resume offset is the stored complete prefix, not an
+older capture bound. Any ordinary delta proof/transfer rejection reopens a
+fresh full bounded fetch. Phase 11 process-prefetch is deliberately disabled
+while Phase 12 opt-in is enabled; their combined scheduler remains a separate
+future gate.
+
+Owner-scoped temporary names use an app-root-derived token. Startup cleanup
+removes only matching Phase 12 temp files under that app's configured
+`local_dest`; foreign app-root tokens and arbitrary operator files are left
+untouched. A hard-exit before final publication is retryable; a hard-exit after
+a verified final but before inventory save remains fail-closed as an unindexed
+final, matching the existing conservative full-fetch collision behavior. It is
+not silently adopted or overwritten.
+
+### Real normal-app evidence
+
+One full control and one opt-in delta integration run used the same trusted
+25-Sep source version:
+
+- fixed snapshot: **644,567,384 B**;
+- proven previous prefix: **644,034,993 B**;
+- transferred append: **532,391 B**;
+- full normal-app wall/CPU: **265.223218 / 96.109375 s**;
+- delta normal-app wall/CPU: **92.686492 / 83.437500 s**;
+- measured end-to-end wall reduction: **65.053%**;
+- `delta_resume_downloads=1`, `delta_resume_fallbacks=0`;
+- snapshot SHA equivalence PASS;
+- deterministic report manifest equivalence PASS;
+- semantic SQLite equivalence PASS;
+- semantic analytics export equivalence PASS.
+
+This is an integration observation, not a replacement for P12-03's replicated
+transport A/B.
+
+### Portable evidence
+
+The same Action built the Windows x64 portable ZIP. PyInstaller explicitly
+includes `akuz_delta`, and the frozen `--self-test` executes
+`assemble_delta_final_proof` inside the EXE before the usual native crypto,
+spawn, parsing, analytics, localhost UI, config-preservation and Unicode-path
+smoke. Portable build and packaged smoke both PASS.
+
+Focused Phase 12 pre-gate: **32 tests PASS**. The last pre-integration full
+Windows regression on `9384e4f` passed **352 tests, 3 skipped**, browser and
+diff checks. A full regression on the exact final acceptance SHA is tracked
+separately by the normal Windows workflow.
+
+No raw log artifact was uploaded, the user's normal app cache was not used as a
+test destination, SSH compression was forced OFF for comparison, and no GitHub
+Release was changed.
+
+### Acceptance boundary
+
+Phase 12 is accepted only as an **opt-in, default-OFF** feature on `main`.
+It is not approved as default-on and is not part of the already published
+v4.8.0 release. Before default-on or a future release decision, separately
+gate the Phase-11+12 combined scheduler and decide whether the conservative
+unindexed-final crash window should gain an ownership-validated recovery intent.

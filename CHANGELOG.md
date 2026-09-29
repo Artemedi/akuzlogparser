@@ -1,5 +1,28 @@
 # История изменений AKUZ Log Explorer
 
+## Unreleased — Phase 12 opt-in
+
+- Добавлен default-OFF режим `AKUZ_PHASE12_DELTA_RESUME=1` для выросших
+  Linux/SSH `.log`: используется только доказанный previous snapshot с
+  host/path/device/inode, SHA-256 и `stored_bytes`; legacy cache не угадывается.
+- Single-proof v2 скачивает append и принимает новый snapshot только после
+  SHA-256 всего удалённого принятого префикса. Обычная ошибка delta безопасно
+  возвращается к свежему полному bounded fetch; no-overwrite коллизии fail-closed.
+- Phase 12 использует app-root-owned temp namespace и не удаляет чужие temp/
+  операторские файлы. Resume offset учитывает отброшенный незавершённый хвост.
+- Пока Phase 12 opt-in активен, Phase 11 process-prefetch отключён; совместный
+  scheduler не принят без отдельного gate.
+- Replicated transport A/B: 120.067 s full против 7.215 s delta median
+  (-93.991% wall) на фиксированном 644,567,384-B snapshot; remote SHA server
+  CPU median 3.67 s.
+- Real normal-app integration: 265.223 s full против 92.686 s delta
+  (-65.053% wall), snapshot/report/semantic SQL/export parity PASS.
+- Portable builder явно включает `akuz_delta`; frozen EXE self-test реально
+  выполняет delta assembler. Acceptance Actions #36563631303 PASS.
+- Это **не** изменение уже опубликованного v4.8.0 Release и не default-on
+  решение.
+
+
 ## 4.8.0 — 2026-09-29
 
 - **Phase 11 process-prefetch принят в production.** На Windows при выборе
