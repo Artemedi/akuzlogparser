@@ -1071,6 +1071,7 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             root = Path(td)
             receiver = FakeReceiver(ready=False)
             child = FakeChild(alive_after_start=True)
+            child.alive = True
             owner = Owner()
             tree_calls = []
 
