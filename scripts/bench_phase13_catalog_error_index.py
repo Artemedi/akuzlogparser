@@ -97,10 +97,13 @@ def _db_metrics(root: Path):
     )
 
 
-def _run_refresh(root: Path, use_index: bool | None):
+def _run_refresh(root: Path, use_index: bool | None,
+                 use_sql_batch: bool = False):
     offset = _trace_count(root)
     wall0, cpu0 = perf_counter(), process_time()
-    overview = refresh(root, use_catalog_error_index=use_index)
+    overview = refresh(
+        root, use_catalog_error_index=use_index,
+        use_sql_batch=use_sql_batch)
     wall = perf_counter() - wall0
     cpu = process_time() - cpu0
     trace = _trace_after(root, offset)
@@ -139,8 +142,16 @@ def _run_refresh(root: Path, use_index: bool | None):
             _num(x.get("matched_errors"), True) for x in summaries),
         raw_sha_lookup_calls=sum(
             _num(x.get("raw_sha_lookup_calls"), True) for x in summaries),
+        ambiguity_preload_queries=sum(
+            _num(x.get("ambiguity_preload_queries"), True) for x in summaries),
+        ambiguity_preload_rows=sum(
+            _num(x.get("ambiguity_preload_rows"), True) for x in summaries),
         insert_attempts=sum(
             _num(x.get("insert_attempts"), True) for x in summaries),
+        insert_batches=sum(
+            _num(x.get("insert_batches"), True) for x in summaries),
+        sql_batch_reports=sum(
+            _num(x.get("sql_batch"), True) for x in summaries),
         ambiguous_update_calls=sum(
             _num(x.get("ambiguous_update_calls"), True) for x in summaries),
         catalog_verify_s=round(sum(
