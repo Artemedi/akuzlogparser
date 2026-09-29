@@ -7,6 +7,7 @@ separately in test_phase11_process_lifecycle.py.
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 from pathlib import Path
@@ -488,7 +489,8 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             FakeProcessFetch.reset()
             with patch(
                     "akuz_app.os.link",
-                    side_effect=OSError("hard links unsupported")):
+                    side_effect=OSError(
+                        errno.EXDEV, "cross-device hard link unsupported")):
                 result, calls = self.build(root, rows, process=True)
 
             self.assertEqual(
@@ -501,6 +503,46 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             self.assertEqual(len(load_store(root)["downloads"]), 3)
             self.assertFalse(list((root / "downloads").glob(
                 ".akuz-phase11-prefetch-*")))
+
+    def test_atomic_promotion_permission_error_is_not_serial_fallback(self):
+        with TemporaryDirectory(prefix="akuz_p11_link_permission_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+
+            FakeProcessFetch.reset()
+            with patch(
+                    "akuz_app.os.link",
+                    side_effect=OSError(errno.EACCES, "permission denied")):
+                with self.assertRaisesRegex(
+                        akuz_app.FetchError,
+                        "Не удалось атомарно принять предзагрузку"):
+                    self.build(root, rows, process=True)
+
+            # Only the first source completed. The process-prefetched second
+            # source was rolled back and the serial writer was NOT started.
+            self.assertEqual(FakeProcessFetch.active, 0)
+            store = load_store(root)
+            self.assertEqual(len(store["downloads"]), 1)
+            self.assertEqual(len(store["reports"]), 1)
+            self.assertFalse(list((root / "downloads").glob(
+                ".akuz-phase11-prefetch-*")))
+
+    def test_atomic_promotion_disk_full_is_not_serial_fallback(self):
+        with TemporaryDirectory(prefix="akuz_p11_link_enospc_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+
+            FakeProcessFetch.reset()
+            with patch(
+                    "akuz_app.os.link",
+                    side_effect=OSError(errno.ENOSPC, "disk full")):
+                with self.assertRaises(akuz_app.FetchError):
+                    self.build(root, rows, process=True)
+
+            self.assertEqual(FakeProcessFetch.active, 0)
+            self.assertEqual(len(load_store(root)["downloads"]), 1)
 
     def test_crash_intent_external_final_is_never_warm_reused(self):
         with TemporaryDirectory(prefix="akuz_p11_external_after_intent_") as td:
