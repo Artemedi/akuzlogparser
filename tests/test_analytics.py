@@ -194,6 +194,20 @@ class ErrorAnalyticsTests(unittest.TestCase):
         self.assertIsNone(_trusted_catalog_error_index(
             future, catalog_path, catalog, True))
 
+    def test_phase13_single_transaction_switch(self):
+        from akuz_analytics import _phase13_single_transaction_requested
+        self.assertFalse(_phase13_single_transaction_requested({}))
+        for value in ("1", "true", "YES", "on"):
+            self.assertTrue(_phase13_single_transaction_requested(
+                {"AKUZ_PHASE13_SINGLE_TRANSACTION": value}))
+        for value in ("0", "false", "NO", "off"):
+            self.assertFalse(_phase13_single_transaction_requested(
+                {"AKUZ_PHASE13_SINGLE_TRANSACTION": value}))
+        with self.assertRaisesRegex(
+                ValueError, "AKUZ_PHASE13_SINGLE_TRANSACTION"):
+            _phase13_single_transaction_requested(
+                {"AKUZ_PHASE13_SINGLE_TRANSACTION": "maybe"})
+
     def test_catalog_error_index_default_on_and_explicit_rollback(self):
         normal = "".join(
             f"12:{n:02}:00.100,AKUZ,session,user: normal event {n}\n"
@@ -219,6 +233,55 @@ class ErrorAnalyticsTests(unittest.TestCase):
         self.assertEqual(rollback, baseline)
         self.assertEqual(_analytics_db_snapshot(self.root), baseline_db)
         self.assertEqual(_analytics_js_snapshot(self.root), baseline_js)
+
+    def test_single_transaction_rolls_back_batch_and_retries_equivalently(self):
+        self.report(
+            "phase13_tx_first",
+            self.event("12:00:00.100", "1234"))
+        self.report(
+            "phase13_tx_second",
+            self.event("13:00:00.100", "5678"))
+
+        import akuz_analytics
+        original = akuz_analytics.ingest
+        calls = {"n": 0}
+
+        def fail_second(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("synthetic second-report failure")
+            return original(*args, **kwargs)
+
+        from unittest.mock import patch
+        with patch("akuz_analytics.ingest", side_effect=fail_second):
+            with self.assertRaisesRegex(
+                    RuntimeError, "synthetic second-report failure"):
+                refresh(
+                    self.root, use_catalog_error_index=True,
+                    single_transaction=True)
+
+        with closing(sqlite3.connect(
+                self.root / "cache" / "error_analytics.sqlite")) as db:
+            self.assertEqual(
+                db.execute("SELECT count(*) FROM indexed").fetchone()[0], 0)
+            self.assertEqual(
+                db.execute("SELECT count(*) FROM errors").fetchone()[0], 0)
+
+        candidate = refresh(
+            self.root, use_catalog_error_index=True,
+            single_transaction=True)
+        candidate_db = _analytics_db_snapshot(self.root)
+        candidate_js = _analytics_js_snapshot(self.root)
+
+        (self.root / "cache" / "error_analytics.sqlite").unlink()
+        shutil.rmtree(self.root / "data")
+        baseline = refresh(
+            self.root, use_catalog_error_index=True,
+            single_transaction=False)
+
+        self.assertEqual(candidate, baseline)
+        self.assertEqual(candidate_db, _analytics_db_snapshot(self.root))
+        self.assertEqual(candidate_js, _analytics_js_snapshot(self.root))
 
     def test_catalog_error_index_candidate_is_sql_and_export_equivalent(self):
         normal = "".join(
