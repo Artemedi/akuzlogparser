@@ -181,6 +181,47 @@ if os.name == "nt":
             pass
 
 
+    def _arm_remaining_finalizer(popen):
+        """Keep a quiet GC fallback only for resources still owned by popen."""
+        popen.finalizer = util.Finalize(
+            popen, _finalize_handles,
+            (popen._akuz_job_owner,
+             getattr(popen, "_handle", None),
+             getattr(popen, "_pipe_handle", None)))
+
+
+    def _close_popen_handles_strict(popen):
+        """Close each owned handle once and retain only failed slots."""
+        errors = []
+        try:
+            popen._akuz_job_owner.close()
+        except BaseException as exc:
+            errors.append(exc)
+
+        process_handle = getattr(popen, "_handle", None)
+        if process_handle is not None:
+            try:
+                _winapi.CloseHandle(process_handle)
+            except BaseException as exc:
+                errors.append(exc)
+            else:
+                popen._handle = None
+
+        pipe_handle = getattr(popen, "_pipe_handle", None)
+        if pipe_handle is not None:
+            try:
+                _winapi.CloseHandle(pipe_handle)
+            except BaseException as exc:
+                errors.append(exc)
+            else:
+                popen._pipe_handle = None
+
+        if errors:
+            raise JobBoundSpawnError(
+                "Could not close atomic Job-bound spawn handles") from errors[0]
+        popen._closed = True
+
+
     class JobBoundPopen:
         """CPython spawn Popen with atomic suspended Job assignment."""
 
@@ -293,31 +334,50 @@ if os.name == "nt":
                     ht = None
 
                 if finalizer is not None:
-                    # The child may already have been resumed and started
-                    # consuming the spawn pipe. Kill the already Job-bound tree
-                    # synchronously and wait for the exact process HANDLE
-                    # before releasing process/pipe ownership.
+                    # The child may already have been resumed. The writer was
+                    # closed above; release the parent's spawn-pipe read HANDLE
+                    # before terminating the Job so teardown cannot retain an
+                    # unnecessary pipe reference while waiting for exit.
                     finalizer.cancel()
+                    pipe_close_error = None
+                    if self._pipe_handle is not None:
+                        try:
+                            _winapi.CloseHandle(self._pipe_handle)
+                        except BaseException as exc:
+                            pipe_close_error = exc
+                        else:
+                            self._pipe_handle = None
+
                     termination_error = None
                     if assigned and self.sentinel is not None:
                         try:
                             _terminate_job_and_wait(owner, self.sentinel)
                         except BaseException as exc:
                             termination_error = exc
+
                     cleanup_error = None
                     try:
-                        _close_handles_strict(
-                            owner, self.sentinel, self._pipe_handle)
+                        _close_popen_handles_strict(self)
                     except BaseException as exc:
                         cleanup_error = exc
-                    self._closed = cleanup_error is None
-                    if cleanup_error is None:
-                        self._handle = None
-                        self._pipe_handle = None
+                        # The original finalizer was cancelled to avoid
+                        # double-close. Re-arm a quiet fallback for only the
+                        # exact resources whose slots remain owned.
+                        _arm_remaining_finalizer(self)
+
+                    if pipe_close_error is not None and cleanup_error is None:
+                        cleanup_error = pipe_close_error
                     if termination_error is not None:
-                        raise JobBoundSpawnError(
-                            "Could not synchronously terminate failed atomic spawn"
-                        ) from termination_error
+                        error = JobBoundSpawnError(
+                            "Could not synchronously terminate failed atomic spawn")
+                        if cleanup_error is not None:
+                            try:
+                                error.add_note(
+                                    "Phase 11 spawn cleanup also failed: " +
+                                    type(cleanup_error).__name__)
+                            except BaseException:
+                                pass
+                        raise error from termination_error
                     if cleanup_error is not None:
                         raise JobBoundSpawnError(
                             "Could not clean failed atomic spawn handles"
@@ -422,42 +482,18 @@ if os.name == "nt":
             if getattr(self, "_closed", False):
                 return
 
-            # Explicit close takes ownership away from the quiet GC fallback.
-            # Update each raw HANDLE slot immediately after its successful
-            # CloseHandle so a later retry can never double-close it.
+            # Explicit close takes ownership away from the current quiet GC
+            # fallback. If any slot fails, install a replacement finalizer for
+            # only the still-owned resources so retry/GC can never double-close
+            # handles that already succeeded.
             finalizer = getattr(self, "finalizer", None)
             if finalizer is not None and finalizer.still_active():
                 finalizer.cancel()
-
-            errors = []
             try:
-                self._akuz_job_owner.close()
-            except BaseException as exc:
-                errors.append(exc)
-
-            process_handle = getattr(self, "_handle", None)
-            if process_handle is not None:
-                try:
-                    _winapi.CloseHandle(process_handle)
-                except BaseException as exc:
-                    errors.append(exc)
-                else:
-                    self._handle = None
-
-            pipe_handle = getattr(self, "_pipe_handle", None)
-            if pipe_handle is not None:
-                try:
-                    _winapi.CloseHandle(pipe_handle)
-                except BaseException as exc:
-                    errors.append(exc)
-                else:
-                    self._pipe_handle = None
-
-            if errors:
-                raise JobBoundSpawnError(
-                    "Could not close atomic Job-bound spawn handles"
-                ) from errors[0]
-            self._closed = True
+                _close_popen_handles_strict(self)
+            except BaseException:
+                _arm_remaining_finalizer(self)
+                raise
 
 
     class JobBoundSpawnProcess(SpawnProcess):
