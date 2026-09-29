@@ -339,6 +339,27 @@ jobs:
           Re-evaluate the actual code for residual handle leaks, TOCTOU, pipe
           lifetime, or unsafe fallback; do not assume these changes are sufficient.
 
+          Latest fixes after the immediately previous Fable BLOCK/MODIFY:
+          - ProcessFetch captures the authoritative atomic Job owner before
+            fallible parent sender.close(), so sender-close failure tears down
+            the whole Job tree rather than only the direct child;
+          - Windows owned-temp cleanup holds the exact parent directory HANDLE
+            without FILE_SHARE_DELETE across DELETE-by-handle, closing the
+            directory-swap window;
+          - late atomic-spawn failure closes the parent spawn-pipe HANDLE,
+            synchronously terminates/waits the Job tree, closes each owned
+            HANDLE slot once and re-arms a quiet Finalize only for resources
+            whose close actually failed;
+          - normal-app promotion failure always attempts both temp cleanup and
+            operation.close(); durable inventory rollback save failure is now a
+            ProcessFetchUnsafeError rather than a logged-and-masked condition;
+          - targeted regressions cover sender-close after atomic start, held
+            parent-directory rename blocking, partial HANDLE close + retry
+            finalizer, cleanup failure still closing the operation, and stale
+            durable rollback restart recovery.
+          Review the actual latest code and reproduce a current failure before
+          carrying forward an older BLOCK verdict.
+
           Treat regression evidence as evidence, not proof. Re-check the
           implementation rather than trusting this summary.
 
