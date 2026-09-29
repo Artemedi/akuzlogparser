@@ -161,7 +161,7 @@ class ErrorAnalyticsTests(unittest.TestCase):
             _phase13_catalog_error_index_requested,
             _trusted_catalog_error_index,
         )
-        self.assertFalse(_phase13_catalog_error_index_requested({}))
+        self.assertTrue(_phase13_catalog_error_index_requested({}))
         for value in ("1", "true", "YES", "on"):
             self.assertTrue(_phase13_catalog_error_index_requested(
                 {"AKUZ_PHASE13_CATALOG_ERROR_INDEX": value}))
@@ -193,6 +193,32 @@ class ErrorAnalyticsTests(unittest.TestCase):
         future = dict(info, error_fingerprint_version=999)
         self.assertIsNone(_trusted_catalog_error_index(
             future, catalog_path, catalog, True))
+
+    def test_catalog_error_index_default_on_and_explicit_rollback(self):
+        normal = "".join(
+            f"12:{n:02}:00.100,AKUZ,session,user: normal event {n}\n"
+            for n in range(6))
+        self.report(
+            "phase13_default",
+            normal + self.event("13:00:00.100", "1234"))
+
+        baseline = refresh(self.root, use_catalog_error_index=False)
+        baseline_db = _analytics_db_snapshot(self.root)
+        baseline_js = _analytics_js_snapshot(self.root)
+
+        (self.root / "cache" / "error_analytics.sqlite").unlink()
+        shutil.rmtree(self.root / "data")
+        default_candidate = refresh(self.root)
+        self.assertEqual(default_candidate, baseline)
+        self.assertEqual(_analytics_db_snapshot(self.root), baseline_db)
+        self.assertEqual(_analytics_js_snapshot(self.root), baseline_js)
+
+        (self.root / "cache" / "error_analytics.sqlite").unlink()
+        shutil.rmtree(self.root / "data")
+        rollback = refresh(self.root, use_catalog_error_index=False)
+        self.assertEqual(rollback, baseline)
+        self.assertEqual(_analytics_db_snapshot(self.root), baseline_db)
+        self.assertEqual(_analytics_js_snapshot(self.root), baseline_js)
 
     def test_catalog_error_index_candidate_is_sql_and_export_equivalent(self):
         normal = "".join(

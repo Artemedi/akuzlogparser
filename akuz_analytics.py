@@ -150,11 +150,11 @@ def source_identity(info):
 
 
 def _phase13_catalog_error_index_requested(env=None):
-    """Parse Phase 13 experimental switch; default remains historical scan."""
+    """Parse Phase 13 rollback switch; accepted index is default-on."""
     values = os.environ if env is None else env
     name = "AKUZ_PHASE13_CATALOG_ERROR_INDEX"
     if name not in values:
-        return False
+        return True
     flag = str(values[name]).strip().lower()
     if flag in ("1", "true", "yes", "on"):
         return True
