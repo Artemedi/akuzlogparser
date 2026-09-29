@@ -385,6 +385,14 @@ class ProcessFetch:
             if child is not None:
                 if child.is_alive() and self._kill_job is not None:
                     popen = getattr(child, "_popen", None)
+                    close_spawn_pipe = getattr(
+                        popen, "close_spawn_pipe", None)
+                    if callable(close_spawn_pipe):
+                        try:
+                            close_spawn_pipe()
+                        except Exception as exc:
+                            unsafe_error = exc
+
                     terminate_tree = getattr(
                         popen, "terminate_job_and_wait", None)
                     if callable(terminate_tree):
@@ -392,7 +400,8 @@ class ProcessFetch:
                             terminate_tree(self.kill_timeout_s)
                             child.join(timeout=0)
                         except Exception as exc:
-                            unsafe_error = exc
+                            if unsafe_error is None:
+                                unsafe_error = exc
                     # If the deterministic Job termination path is unavailable
                     # or failed, closing KILL_ON_JOB_CLOSE remains a bounded
                     # backup before direct-process termination.
