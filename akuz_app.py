@@ -35,6 +35,7 @@ from akuz_runtime import DOCUMENTS, app_root, prepare_runtime
 from akuz_instance_lock import InstanceBusy, exclusive_instance
 from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
                                 ProcessFetchUnsafeError,
+                                owned_snapshot_promotion_guard,
                                 remove_owned_snapshot, ssh_fetch_child)
 from akuz_win_job_spawn import get_job_bound_spawn_context
 from akuz_version import __version__
@@ -642,10 +643,13 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             raise
 
         try:
-            # Atomic no-overwrite promotion on the same downloads volume.
-            # os.link fails with FileExistsError rather than replacing a file
-            # that appeared after the earlier existence check.
-            os.link(result.path, final)
+            # Freeze the exact validated Windows file+parent identity while
+            # CreateHardLink resolves the source pathname. The guard omits
+            # delete sharing, so the temp path cannot be swapped between SHA
+            # validation and this atomic no-overwrite promotion.
+            with owned_snapshot_promotion_guard(
+                    result.path, result.cleanup_identity):
+                os.link(result.path, final)
         except FileExistsError as exc:
             rollback_prefetch_inventory('final_exists')
             remove_owned_snapshot(
