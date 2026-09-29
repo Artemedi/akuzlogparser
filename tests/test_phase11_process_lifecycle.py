@@ -233,6 +233,44 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             self.assertTrue(child.killed)
             self.assertTrue(receiver.closed)
 
+    @unittest.skipUnless(os.name == "nt", "Windows Job ownership")
+    def test_sender_close_failure_uses_job_owner_before_direct_terminate(self):
+        class Owner:
+            def __init__(self, child):
+                self.child = child
+                self.calls = 0
+                self.closed = False
+
+            def close(self):
+                self.calls += 1
+                self.closed = True
+                self.child.alive = False
+
+        with TemporaryDirectory(prefix="akuz_process_sender_job_") as td:
+            root = Path(td)
+            receiver = FakeReceiver(ready=False)
+            child = FakeChild(alive_after_start=True)
+            owner = Owner(child)
+            child._popen = type("Popen", (), {
+                "_akuz_job_owner": owner})()
+            ctx = FakeContext(receiver, child)
+            ctx._akuz_job_bound_context = True
+            ctx.sender = CloseErrorSender()
+            op = ProcessFetch(
+                ctx, lambda *args: None, (), root / "snapshot.log",
+                poll_timeout_s=.01, join_timeout_s=.01, kill_timeout_s=.01,
+                expected_listed_bytes=0, require_kill_job=True,
+                safe_ipc=True)
+            with self.assertRaisesRegex(OSError, "sender close failure"):
+                op.start()
+            self.assertEqual(owner.calls, 1)
+            self.assertTrue(owner.closed)
+            self.assertFalse(child.terminated)
+            self.assertFalse(child.killed)
+            self.assertFalse(child.is_alive())
+            self.assertTrue(receiver.closed)
+            self.assertIsNone(op._kill_job)
+
     def test_safe_ipc_rejects_malformed_json_and_cleans_snapshot(self):
         with TemporaryDirectory(prefix="akuz_process_json_bad_") as td:
             root = Path(td)
@@ -494,6 +532,44 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             self.assertGreaterEqual(calls["count"], 2)
             self.assertEqual(target.read_bytes(), b"owned")
 
+    @unittest.skipUnless(os.name == "nt", "Windows parent cleanup guard")
+    def test_windows_cleanup_holds_parent_directory_against_rename(self):
+        with TemporaryDirectory(prefix="akuz_process_parent_guard_") as td:
+            base = Path(td)
+            root = base / "owned"
+            moved = base / "moved"
+            root.mkdir()
+            target = root / "snapshot.log"
+            target.write_bytes(b"owned")
+
+            import akuz_process_fetch as process_fetch
+            real_identity = process_fetch._windows_cleanup_identity
+            calls = {"count": 0, "blocked": False}
+
+            def prove_parent_guard(handle):
+                identity = real_identity(handle)
+                calls["count"] += 1
+                if calls["count"] == 2:
+                    try:
+                        os.rename(root, moved)
+                    except OSError:
+                        calls["blocked"] = True
+                    else:
+                        os.rename(moved, root)
+                        self.fail(
+                            "parent directory rename succeeded while cleanup "
+                            "guard was held")
+                return identity
+
+            with patch(
+                    "akuz_process_fetch._windows_cleanup_identity",
+                    side_effect=prove_parent_guard):
+                remove_owned_snapshot(target, attempts=1, delay_s=.01)
+
+            self.assertTrue(calls["blocked"])
+            self.assertFalse(target.exists())
+            self.assertTrue(root.is_dir())
+
     def test_owned_snapshot_cleanup_failure_is_unsafe(self):
         with TemporaryDirectory(prefix="akuz_process_cleanup_unsafe_") as td:
             root = Path(td)
@@ -721,7 +797,8 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
 
         popen = object.__new__(job_spawn.JobBoundPopen)
         popen._closed = False
-        popen.finalizer = FakeFinalizer()
+        first_finalizer = FakeFinalizer()
+        popen.finalizer = first_finalizer
         popen._akuz_job_owner = FakeOwner()
         popen._handle = 101
         popen._pipe_handle = 102
@@ -740,12 +817,15 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                     "Could not close atomic Job-bound spawn handles"):
                 popen.close()
 
-        self.assertTrue(popen.finalizer.cancelled)
+        self.assertTrue(first_finalizer.cancelled)
         self.assertTrue(popen._akuz_job_owner.closed)
         self.assertEqual(calls, [101, 102])
         self.assertFalse(popen._closed)
         self.assertIsNone(popen._handle)
         self.assertEqual(popen._pipe_handle, 102)
+        retry_finalizer = popen.finalizer
+        self.assertIsNot(retry_finalizer, first_finalizer)
+        self.assertTrue(retry_finalizer.still_active())
 
         # Retry owns only the one HANDLE that actually failed previously.
         calls.clear()
@@ -755,6 +835,7 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
         self.assertEqual(calls, [102])
         self.assertTrue(popen._closed)
         self.assertIsNone(popen._pipe_handle)
+        self.assertFalse(retry_finalizer.still_active())
 
     @unittest.skipUnless(os.name == "nt", "Windows parent identity binding")
     def test_validated_parent_identity_change_blocks_cleanup(self):
