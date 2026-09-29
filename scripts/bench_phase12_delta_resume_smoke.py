@@ -129,12 +129,15 @@ def _metadata(client, cfg, quoted: str):
 
 
 def _remote_prefix_sha(client, cfg, quoted: str, size: int, use_sudo: bool):
-    command = (
-        sudo_prefix(use_sudo, bool(cfg.sudo_password))
-        + f"head -c {size} -- "
-        + quoted
-        + " | sha256sum"
+    # Benchmark-only CPU accounting for the remote proof command. GNU time is
+    # required by the Phase 12 acceptance harness; production runtime does not
+    # depend on it.
+    pipeline = f"head -c {size} -- {quoted} | sha256sum"
+    timed = (
+        "/usr/bin/time -f 'AKUZ_PHASE12_SHA_CPU %U %S' "
+        "sh -c " + shlex.quote(pipeline)
     )
+    command = sudo_prefix(use_sudo, bool(cfg.sudo_password)) + timed
     wall0 = perf_counter()
     cpu0 = process_time()
     stdin, stdout, stderr = client.exec_command(
@@ -149,9 +152,17 @@ def _remote_prefix_sha(client, cfg, quoted: str, size: int, use_sudo: bool):
     wall_s = perf_counter() - wall0
     cpu_s = process_time() - cpu0
     match = _SHA_LINE.fullmatch(data.strip())
-    if status != 0 or error.strip() or match is None:
+    cpu_match = re.search(
+        rb"AKUZ_PHASE12_SHA_CPU\s+([0-9]+(?:\.[0-9]+)?)\s+([0-9]+(?:\.[0-9]+)?)",
+        error)
+    clean_error = re.sub(
+        rb"AKUZ_PHASE12_SHA_CPU\s+[0-9]+(?:\.[0-9]+)?\s+[0-9]+(?:\.[0-9]+)?\s*",
+        b"", error).strip()
+    if status != 0 or clean_error or match is None or cpu_match is None:
         raise AssertionError("Remote bounded prefix SHA failed")
-    return match.group(1).decode("ascii").lower(), wall_s, cpu_s
+    server_cpu_s = float(cpu_match.group(1)) + float(cpu_match.group(2))
+    return (match.group(1).decode("ascii").lower(), wall_s, cpu_s,
+            server_cpu_s)
 
 
 def _transfer_range(client, cfg, quoted: str, start: int, length: int,
@@ -272,7 +283,7 @@ def _delta_trial(cfg, day: str, previous: Path, previous_sha: str,
         rx0, tx0 = counted.rx_bytes, counted.tx_bytes
         wall0, cpu0 = perf_counter(), process_time()
 
-        old_remote_sha, old_sha_wall, old_sha_cpu = _remote_prefix_sha(
+        old_remote_sha, old_sha_wall, old_sha_cpu, old_sha_server_cpu = _remote_prefix_sha(
             client, cfg, quoted, previous_bytes, use_sudo)
         if old_remote_sha != previous_sha:
             raise AssertionError("Saved remote prefix differs from previous snapshot")
@@ -287,7 +298,7 @@ def _delta_trial(cfg, day: str, previous: Path, previous_sha: str,
                 or transfer_after[2] != bound):
             raise AssertionError("Fixed source changed during delta transfer")
 
-        new_remote_sha, new_sha_wall, new_sha_cpu = _remote_prefix_sha(
+        new_remote_sha, new_sha_wall, new_sha_cpu, new_sha_server_cpu = _remote_prefix_sha(
             client, cfg, quoted, bound, use_sudo)
 
         # The identity check must bracket the FINAL remote prefix proof too.
@@ -329,10 +340,13 @@ def _delta_trial(cfg, day: str, previous: Path, previous_sha: str,
             client_cpu_s=round(cpu_s, 6),
             old_prefix_sha_wall_s=round(old_sha_wall, 6),
             old_prefix_sha_client_cpu_s=round(old_sha_cpu, 6),
+            old_prefix_sha_server_cpu_s=round(old_sha_server_cpu, 6),
             transfer_wall_s=round(transfer_wall, 6),
             transfer_client_cpu_s=round(transfer_cpu, 6),
             new_prefix_sha_wall_s=round(new_sha_wall, 6),
             new_prefix_sha_client_cpu_s=round(new_sha_cpu, 6),
+            new_prefix_sha_server_cpu_s=round(new_sha_server_cpu, 6),
+            remote_sha_server_cpu_s=round(old_sha_server_cpu + new_sha_server_cpu, 6),
             assemble_wall_s=round(assemble_wall, 6),
             assemble_client_cpu_s=round(assemble_cpu, 6),
             socket_rx_bytes=counted.rx_bytes-rx0,
@@ -398,7 +412,9 @@ def _public_row(row):
     allowed = (
         "mode", "bound_bytes", "previous_bytes", "logical_transfer_bytes",
         "wall_s", "client_cpu_s", "old_prefix_sha_wall_s",
-        "transfer_wall_s", "new_prefix_sha_wall_s", "assemble_wall_s",
+        "old_prefix_sha_server_cpu_s", "transfer_wall_s",
+        "new_prefix_sha_wall_s", "new_prefix_sha_server_cpu_s",
+        "remote_sha_server_cpu_s", "assemble_wall_s",
         "socket_rx_bytes", "socket_tx_bytes",
     )
     return {key: row[key] for key in allowed if key in row}
@@ -433,7 +449,7 @@ def main():
         print("APP_CACHE_CHANGED=NO")
         print("RELEASE_CHANGED=NO")
         print("REPLICATED=NO")
-        print("SERVER_SHA_CPU_MEASURED=NO")
+        print("SERVER_SHA_CPU_MEASURED=YES")
     except BaseException as exc:
         print("PHASE12_STRICT_DELTA_SMOKE=FAILED",
               type(exc).__name__)
