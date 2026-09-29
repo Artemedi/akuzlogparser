@@ -82,6 +82,12 @@ class FakeSender:
         self.closed = True
 
 
+class CloseErrorSender(FakeSender):
+    def close(self):
+        self.closed = True
+        raise OSError("injected sender close failure")
+
+
 class FakeChild:
     def __init__(self, on_start=None, *, exitcode=0,
                  alive_after_start=False, terminate_stops=True,
@@ -202,6 +208,29 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                     ctx, lambda *args: None, (), root / "x.log",
                     expected_listed_bytes=1, require_kill_job=True,
                     safe_ipc=False)
+
+    def test_sender_close_failure_preserves_unsafe_abort(self):
+        with TemporaryDirectory(prefix="akuz_process_sender_close_") as td:
+            root = Path(td)
+            receiver = FakeReceiver(ready=False)
+            child = FakeChild(
+                alive_after_start=True,
+                terminate_stops=False,
+                kill_stops=False)
+            ctx = FakeContext(receiver, child)
+            ctx.sender = CloseErrorSender()
+            op = ProcessFetch(
+                ctx, lambda *args: None, (), root / "snapshot.log",
+                poll_timeout_s=.01, join_timeout_s=.01, kill_timeout_s=.01,
+                safe_ipc=True)
+            with self.assertRaisesRegex(
+                    ProcessFetchUnsafeError, "could not be terminated") as cm:
+                op.start()
+            self.assertIsInstance(cm.exception.__cause__, OSError)
+            self.assertTrue(ctx.sender.closed)
+            self.assertTrue(child.terminated)
+            self.assertTrue(child.killed)
+            self.assertTrue(receiver.closed)
 
     def test_safe_ipc_rejects_malformed_json_and_cleans_snapshot(self):
         with TemporaryDirectory(prefix="akuz_process_json_bad_") as td:
