@@ -144,3 +144,39 @@ never silently skip or duplicate bytes.
 Integration needs an explicit cache-schema/ownership design, rollback switch,
 mixed-cache tests, Phase 11 interaction tests, frozen portable gate and a new
 real A/B. No release publication is implied by passing these gates.
+
+
+## P12-01 / P12-02 evidence — 2026-09-29
+
+**Windows regression PASS.** Exact code SHA `5296ee3`, Actions
+`#36548789449`, DBA-008D: **333 Python tests PASS, 3 skipped**; browser
+controls PASS; `git diff --check` PASS. No production publish occurred.
+
+**Read-only strict-delta smoke PASS.** Workflow SHA `5e14bd6`, Actions
+`#36548902058`, DBA-008D. Source was the trusted 25-Sep AKUZ application
+log, compression forced OFF. The tested immutable prefix was **644,567,384 B**.
+A previous stored prefix of **644,034,993 B** was reconstructed in an owned
+temporary workspace; only the **532,391 B** append was transferred by the
+strict-delta candidate.
+
+Measured single-trial comparison:
+
+| Metric | Full bounded fetch | Strict delta |
+|---|---:|---:|
+| logical SSH payload | 644,567,384 B | 532,391 B |
+| socket RX | 645,881,456 B | 535,712 B |
+| wall | 180.965705 s | 10.890523 s |
+| client CPU | 16.875000 s | 3.171875 s |
+| transfer wall | 180.762540 s | 0.477432 s |
+| old remote prefix SHA wall | n/a | 3.248178 s |
+| new remote prefix SHA wall | n/a | 3.422887 s |
+| local assemble/verify wall | n/a | 3.356579 s |
+
+Snapshot SHA equivalence PASS; device/inode identity stable; no raw payload was
+uploaded; normal app cache and Release were unchanged. The strict candidate
+reduced measured wall by **~93.98%** and logical payload by **~99.92%** in this
+one observation. This is deliberately **not acceptance evidence yet**:
+`REPLICATED=NO` and server-side SHA CPU was not measured.
+
+Next gate is P12-03: balanced 3+3 full/strict-delta A/B on one fixed prefix,
+with server proof CPU accounting added before any runtime integration.
