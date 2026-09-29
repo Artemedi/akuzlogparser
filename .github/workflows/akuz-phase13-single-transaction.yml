@@ -1,4 +1,4 @@
-name: AKUZ Phase 13 single-transaction A-B
+name: AKUZ Phase 13 single-transaction replicated A-B
 
 on:
   push:
@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   ab:
-    name: Real per-report vs single-transaction A-B
+    name: Replicated per-report vs single-transaction A-B
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 40
@@ -46,19 +46,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Analytics contract failed' }
           & python -B -m unittest discover -s tests -p 'test_phase13_single_transaction.py' -q
           if ($LASTEXITCODE -ne 0) { throw 'P13-05 benchmark guard failed' }
+          & python -B -m unittest discover -s tests -p 'test_phase13_single_transaction_replicated.py' -q
+          if ($LASTEXITCODE -ne 0) { throw 'P13-05 replicated harness guard failed' }
           Write-Host "EXACT_SHA=$actual"
           Write-Host 'PHASE13_SINGLE_TRANSACTION_PRE_GATE=PASS'
 
-      - name: Run real 23-24-25 transaction A-B
+      - name: Run real 23-24-25 replicated transaction A-B
         run: |
           $ErrorActionPreference = 'Stop'
           $privateRoot = 'E:\Software\Project\LogAkusExplorer\akuzlogparser'
-          $result = Join-Path $privateRoot ("diagnostics\phase13_single_tx_" + $env:GITHUB_RUN_ID + ".json")
-          & python -B scripts/bench_phase13_single_transaction.py `
+          $result = Join-Path $privateRoot ("diagnostics\phase13_single_tx_replicated_" + $env:GITHUB_RUN_ID + ".json")
+          & python -B scripts/bench_phase13_single_transaction_replicated.py `
             --config (Join-Path $privateRoot 'ConnectConf.cfg') `
             --app-root $privateRoot `
             --result $result
-          if ($LASTEXITCODE -ne 0) { throw 'P13-05 real A-B failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'P13-05 replicated real A-B failed' }
+          Write-Host 'REPLICATED_ORDER=B_C_C_B_B_C'
           Write-Host 'REAL_REPORTS=23_24_25_SEP'
           Write-Host 'CATALOG_ERROR_INDEX=ON_BOTH_MODES'
           Write-Host 'JOURNAL_MODE=DELETE'
