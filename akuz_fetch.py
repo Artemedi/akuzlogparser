@@ -386,7 +386,7 @@ def selected_snapshot_path(cfg: ConnectConfig, selected: dict) -> Path:
 
 
 
-_SHA256_STDIN = re.compile(rb"^([0-9a-fA-F]{64})\\s+-\\s*$")
+_SHA256_STDIN = re.compile(rb"^([0-9a-fA-F]{64})\s+-\s*$")
 
 
 def _remote_prefix_sha256(client, cfg: ConnectConfig, quoted: str,
