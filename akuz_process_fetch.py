@@ -769,59 +769,61 @@ def _windows_open_cleanup_handle(path: Path, access: int):
 def _remove_owned_snapshot_windows(
         target: Path, *, attempts=100, delay_s=0.10,
         expected_identity=None):
+    """Delete exactly the opened Windows file object, never a later pathname.
+
+    A parent-directory guard prevents directory replacement. The snapshot is
+    opened once with DELETE access; all identity checks and
+    SetFileInformationByHandle operate on that same HANDLE. Retrying never
+    re-resolves the pathname after ownership has been established.
+    """
     import ctypes
     from ctypes import wintypes
 
     file_read_attributes = 0x00000080
     delete_access = 0x00010000
     parent_guard = None
-    anchor = None
+    delete_handle = None
     close_errors = []
+    last_error = None
+
+    class FILE_DISPOSITION_INFO(ctypes.Structure):
+        _fields_ = [("DeleteFile", ctypes.c_ubyte)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.SetFileInformationByHandle.argtypes = [
+        wintypes.HANDLE, ctypes.c_int,
+        ctypes.c_void_p, wintypes.DWORD]
+    kernel32.SetFileInformationByHandle.restype = wintypes.BOOL
+
     try:
-        # Hold the exact parent directory open without FILE_SHARE_DELETE for
-        # the entire cleanup operation. This closes the directory-swap window
-        # between identity validation and SetFileInformationByHandle.
         parent_guard = _windows_open_promotion_guard_handle(
             target.parent, directory=True)
         parent_identity = _windows_directory_identity(parent_guard)
 
-        anchor = _windows_open_cleanup_handle(target, file_read_attributes)
-        if anchor is None:
-            return
-        owned_identity = _windows_cleanup_identity(anchor)
-
-        if expected_identity is not None:
-            expected_file, expected_parent = expected_identity
-            if owned_identity != expected_file:
-                raise ProcessFetchUnsafeError(
-                    "Owned process snapshot identity changed before cleanup")
-            if parent_identity != expected_parent:
-                raise ProcessFetchUnsafeError(
-                    "Owned process snapshot parent changed before cleanup")
-        last_error = None
-
-        class FILE_DISPOSITION_INFO(ctypes.Structure):
-            _fields_ = [("DeleteFile", ctypes.c_ubyte)]
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.SetFileInformationByHandle.argtypes = [
-            wintypes.HANDLE, ctypes.c_int,
-            ctypes.c_void_p, wintypes.DWORD]
-        kernel32.SetFileInformationByHandle.restype = wintypes.BOOL
-
         for attempt in range(max(1, attempts)):
-            delete_handle = None
             try:
-                delete_handle = _windows_open_cleanup_handle(
-                    target, delete_access | file_read_attributes)
                 if delete_handle is None:
-                    return
-                if _windows_cleanup_identity(delete_handle) != owned_identity:
-                    raise ProcessFetchUnsafeError(
-                        "Owned process snapshot pathname was replaced")
+                    delete_handle = _windows_open_cleanup_handle(
+                        target, delete_access | file_read_attributes)
+                    if delete_handle is None:
+                        return
+
+                    opened_identity = _windows_cleanup_identity(delete_handle)
+                    if expected_identity is not None:
+                        expected_file, expected_parent = expected_identity
+                        if opened_identity != expected_file:
+                            raise ProcessFetchUnsafeError(
+                                "Owned process snapshot identity changed "
+                                "before cleanup")
+                        if parent_identity != expected_parent:
+                            raise ProcessFetchUnsafeError(
+                                "Owned process snapshot parent changed "
+                                "before cleanup")
+
                 if _windows_directory_identity(parent_guard) != parent_identity:
                     raise ProcessFetchUnsafeError(
                         "Owned process snapshot parent was replaced")
+
                 disposition = FILE_DISPOSITION_INFO(1)
                 if not kernel32.SetFileInformationByHandle(
                         wintypes.HANDLE(_windows_handle_value(delete_handle)),
@@ -835,9 +837,11 @@ def _remove_owned_snapshot_windows(
                 raise
             except OSError as exc:
                 last_error = exc
-            finally:
-                if delete_handle is not None:
-                    _close_windows_handle(delete_handle)
+                # If acquisition itself failed there is no trusted HANDLE yet;
+                # retry the open. Once acquired, retain the same exact HANDLE
+                # for every disposition retry.
+                if delete_handle is None and attempt + 1 >= max(1, attempts):
+                    break
 
             if attempt + 1 < max(1, attempts):
                 sleep(delay_s)
@@ -845,9 +849,9 @@ def _remove_owned_snapshot_windows(
         raise ProcessFetchUnsafeError(
             "Owned process snapshot could not be removed") from last_error
     finally:
-        if anchor is not None:
+        if delete_handle is not None:
             try:
-                _close_windows_handle(anchor)
+                _close_windows_handle(delete_handle)
             except BaseException as exc:
                 close_errors.append(exc)
         if parent_guard is not None:
@@ -859,6 +863,7 @@ def _remove_owned_snapshot_windows(
             raise ProcessFetchUnsafeError(
                 "Could not close owned snapshot cleanup guards"
             ) from close_errors[0]
+
 
 def remove_owned_snapshot(
         path: Path, *, attempts=100, delay_s=0.10,
