@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import tempfile
 import time
 from typing import Callable
 
@@ -22,6 +23,14 @@ from akuz_diagnostics import event as perf_event, phase as perf_phase
 
 class FetchError(RuntimeError):
     pass
+
+
+class DeltaResumeFallback(FetchError):
+    """The optional delta route could not prove a safe snapshot.
+
+    Callers may retry with the ordinary full bounded fetch using a fresh SSH
+    connection. No delta candidate has been published when this is raised.
+    """
 
 
 @dataclass(frozen=True)
@@ -376,9 +385,243 @@ def selected_snapshot_path(cfg: ConnectConfig, selected: dict) -> Path:
     return cfg.local_dest / ('akuz_v4_' + selected['id'][:18] + '_' + safe)
 
 
+
+_SHA256_STDIN = re.compile(rb"^([0-9a-fA-F]{64})\\s+-\\s*$")
+
+
+def _remote_prefix_sha256(client, cfg: ConnectConfig, quoted: str,
+                          size: int, sudo: bool) -> str:
+    """Hash one bounded remote prefix without exposing path/digest in errors."""
+    if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
+        raise DeltaResumeFallback('Некорректная граница SHA delta-снимка')
+    command = (sudo_prefix(sudo, bool(cfg.sudo_password))
+               + f'head -c {size} -- ' + quoted + ' | sha256sum')
+    status, data, error = _run_capture(
+        client, command, cfg.sudo_password if sudo else '', max_bytes=4096)
+    match = _SHA256_STDIN.fullmatch(data.strip())
+    if status or match is None or error:
+        raise DeltaResumeFallback(
+            'Не удалось криптографически подтвердить удалённый префикс')
+    return match.group(1).decode('ascii').lower()
+
+
+def _last_newline_end(path: Path) -> int:
+    """Return byte offset just after the final LF, or 0 when none exists."""
+    length = path.stat().st_size
+    with path.open('rb') as stream:
+        block_size = 65536
+        cursor = length
+        while cursor:
+            start = max(0, cursor-block_size)
+            stream.seek(start)
+            chunk = stream.read(cursor-start)
+            offset = chunk.rfind(b'\n')
+            if offset >= 0:
+                return start + offset + 1
+            cursor = start
+    return 0
+
+
+def _validate_resume_entry(cfg: ConnectConfig, current: dict, before,
+                           resume: dict):
+    """Validate only inventory-owned proof metadata; never guess legacy rows."""
+    if not isinstance(resume, dict):
+        raise DeltaResumeFallback('Нет доказанного предыдущего снимка')
+    if resume.get('host') != cfg.host or resume.get('remote') != current['path']:
+        raise DeltaResumeFallback('Предыдущий снимок относится к другому источнику')
+    snapshot = resume.get('snapshot')
+    if not isinstance(snapshot, dict):
+        raise DeltaResumeFallback('В старом индексе нет proof metadata')
+    dev, inode, bound, _ = before
+    if (snapshot.get('device'), snapshot.get('inode')) != (dev, inode):
+        raise DeltaResumeFallback('Удалённая identity не совпадает с предыдущей')
+    old_size = resume.get('size')
+    if (not isinstance(old_size, int) or isinstance(old_size, bool)
+            or old_size <= 0 or snapshot.get('stored_bytes') != old_size):
+        raise DeltaResumeFallback('Некорректная сохранённая граница resume')
+    if bound <= old_size:
+        raise DeltaResumeFallback('Нет доказанного append после предыдущего снимка')
+    previous_sha = resume.get('sha256')
+    if (not isinstance(previous_sha, str)
+            or re.fullmatch(r'[0-9a-f]{64}', previous_sha) is None):
+        raise DeltaResumeFallback('Нет корректного SHA предыдущего снимка')
+    try:
+        previous = Path(resume['path'])
+    except (KeyError, TypeError):
+        raise DeltaResumeFallback('Нет пути предыдущего снимка')
+    try:
+        root = cfg.local_dest.resolve()
+        resolved = previous.resolve(strict=True)
+        resolved.relative_to(root)
+        st = previous.lstat()
+    except (OSError, ValueError):
+        raise DeltaResumeFallback('Предыдущий снимок недоступен или вне downloads')
+    if previous.is_symlink() or not previous.is_file() or st.st_size != old_size:
+        raise DeltaResumeFallback('Предыдущий снимок изменён или недоступен')
+    return previous, previous_sha, old_size
+
+
+def _fetch_selected_delta(client, cfg: ConnectConfig, current: dict,
+                          before, use_sudo: bool, dest: Path, resume: dict,
+                          notify, *, trace_root: Path | None = None):
+    """Try one proven append-only resume. Never mutates the previous snapshot."""
+    from akuz_delta import RemoteMeta, ResumeRejected, assemble_delta_final_proof
+
+    previous, previous_sha, old_size = _validate_resume_entry(
+        cfg, current, before, resume)
+    dev, inode, bound, first_mtime = before
+    quoted = shlex.quote(current['path'])
+    delta_path = None
+
+    def trace(stage: str, **metrics):
+        return (perf_phase(trace_root, stage, **metrics)
+                if trace_root is not None else nullcontext())
+
+    try:
+        cfg.local_dest.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(
+            prefix=dest.name + '.delta-', dir=cfg.local_dest)
+        delta_path = Path(temp_name)
+        expected = bound - old_size
+        copied = 0
+        command = (sudo_prefix(use_sudo, bool(cfg.sudo_password))
+                   + f'tail -c +{old_size + 1} -- ' + quoted
+                   + f' | head -c {expected}')
+        notify(f'Докачиваю {expected} байт проверяемого delta-снимка…')
+        with trace('source.ssh.delta.transfer', bytes_expected=expected):
+            stdin, stdout, stderr = client.exec_command(
+                command, timeout=120, get_pty=False)
+            if use_sudo and cfg.sudo_password:
+                stdin.write(cfg.sudo_password + '\n')
+                stdin.flush()
+            stdin.channel.shutdown_write()
+            with os.fdopen(fd, 'wb') as output:
+                fd = None
+                while True:
+                    block = stdout.read(256 * 1024)
+                    if not block:
+                        break
+                    copied += len(block)
+                    if copied > expected:
+                        raise DeltaResumeFallback(
+                            'Delta передал больше зафиксированной границы')
+                    output.write(block)
+            error = stderr.read(32768).decode('utf-8', 'replace').strip()
+            status = stdout.channel.recv_exit_status()
+        if status or copied != expected or error:
+            raise DeltaResumeFallback('Delta-передача неполная')
+
+        after_transfer, err = _remote_metadata(
+            client, cfg, quoted, use_sudo)
+        if (after_transfer is None or after_transfer[:2] != (dev, inode)
+                or after_transfer[2] < bound):
+            raise DeltaResumeFallback(
+                'Источник изменился небезопасно во время delta-передачи')
+
+        active = (
+            current['size'] != bound
+            or after_transfer[2] != bound
+            or after_transfer[3] != first_mtime)
+        publish_size = bound
+        if active and not _ends_with_newline(delta_path):
+            delta_newline = _last_newline_end(delta_path)
+            if delta_newline:
+                publish_size = old_size + delta_newline
+            elif _ends_with_newline(previous):
+                publish_size = old_size
+            else:
+                raise DeltaResumeFallback(
+                    'Нельзя доказать границу завершённой строки delta-снимка')
+
+        with trace('source.ssh.delta.remote_sha', bytes_expected=publish_size):
+            remote_sha = _remote_prefix_sha256(
+                client, cfg, quoted, publish_size, use_sudo)
+        proof_after, err = _remote_metadata(
+            client, cfg, quoted, use_sudo)
+        if (proof_after is None or proof_after[:2] != (dev, inode)
+                or proof_after[2] < bound):
+            raise DeltaResumeFallback(
+                'Источник изменился во время финального SHA-доказательства')
+
+        with trace('source.ssh.delta.assemble',
+                   bytes_expected=publish_size):
+            try:
+                published_size, digest = assemble_delta_final_proof(
+                    previous,
+                    previous_sha256=previous_sha,
+                    previous_device=dev,
+                    previous_inode=inode,
+                    before=RemoteMeta(dev, inode, bound, first_mtime),
+                    delta=delta_path,
+                    transfer_bound=bound,
+                    publish_size=publish_size,
+                    after=RemoteMeta(*proof_after),
+                    remote_published_prefix_sha256=remote_sha,
+                    final=dest,
+                )
+            except FileExistsError as exc:
+                raise FetchError(
+                    'Снимок с таким именем уже появился вне индекса. '
+                    'Проверьте downloads.') from exc
+            except ResumeRejected as exc:
+                if dest.exists():
+                    raise FetchError(
+                        'Снимок с таким именем уже появился вне индекса. '
+                        'Проверьте downloads.') from exc
+                raise DeltaResumeFallback(
+                    'Delta-снимок не прошёл криптографическую проверку') from exc
+
+        dropped = bound - published_size
+        if dropped:
+            notify(
+                f'Активный лог: отброшено {dropped} байт '
+                'незавершённой строки')
+        notify(
+            f'Delta-снимок готов: {published_size} байт '
+            f'из границы {bound}')
+        if trace_root is not None:
+            perf_event(
+                trace_root, 'source.ssh.delta', 'summary',
+                previous_bytes=old_size, delta_bytes=expected,
+                captured_bytes=bound, stored_bytes=published_size,
+                dropped_tail_bytes=dropped)
+        return dest, digest, dict(
+            active=active,
+            captured_bytes=bound,
+            stored_bytes=published_size,
+            dropped_tail_bytes=dropped,
+            listed_bytes=current['size'],
+            remote_path=current['path'],
+            delta_resume=True,
+            previous_bytes=old_size,
+        )
+    except DeltaResumeFallback:
+        raise
+    except FetchError:
+        raise
+    except Exception as exc:
+        raise DeltaResumeFallback(
+            'Delta-resume завершился недоказанным состоянием') from exc
+    finally:
+        if 'fd' in locals() and fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if delta_path is not None:
+            try:
+                delta_path.unlink(missing_ok=True)
+            except OSError:
+                if trace_root is not None:
+                    perf_event(
+                        trace_root, 'source.ssh.delta',
+                        'temp_cleanup_deferred', enabled=0)
+
+
 def fetch_selected(cfg: ConnectConfig, selected: dict,
                    notify=lambda msg: None, client_factory=None,
-                   *, trace_root: Path | None = None) -> tuple[Path, str, dict]:
+                   *, trace_root: Path | None = None,
+                   resume: dict | None = None) -> tuple[Path, str, dict]:
     """Download byte-bounded prefix from an append-only live file, or exact static file.
 
     The selection must come from server-side inventory, NOT untrusted browser paths.
@@ -422,6 +665,10 @@ def fetch_selected(cfg: ConnectConfig, selected: dict,
             raise FetchError('Снимок с таким именем уже существует вне индекса. Проверьте downloads.')
         if part.exists():
             raise FetchError('Остался незавершённый .part. Проверьте downloads.')
+        if resume is not None:
+            return _fetch_selected_delta(
+                client, cfg, current, before, use_sudo, dest, resume,
+                notify, trace_root=trace_root)
         notify(f'Скачиваю фиксированные {bound} байт из {current["name"]}…')
         def transfer(sudo):
             cmd = sudo_prefix(sudo, bool(cfg.sudo_password)) + f'head -c {bound} -- ' + quoted
@@ -504,6 +751,7 @@ def fetch_selected(cfg: ConnectConfig, selected: dict,
 
 # Explicit capability marker: only compatible fetch adapters may be overlapped.
 fetch_selected._akuz_process_prefetch_compatible = True
+fetch_selected._akuz_delta_resume_compatible = True
 
 def _sha_file(path: Path) -> str:
     h = hashlib.sha256()
