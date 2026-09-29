@@ -69,6 +69,7 @@ def assemble_delta_contract(
     remote_published_prefix_sha256: str,
     final: Path,
     fail_after_written: int | None = None,
+    temp_prefix: str | None = None,
 ) -> tuple[int, str]:
     """Assemble and atomically publish one proven immutable snapshot.
 
@@ -198,6 +199,10 @@ def assemble_delta_final_proof(
     final = Path(final)
     part: Path | None = None
 
+    if temp_prefix is not None and (
+            not temp_prefix or "/" in temp_prefix or "\\" in temp_prefix
+            or "\x00" in temp_prefix):
+        raise ResumeRejected("invalid temp owner prefix")
     if final.exists() or final.is_symlink():
         raise ResumeRejected("target already exists")
     if previous.is_symlink() or not previous.is_file():
@@ -249,7 +254,8 @@ def assemble_delta_final_proof(
     try:
         final.parent.mkdir(parents=True, exist_ok=True)
         fd, part_name = tempfile.mkstemp(
-            prefix=final.name + ".part-", dir=final.parent)
+            prefix=(temp_prefix or final.name + ".part-"),
+            dir=final.parent)
         part = Path(part_name)
         with os.fdopen(fd, "wb") as output:
             with previous.open("rb") as old:

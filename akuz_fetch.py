@@ -469,6 +469,11 @@ def _fetch_selected_delta(client, cfg: ConnectConfig, current: dict,
 
     previous, previous_sha, old_size = _validate_resume_entry(
         cfg, current, before, resume)
+    owner = resume.get("_delta_owner")
+    if (not isinstance(owner, str)
+            or re.fullmatch(r"[0-9a-f]{12}", owner) is None):
+        raise DeltaResumeFallback("Нет owner token для delta-снимка")
+    temp_base = ".akuz-phase12-" + owner + "-"
     dev, inode, bound, first_mtime = before
     quoted = shlex.quote(current['path'])
     delta_path = None
@@ -480,7 +485,7 @@ def _fetch_selected_delta(client, cfg: ConnectConfig, current: dict,
     try:
         cfg.local_dest.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(
-            prefix=dest.name + '.delta-', dir=cfg.local_dest)
+            prefix=temp_base + "delta-", dir=cfg.local_dest)
         delta_path = Path(temp_name)
         expected = bound - old_size
         copied = 0
@@ -558,6 +563,7 @@ def _fetch_selected_delta(client, cfg: ConnectConfig, current: dict,
                     after=RemoteMeta(*proof_after),
                     remote_published_prefix_sha256=remote_sha,
                     final=dest,
+                    temp_prefix=temp_base + "part-",
                 )
             except FileExistsError as exc:
                 raise FetchError(

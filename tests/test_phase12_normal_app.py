@@ -38,11 +38,14 @@ class ResumeAwareSSH:
             "ssh.example", 22, "reader", "", "", "",
             "/srv/akuz", root / "downloads", "*.log", "", False)
         self.calls = []
+        self.resume_owners = []
         self.fail_resume_once = False
 
         def fetch(cfg, remote, notify, **kwargs):
             resume = kwargs.get("resume")
             self.calls.append(resume is not None)
+            if resume is not None:
+                self.resume_owners.append(resume.get("_delta_owner"))
             if resume is not None and self.fail_resume_once:
                 self.fail_resume_once = False
                 raise DeltaResumeFallback("synthetic proof rejection")
@@ -163,6 +166,8 @@ class Phase12NormalAppTests(unittest.TestCase):
         self.remote.append(event(13, "second"))
         self.build(state, selected, "1")
         self.assertEqual(self.remote.calls, [False, True])
+        self.assertEqual(
+            self.remote.resume_owners, [app._phase12_delta_owner(self.root)])
         self.assertEqual(state.result["delta_resume_downloads"], 1)
         self.assertEqual(state.result["delta_resume_fallbacks"], 0)
         self.assertEqual(first_path.read_bytes(), first_bytes)
@@ -202,6 +207,23 @@ class Phase12NormalAppTests(unittest.TestCase):
         entry["path"] = str(outside)
         self.assertIsNone(
             app._phase12_resume_candidate(store, self.remote.cfg, current))
+
+    def test_opt_in_cleans_only_this_app_roots_delta_orphans(self):
+        state, selected = self.prepare()
+        dest = self.remote.cfg.local_dest
+        dest.mkdir(parents=True, exist_ok=True)
+        owner = app._phase12_delta_owner(self.root)
+        owned_part = dest / (".akuz-phase12-" + owner + "-part-dead")
+        owned_delta = dest / (".akuz-phase12-" + owner + "-delta-dead")
+        foreign = dest / ".akuz-phase12-ffffffffffff-part-keep"
+        arbitrary = dest / "operator-file.txt"
+        for path in (owned_part, owned_delta, foreign, arbitrary):
+            path.write_bytes(b"x")
+        self.build(state, selected, "1")
+        self.assertFalse(owned_part.exists())
+        self.assertFalse(owned_delta.exists())
+        self.assertTrue(foreign.exists())
+        self.assertTrue(arbitrary.exists())
 
     def test_invalid_delta_switch_fails_before_fetch(self):
         state, selected = self.prepare()

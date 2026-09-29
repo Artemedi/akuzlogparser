@@ -357,6 +357,42 @@ def _cleanup_phase11_prefetch_orphans(root: Path, local_dest: Path) -> int:
     return removed
 
 
+def _phase12_delta_owner(root: Path) -> str:
+    return key_for(
+        "phase12-delta-owner", str(Path(root).resolve()))[:12]
+
+
+def _cleanup_phase12_delta_orphans(root: Path, local_dest: Path) -> int:
+    """Remove only temp files owned by this exact app root."""
+    prefix = ".akuz-phase12-" + _phase12_delta_owner(root) + "-"
+    local_dest = Path(local_dest).resolve()
+    if not local_dest.is_dir():
+        return 0
+    removed = 0
+    for candidate in local_dest.glob(prefix + "*"):
+        # Production Phase 12 creates files only. An owned-name symlink is safe
+        # to unlink as a directory entry; never follow its target.
+        if candidate.is_symlink():
+            try:
+                candidate.unlink(missing_ok=True)
+                removed += 1
+            except OSError:
+                pass
+            continue
+        try:
+            if candidate.parent.resolve() != local_dest:
+                continue
+        except OSError:
+            continue
+        if candidate.is_file():
+            try:
+                candidate.unlink(missing_ok=True)
+                removed += 1
+            except OSError:
+                pass
+    return removed
+
+
 def _phase12_delta_requested(env=None) -> bool:
     """Parse the default-off Phase 12 rollback switch."""
     values = os.environ if env is None else env
@@ -494,6 +530,13 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
                 if orphan_count:
                     perf_event(root, 'process.prefetch', 'orphan_cleanup',
                                removed=orphan_count)
+                if delta_resume_requested:
+                    delta_orphans = _cleanup_phase12_delta_orphans(
+                        root, phase11_cfg.local_dest)
+                    if delta_orphans:
+                        perf_event(
+                            root, 'source.ssh.delta', 'orphan_cleanup',
+                            removed=delta_orphans)
             except OSError:
                 phase11_cleanup_ok = False
                 perf_event(root, 'process.prefetch', 'cleanup_failed', enabled=0)
@@ -607,6 +650,9 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                 resume = (
                     _phase12_resume_candidate(store, cfg, remote)
                     if delta_resume_requested and supports_delta else None)
+                if resume is not None:
+                    resume = dict(resume)
+                    resume["_delta_owner"] = _phase12_delta_owner(root)
 
                 def call_ssh(resume_entry=None):
                     kwargs = {}

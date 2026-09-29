@@ -120,7 +120,8 @@ class SSHTraceTests(unittest.TestCase):
             resume = dict(
                 path=str(previous), sha256=hashlib.sha256(old).hexdigest(),
                 size=len(old), host=cfg.host, remote=selected["path"],
-                snapshot=dict(device=1, inode=2, stored_bytes=len(old)))
+                snapshot=dict(device=1, inode=2, stored_bytes=len(old)),
+                _delta_owner="a" * 12)
             ssh = DeltaFakeSSH(remote_data)
             meta = ((1, 2, len(remote_data), 100), "")
             with patch.object(fetch, "_connect", return_value=ssh), \
@@ -231,10 +232,12 @@ class SSHTraceTests(unittest.TestCase):
             for resume in (
                 dict(path=str(external), sha256=hashlib.sha256(b"old\n").hexdigest(),
                      size=4, host=cfg.host, remote=selected["path"],
-                     snapshot=dict(stored_bytes=4)),
+                     snapshot=dict(stored_bytes=4),
+                     _delta_owner="a" * 12),
                 dict(path=str(external), sha256=hashlib.sha256(b"old\n").hexdigest(),
                      size=4, host=cfg.host, remote=selected["path"],
-                     snapshot=dict(device=1, inode=2, stored_bytes=4)),
+                     snapshot=dict(device=1, inode=2, stored_bytes=4),
+                     _delta_owner="a" * 12),
             ):
                 ssh = DeltaFakeSSH(b"old\nmore\n")
                 with patch.object(fetch, "_connect", return_value=ssh), \
