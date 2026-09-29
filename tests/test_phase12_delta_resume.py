@@ -12,7 +12,9 @@ import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
+import akuz_delta
 from akuz_delta import RemoteMeta, ResumeRejected, assemble_delta_contract
 
 
@@ -206,6 +208,42 @@ class Phase12DeltaResumeContractTests(unittest.TestCase):
             self.run_contract(old, remote)
         self.assertEqual(self.final.read_bytes(), b"operator-owned")
         self.assertEqual(self.previous.read_bytes(), old)
+
+    def test_publish_race_never_overwrites_new_final(self):
+        old = b"event-1\n"
+        remote = old + b"event-2\n"
+        real_link = akuz_delta.os.link
+
+        def racing_link(source, target):
+            Path(target).write_bytes(b"other-writer")
+            return real_link(source, target)
+
+        with patch.object(akuz_delta.os, "link", side_effect=racing_link):
+            with self.assertRaises(FileExistsError):
+                self.run_contract(old, remote)
+        self.assertEqual(self.final.read_bytes(), b"other-writer")
+        self.assertEqual(self.previous.read_bytes(), old)
+        self.assertFalse(self.final.with_name(self.final.name + ".part").exists())
+
+    def test_post_link_temp_cleanup_failure_keeps_successful_publish(self):
+        old = b"event-1\n"
+        remote = old + b"event-2\n"
+        real_unlink = akuz_delta.os.unlink
+
+        def fail_part_cleanup(path):
+            if Path(path).name.endswith(".part"):
+                raise OSError(errno.EACCES, "synthetic cleanup denied")
+            return real_unlink(path)
+
+        with patch.object(akuz_delta.os, "unlink", side_effect=fail_part_cleanup):
+            size, sha = self.run_contract(old, remote)
+        self.assertEqual(size, len(remote))
+        self.assertEqual(sha, digest_bytes(remote))
+        self.assertEqual(self.final.read_bytes(), remote)
+        self.assertEqual(self.previous.read_bytes(), old)
+        # Cleanup debt is allowed only after a fully verified no-overwrite
+        # publication. A later owner-scoped cleanup gate will remove it.
+        self.assertTrue(self.final.with_name(self.final.name + ".part").exists())
 
 
 if __name__ == "__main__":
