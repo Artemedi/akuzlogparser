@@ -1,4 +1,4 @@
-name: AKUZ Phase 13 WAL A-B
+name: AKUZ Phase 13 WAL replicated A-B
 
 on:
   push:
@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   ab:
-    name: Real DELETE vs WAL A-B
+    name: Replicated DELETE vs WAL A-B
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 40
@@ -46,19 +46,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Analytics contract failed' }
           & python -B -m unittest discover -s tests -p 'test_phase13_wal.py' -q
           if ($LASTEXITCODE -ne 0) { throw 'P13-04 benchmark guard failed' }
+          & python -B -m unittest discover -s tests -p 'test_phase13_wal_replicated.py' -q
+          if ($LASTEXITCODE -ne 0) { throw 'P13-04 replicated harness guard failed' }
           Write-Host "EXACT_SHA=$actual"
           Write-Host 'PHASE13_WAL_PRE_GATE=PASS'
 
-      - name: Run real 23-24-25 DELETE vs WAL A-B
+      - name: Run real 23-24-25 replicated DELETE vs WAL A-B
         run: |
           $ErrorActionPreference = 'Stop'
           $privateRoot = 'E:\Software\Project\LogAkusExplorer\akuzlogparser'
-          $result = Join-Path $privateRoot ("diagnostics\phase13_wal_" + $env:GITHUB_RUN_ID + ".json")
-          & python -B scripts/bench_phase13_wal.py `
+          $result = Join-Path $privateRoot ("diagnostics\phase13_wal_replicated_" + $env:GITHUB_RUN_ID + ".json")
+          & python -B scripts/bench_phase13_wal_replicated.py `
             --config (Join-Path $privateRoot 'ConnectConf.cfg') `
             --app-root $privateRoot `
             --result $result
-          if ($LASTEXITCODE -ne 0) { throw 'P13-04 real A-B failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'P13-04 replicated real A-B failed' }
+          Write-Host 'REPLICATED_ORDER=D_W_W_D_D_W'
           Write-Host 'REAL_REPORTS=23_24_25_SEP'
           Write-Host 'CATALOG_ERROR_INDEX=ON_BOTH_MODES'
           Write-Host 'INDEXES_UNCHANGED=YES'
