@@ -11,6 +11,7 @@ import json
 import multiprocessing
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import tempfile
