@@ -44,7 +44,7 @@ jobs:
           }
           & python -B -m unittest tests.test_analytics -q
           if ($LASTEXITCODE -ne 0) { throw 'Analytics contract failed' }
-          & python -B -m pytest tests/test_phase13_catalog_index.py -q
+          & python -B -m unittest discover -s tests -p 'test_phase13_catalog_index.py' -q
           if ($LASTEXITCODE -ne 0) { throw 'Phase 13 benchmark guard failed' }
           Write-Host "EXACT_SHA=$actual"
           Write-Host 'PHASE13_FOCUSED_PRE_GATE=PASS'
