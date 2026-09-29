@@ -35,9 +35,9 @@ jobs:
           }
           $privateRoot = 'E:\\Software\\Project\\LogAkusExplorer\\akuzlogparser'
           $diagnostics = Join-Path $privateRoot 'diagnostics'
-          python -B scripts/bench_phase11_normal_app_real.py --config (Join-Path $privateRoot 'ConnectConf.cfg') --app-root $privateRoot --diagnostics $diagnostics --result (Join-Path $diagnostics 'phase11_normal_app_real_static_24_27_rc_20260929.json')
+          python -B scripts/bench_phase11_normal_app_real.py --config (Join-Path $privateRoot 'ConnectConf.cfg') --app-root $privateRoot --diagnostics $diagnostics --result (Join-Path $diagnostics 'phase11_normal_app_real_static_24_27_v480_final_20260929.json')
           if ($LASTEXITCODE -ne 0) { throw 'Phase 11 normal-app real acceptance failed' }
-          Write-Host 'PHASE11_SCOPE=RELEASE_CANDIDATE_NORMAL_APP_STATIC_ACCEPTANCE'
+          Write-Host 'PHASE11_SCOPE=V480_FINAL_NORMAL_APP_STATIC_ACCEPTANCE'
           Write-Host 'USER_CACHE_UNCHANGED=PASS'
           Write-Host 'COMPRESSION_DEFAULT_UNCHANGED=PASS'
           Write-Host 'NO_RELEASE_CHANGE=PASS'
