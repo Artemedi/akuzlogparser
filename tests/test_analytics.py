@@ -194,6 +194,18 @@ class ErrorAnalyticsTests(unittest.TestCase):
         self.assertIsNone(_trusted_catalog_error_index(
             future, catalog_path, catalog, True))
 
+        from akuz_analytics import _phase13_sql_batch_requested
+        self.assertFalse(_phase13_sql_batch_requested({}))
+        for value in ("1", "true", "YES", "on"):
+            self.assertTrue(_phase13_sql_batch_requested(
+                {"AKUZ_PHASE13_SQL_BATCH": value}))
+        for value in ("0", "false", "NO", "off"):
+            self.assertFalse(_phase13_sql_batch_requested(
+                {"AKUZ_PHASE13_SQL_BATCH": value}))
+        with self.assertRaisesRegex(ValueError, "AKUZ_PHASE13_SQL_BATCH"):
+            _phase13_sql_batch_requested(
+                {"AKUZ_PHASE13_SQL_BATCH": "maybe"})
+
     def test_catalog_error_index_default_on_and_explicit_rollback(self):
         normal = "".join(
             f"12:{n:02}:00.100,AKUZ,session,user: normal event {n}\n"
@@ -219,6 +231,41 @@ class ErrorAnalyticsTests(unittest.TestCase):
         self.assertEqual(rollback, baseline)
         self.assertEqual(_analytics_db_snapshot(self.root), baseline_db)
         self.assertEqual(_analytics_js_snapshot(self.root), baseline_js)
+
+    def test_sql_batch_candidate_preserves_conflict_and_exports(self):
+        # Same logical source/line with different raw bytes must remain
+        # ambiguous exactly as in the historical point-SELECT path.
+        self.report("sql_batch_first", self.event("12:00:00.100", "1234"))
+        self.report("sql_batch_other", self.event(
+            "12:00:00.100", "different patient"))
+
+        baseline = refresh(
+            self.root, use_catalog_error_index=True, use_sql_batch=False)
+        baseline_db = _analytics_db_snapshot(self.root)
+        baseline_js = _analytics_js_snapshot(self.root)
+        self.assertEqual(baseline["ambiguous"], 2)
+
+        (self.root / "cache" / "error_analytics.sqlite").unlink()
+        shutil.rmtree(self.root / "data")
+        candidate = refresh(
+            self.root, use_catalog_error_index=True, use_sql_batch=True)
+
+        self.assertEqual(candidate, baseline)
+        self.assertEqual(_analytics_db_snapshot(self.root), baseline_db)
+        self.assertEqual(_analytics_js_snapshot(self.root), baseline_js)
+        trace = (
+            self.root / "diagnostics" / "performance.txt"
+        ).read_text("utf-8")
+        summaries = [
+            line for line in trace.splitlines()
+            if "stage=analytics.ingest status=summary" in line
+        ]
+        self.assertTrue(summaries)
+        self.assertTrue(any("sql_batch=1" in line for line in summaries))
+        self.assertTrue(any("raw_sha_lookup_calls=0" in line
+                            for line in summaries))
+        self.assertTrue(any("insert_batches=1" in line
+                            for line in summaries))
 
     def test_catalog_error_index_candidate_is_sql_and_export_equivalent(self):
         normal = "".join(
