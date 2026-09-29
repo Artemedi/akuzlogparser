@@ -3311,3 +3311,14 @@ The benchmark correctness fixes are not P13-03 optimizations and remain:
 stage-duration parsing keeps the stage name, and SQLite metrics connections are
 closed deterministically. Their red-to-green tests were moved into the generic
 Phase 13 benchmark test surface.
+
+
+P13-03 post-removal cleanup gate:
+- exact SHA `e8d9ddb0902a15b08d680be714a5a3c01b10119e`;
+- Windows Actions #36620890454;
+- 362 Python tests PASS, 3 skipped;
+- browser controls 9/9 PASS;
+- diff hygiene and no-production-publish gate PASS.
+
+This confirms the accepted P13-01 production baseline after all P13-03 runtime,
+switch, harness and workflow code was removed.
