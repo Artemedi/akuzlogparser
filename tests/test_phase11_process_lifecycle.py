@@ -406,6 +406,34 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                         ProcessFetchError, "reparse point"):
                     _owned_snapshot_stat(target)
 
+    @unittest.skipUnless(os.name == "nt", "Windows reparse-safe hash open")
+    def test_windows_hash_rejects_reparse_handle_before_read(self):
+        with TemporaryDirectory(prefix="akuz_process_hash_reparse_") as td:
+            target = Path(td) / "snapshot.log"
+            target.write_bytes(b"payload")
+            expected = _owned_snapshot_stat(target)
+            real_guard = __import__(
+                "akuz_process_fetch")._windows_open_promotion_guard_handle
+
+            def guard(path, *, directory=False):
+                handle = real_guard(path, directory=directory)
+                if not directory:
+                    # Model CreateFileW(OPEN_REPARSE_POINT) returning a reparse
+                    # object: identity validation must fail before os.read.
+                    _close_windows_handle(handle)
+                    raise ProcessFetchUnsafeError(
+                        "Owned process snapshot became a reparse point")
+                return handle
+
+            with patch(
+                    "akuz_process_fetch._windows_open_promotion_guard_handle",
+                    side_effect=guard), \
+                 patch("akuz_process_fetch.os.read") as read_mock:
+                with self.assertRaisesRegex(
+                        ProcessFetchUnsafeError, "reparse point"):
+                    _sha256_owned_snapshot(target, expected)
+            read_mock.assert_not_called()
+
     def test_owned_snapshot_rejects_symlink_flag(self):
         with TemporaryDirectory(prefix="akuz_process_symlink_") as td:
             target = Path(td) / "snapshot.log"
@@ -501,36 +529,30 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             self.assertFalse(target.exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows handle deletion")
-    def test_windows_handle_cleanup_rejects_path_replacement(self):
-        with TemporaryDirectory(prefix="akuz_process_win_swap_") as td:
-            root = Path(td)
-            target = root / "snapshot.log"
+    def test_windows_handle_cleanup_uses_one_exact_delete_handle(self):
+        with TemporaryDirectory(prefix="akuz_process_win_exact_delete_") as td:
+            target = Path(td) / "snapshot.log"
             target.write_bytes(b"owned")
             import akuz_process_fetch as process_fetch
-            real_identity = process_fetch._windows_cleanup_identity
-            calls = {"count": 0}
+            real_open = process_fetch._windows_open_cleanup_handle
+            calls = []
 
-            def racing_identity(handle):
-                identity = real_identity(handle)
-                calls["count"] += 1
-                if calls["count"] == 2:
-                    # Model a pathname that now resolves to a different file
-                    # between the stable anchor and DELETE-handle open. The
-                    # replacement itself is intentionally not performed here:
-                    # Windows can deny rename while the anchor is open, and
-                    # the contract under test is handle-identity mismatch.
-                    return (identity[0], identity[1] + 1, identity[2])
-                return identity
+            def counted_open(path, access):
+                handle = real_open(path, access)
+                calls.append((Path(path), access, handle))
+                return handle
 
             with patch(
-                    "akuz_process_fetch._windows_cleanup_identity",
-                    side_effect=racing_identity):
-                with self.assertRaisesRegex(
-                        ProcessFetchUnsafeError, "pathname was replaced"):
-                    remove_owned_snapshot(
-                        target, attempts=2, delay_s=.01)
-            self.assertGreaterEqual(calls["count"], 2)
-            self.assertEqual(target.read_bytes(), b"owned")
+                    "akuz_process_fetch._windows_open_cleanup_handle",
+                    side_effect=counted_open):
+                remove_owned_snapshot(target, attempts=3, delay_s=.01)
+
+            delete_calls = [
+                row for row in calls if row[1] & 0x00010000]
+            self.assertEqual(len(delete_calls), 1)
+            self.assertEqual(delete_calls[0][0], target)
+            self.assertFalse(target.exists())
+
 
     @unittest.skipUnless(os.name == "nt", "Windows parent cleanup guard")
     def test_windows_cleanup_holds_parent_directory_against_rename(self):
@@ -543,7 +565,7 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             target.write_bytes(b"owned")
 
             import akuz_process_fetch as process_fetch
-            real_identity = process_fetch._windows_cleanup_identity
+            real_identity = process_fetch._windows_directory_identity
             calls = {"count": 0, "blocked": False}
 
             def prove_parent_guard(handle):
@@ -562,7 +584,7 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                 return identity
 
             with patch(
-                    "akuz_process_fetch._windows_cleanup_identity",
+                    "akuz_process_fetch._windows_directory_identity",
                     side_effect=prove_parent_guard):
                 remove_owned_snapshot(target, attempts=1, delay_s=.01)
 
@@ -1074,11 +1096,16 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             child.alive = True
             owner = Owner()
             tree_calls = []
+            ordering = []
 
             class Popen:
                 _akuz_job_owner = owner
 
+                def close_spawn_pipe(self):
+                    ordering.append("pipe")
+
                 def terminate_job_and_wait(self, timeout_s):
+                    ordering.append("job")
                     tree_calls.append(timeout_s)
                     child.alive = False
                     return -15
@@ -1096,6 +1123,7 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             op.abort()
 
             self.assertEqual(tree_calls, [.25])
+            self.assertEqual(ordering, ["pipe", "job"])
             self.assertEqual(owner.calls, 1)
             self.assertTrue(owner.closed)
             self.assertFalse(child.terminated)
