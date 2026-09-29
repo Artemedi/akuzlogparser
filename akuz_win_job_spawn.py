@@ -475,6 +475,17 @@ if os.name == "nt":
 
         kill = terminate
 
+        def terminate_job_and_wait(self, timeout_s):
+            """Synchronously terminate the entire owned Job tree."""
+            if self.returncode is not None:
+                return self.returncode
+            timeout_ms = max(0, int(float(timeout_s) * 1000 + 0.5))
+            _terminate_job_and_wait(
+                self._akuz_job_owner, self._handle, timeout_ms)
+            # The exact process HANDLE is signaled now; reuse wait() to update
+            # multiprocessing-compatible returncode semantics.
+            return self.wait(timeout=0)
+
         def close_job(self):
             self._akuz_job_owner.close()
 
