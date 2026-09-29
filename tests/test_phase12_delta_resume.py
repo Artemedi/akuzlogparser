@@ -17,6 +17,7 @@ from unittest.mock import patch
 import akuz_delta
 from akuz_delta import RemoteMeta, ResumeRejected, assemble_delta_contract
 from scripts import bench_phase12_delta_resume_smoke as delta_smoke
+from scripts import bench_phase12_delta_resume_ab as delta_ab
 
 
 def digest_bytes(data: bytes) -> str:
@@ -253,6 +254,29 @@ class Phase12DeltaResumeContractTests(unittest.TestCase):
                 "snapshot_sha256", "delta_sha256", "host",
                 "remote_path", "inode"):
             self.assertNotIn(forbidden, public)
+
+    def test_replicated_ab_public_summary_redacts_trial_digests(self):
+        result = dict(
+            fixed_prefix_bytes=100,
+            previous_bytes=80,
+            delta_bytes=20,
+            order=list(delta_ab.ORDER),
+            summary={
+                "full": {"wall_median_s": 10.0},
+                "strict_delta": {"wall_median_s": 2.0},
+            },
+            wall_reduction_pct=80.0,
+            socket_rx_reduction_pct=99.0,
+            logical_transfer_reduction_pct=80.0,
+            trials=[{"snapshot_sha256": "secret"}],
+        )
+        public = delta_ab._public_summary(result)
+        self.assertNotIn("trials", public)
+        self.assertNotIn("snapshot_sha256", repr(public))
+        self.assertEqual(
+            delta_ab.ORDER,
+            ("full", "strict_delta", "strict_delta",
+             "full", "full", "strict_delta"))
 
     def test_post_link_temp_cleanup_failure_keeps_successful_publish(self):
         old = b"event-1\n"
