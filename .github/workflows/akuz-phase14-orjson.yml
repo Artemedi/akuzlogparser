@@ -1,4 +1,5 @@
 name: AKUZ Phase 14 orjson A-B
+# Rerun after fixing the synthetic chunk-size fixture.
 
 on:
   push:
