@@ -475,6 +475,30 @@ if os.name == "nt":
 
         kill = terminate
 
+        def close_spawn_pipe(self):
+            """Release the parent-side spawn-pipe read HANDLE exactly once.
+
+            This is used by ProcessFetch.abort() before synchronous Job-tree
+            termination. The child either already duplicated the handle or is
+            about to be terminated; retaining the parent's read HANDLE while
+            waiting provides no value and widens failure-path handle lifetime.
+            """
+            pipe_handle = getattr(self, "_pipe_handle", None)
+            if pipe_handle is None:
+                return
+
+            finalizer = getattr(self, "finalizer", None)
+            if finalizer is not None and finalizer.still_active():
+                finalizer.cancel()
+            try:
+                _winapi.CloseHandle(pipe_handle)
+            except BaseException as exc:
+                _arm_remaining_finalizer(self)
+                raise JobBoundSpawnError(
+                    "Could not close atomic spawn pipe HANDLE") from exc
+            self._pipe_handle = None
+            _arm_remaining_finalizer(self)
+
         def terminate_job_and_wait(self, timeout_s):
             """Synchronously terminate the entire owned Job tree."""
             if self.returncode is not None:
