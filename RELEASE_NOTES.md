@@ -9,14 +9,20 @@
 разбором уже скачанного файла. Одновременно работает не более одного
 fetch-child. Local и SMB/UNC источники не менялись.
 
-На предфинальном реальном A/B наборе из 857,563,363 байт:
+На финальном hardened A/B после version bump, Fable ACCEPT и всех lifecycle
+исправлений, на наборе из 857,563,363 байт:
 
-- последовательный normal-app: **329.511 с**;
-- process-prefetch: **277.482 с**;
-- wall уменьшился примерно на **15.8%**;
+- последовательный normal-app: **356.468 с**;
+- process-prefetch: **325.070 с**;
+- wall уменьшился примерно на **8.8%**;
+- total CPU: **256.734 → 251.703 с** (~2.0% ниже);
+- peak private memory: **988,049,408 → 1,077,604,352 B** (~9.1% выше);
 - inventory parity — PASS;
 - analytics SQL parity — PASS;
-- analytics exports parity — PASS.
+- analytics exports parity — PASS;
+- workspace cleanup / privacy gate — PASS.
+
+Actions: #36540421782; numeric audit: #36540580395.
 
 Это измерение конкретной рабочей нагрузки DBA-008D, а не гарантированный
 процент ускорения на любом сервере.
@@ -69,9 +75,15 @@ TRANSACTION=ACCEPT, OVERALL=ACCEPT**.
 Actions #36537874019 — **318 Python tests PASS, 3 skips**,
 browser controls PASS, `git diff --check` PASS.
 
-Перед публикацией v4.8.0 тот же production candidate дополнительно проходит
-финальный exact-SHA regression, real normal-app A/B, numeric evidence audit,
-frozen portable spawn/self-test, packaged smoke, BUILD_INFO и SHA256SUMS.
+Финальные pre-release gates уже пройдены:
+- exact versioned SHA regression #36539318506 — 318 Python tests PASS,
+  3 skips, browser controls и diff-check PASS;
+- real normal-app A/B #36540421782 — PASS;
+- numeric evidence audit #36540580395 — PASS;
+- frozen portable atomic Job-bound spawn/self-test + packaged smoke
+  #36540426274 — PASS.
+BUILD_INFO и SHA256SUMS повторно проверяются самим release workflow
+непосредственно перед публикацией.
 
 ## Остальное поведение
 
