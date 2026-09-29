@@ -65,4 +65,4 @@ jobs:
           Write-Host 'NO_RELEASE_CHANGE=PASS'
           Write-Host 'RAW_LOG_ARTIFACT_UPLOAD=NO'
 
-# Rerun after remote SHA CPU instrumentation switched to bash TIMEFORMAT.
+# Rerun after remote SHA CPU instrumentation switched to POSIX bash time -p under LC_ALL=C.
