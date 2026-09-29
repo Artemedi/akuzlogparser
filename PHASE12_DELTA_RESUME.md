@@ -25,9 +25,14 @@ Initial contract commits on `main`:
 - `963d3c2` — successful no-overwrite publication remains committed even if
   removal of the temporary hard-link name fails.
 - `fedf4b6` — publication-race and deferred-cleanup tests.
+- `9578bcd` — read-only strict proof-cost smoke harness.
+- `5296ee3` — final remote prefix proof bracketed by a second identity stat.
+- `5e14bd6` — robust synthetic pre-gate + queued 25-Sep read-only workflow.
 
-The Windows self-hosted full regression for `fedf4b6` is Actions
-`#36547772522`. It is not evidence until the run completes successfully.
+The current Windows self-hosted full regression is Actions
+`#36548789449` (exact code SHA `5296ee3`). The dedicated read-only 25-Sep
+strict-delta smoke is Actions `#36548902058` (workflow SHA `5e14bd6`).
+Both are gates, not evidence, until they complete successfully.
 
 ## Strict correctness baseline
 
