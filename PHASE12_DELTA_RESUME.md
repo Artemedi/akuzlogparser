@@ -330,8 +330,8 @@ smoke. Portable build and packaged smoke both PASS.
 
 Focused Phase 12 pre-gate: **32 tests PASS**. The last pre-integration full
 Windows regression on `9384e4f` passed **352 tests, 3 skipped**, browser and
-diff checks. A full regression on the exact final acceptance SHA is tracked
-separately by the normal Windows workflow.
+diff checks. The exact final acceptance SHA also passed the normal Windows workflow:
+[Actions #36563631352](https://github.com/Artemedi/akuzlogparser/actions/runs/36563631352), **354 Python tests PASS, 3 skipped**, browser controls PASS and diff-check PASS.
 
 No raw log artifact was uploaded, the user's normal app cache was not used as a
 test destination, SSH compression was forced OFF for comparison, and no GitHub

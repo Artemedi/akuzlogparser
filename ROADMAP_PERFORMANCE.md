@@ -194,8 +194,8 @@ end-to-end integration on the same snapshot: 265.223218 s full vs
 equivalence PASS, delta fallback count 0. Frozen portable includes and executes
 `akuz_delta` in self-test. Default remains OFF, Phase 11 process-prefetch is
 disabled while opt-in is active, and published v4.8.0 Release is unchanged.
-See `PHASE12_DELTA_RESUME.md`. Default-on and combined Phase-11+12 scheduling
-remain future decisions.
+See `PHASE12_DELTA_RESUME.md`. Final exact-SHA Windows regression
+[Actions #36563631352](https://github.com/Artemedi/akuzlogparser/actions/runs/36563631352): 354 Python PASS, 3 skipped, browser/diff PASS. Default-on and combined Phase-11+12 scheduling remain future decisions.
 
 ### Phase 13 — аналитика SQLite и третий проход [OPEN]
 1. Измерить `analytics.ingest/export/overview`, SELECT/INSERT, индексы, транзакции, write amplification и повторное распознавание ошибок по raw; baseline refresh ≈37.58 s.
