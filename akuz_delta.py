@@ -158,3 +158,137 @@ def assemble_delta_contract(
         if not linked:
             part.unlink(missing_ok=True)
         raise
+
+
+def assemble_delta_final_proof(
+    previous: Path,
+    *,
+    previous_sha256: str,
+    previous_device: int,
+    previous_inode: int,
+    before: RemoteMeta,
+    delta: Path,
+    transfer_bound: int,
+    publish_size: int,
+    after: RemoteMeta,
+    remote_published_prefix_sha256: str,
+    final: Path,
+    fail_after_written: int | None = None,
+) -> tuple[int, str]:
+    """Phase 12 v2: one final remote proof + producer-fed local hashes.
+
+    A cryptographic SHA-256 of the complete accepted remote prefix is sufficient
+    to prove both the previously stored bytes and the downloaded delta. The
+    earlier prototype's separate remote SHA of the old prefix is therefore not
+    required for correctness.
+
+    The previous local SHA and the new snapshot SHA are computed while copying,
+    avoiding separate full rereads of the previous and assembled files.
+    Bytes beyond publish_size (an unfinished active-file tail) are validated as
+    part of the downloaded delta length but are never written to the published
+    candidate.
+    """
+    previous = Path(previous)
+    delta = Path(delta)
+    final = Path(final)
+    part = final.with_name(final.name + ".part")
+
+    if final.exists() or final.is_symlink() or part.exists() or part.is_symlink():
+        raise ResumeRejected("target already exists")
+    if previous.is_symlink() or not previous.is_file():
+        raise ResumeRejected("previous snapshot is not a regular file")
+    if delta.is_symlink() or not delta.is_file():
+        raise ResumeRejected("delta is not a regular file")
+
+    old_size = previous.stat().st_size
+    if old_size <= 0:
+        raise ResumeRejected("empty previous snapshot")
+    if before.device != previous_device or before.inode != previous_inode:
+        raise ResumeRejected("remote identity changed before transfer")
+    if before.size < old_size:
+        raise ResumeRejected("remote source was truncated")
+    if transfer_bound != before.size:
+        raise ResumeRejected("transfer bound must equal trusted before.size")
+    if transfer_bound <= old_size:
+        raise ResumeRejected("no append delta to resume")
+    if not old_size <= publish_size <= transfer_bound:
+        raise ResumeRejected("invalid published prefix boundary")
+    if after.device != before.device or after.inode != before.inode:
+        raise ResumeRejected("remote identity changed during transfer")
+    if after.size < transfer_bound:
+        raise ResumeRejected("remote source shrank during transfer")
+
+    expected_delta = transfer_bound - old_size
+    if delta.stat().st_size != expected_delta:
+        raise ResumeRejected("delta length is incomplete or replayed")
+
+    old_hash = hashlib.sha256()
+    published_hash = hashlib.sha256()
+    written = 0
+    linked = False
+
+    def write_checked(output, data: bytes):
+        nonlocal written
+        if not data:
+            return
+        if (fail_after_written is not None
+                and written + len(data) > fail_after_written):
+            allowed = max(0, fail_after_written - written)
+            if allowed:
+                output.write(data[:allowed])
+                written += allowed
+            raise OSError(errno.ENOSPC, "synthetic disk full")
+        output.write(data)
+        written += len(data)
+
+    try:
+        final.parent.mkdir(parents=True, exist_ok=True)
+        with part.open("xb") as output:
+            with previous.open("rb") as old:
+                while True:
+                    block = old.read(1024 * 1024)
+                    if not block:
+                        break
+                    old_hash.update(block)
+                    published_hash.update(block)
+                    write_checked(output, block)
+
+            if old_hash.hexdigest() != previous_sha256:
+                raise ResumeRejected("previous local snapshot failed SHA")
+
+            accepted_delta = publish_size - old_size
+            consumed = 0
+            with delta.open("rb") as tail:
+                while True:
+                    block = tail.read(1024 * 1024)
+                    if not block:
+                        break
+                    consumed += len(block)
+                    if accepted_delta > 0:
+                        accepted = block[:accepted_delta]
+                        if accepted:
+                            published_hash.update(accepted)
+                            write_checked(output, accepted)
+                            accepted_delta -= len(accepted)
+            if consumed != expected_delta or accepted_delta != 0:
+                raise ResumeRejected("assembled transfer length mismatch")
+
+        if written != publish_size or part.stat().st_size != publish_size:
+            raise ResumeRejected("assembled published length mismatch")
+
+        published_sha = published_hash.hexdigest()
+        if published_sha != remote_published_prefix_sha256:
+            raise ResumeRejected(
+                "new remote prefix proof does not match assembled snapshot")
+
+        os.link(part, final)
+        linked = True
+        try:
+            os.unlink(part)
+        except OSError:
+            pass
+        return publish_size, published_sha
+    except BaseException:
+        if not linked:
+            part.unlink(missing_ok=True)
+        raise
