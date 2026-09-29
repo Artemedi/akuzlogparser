@@ -21,6 +21,7 @@ from akuz_delta import (
 )
 from scripts import bench_phase12_delta_resume_smoke as delta_smoke
 from scripts import bench_phase12_delta_resume_ab as delta_ab
+from scripts import bench_phase12_delta_resume_v2_ab as delta_v2_ab
 
 
 def digest_bytes(data: bytes) -> str:
@@ -358,6 +359,25 @@ class Phase12DeltaResumeContractTests(unittest.TestCase):
             delta_ab.ORDER,
             ("full", "strict_delta", "strict_delta",
              "full", "full", "strict_delta"))
+
+    def test_v2_ab_public_summary_redacts_trial_digests(self):
+        result = dict(
+            fixed_prefix_bytes=100,
+            previous_bytes=80,
+            delta_bytes=20,
+            order=list(delta_v2_ab.ORDER),
+            summary={
+                "full": {"wall_median_s": 10.0},
+                "single_proof_delta": {"wall_median_s": 1.0},
+            },
+            wall_reduction_pct=90.0,
+            socket_rx_reduction_pct=99.0,
+            logical_transfer_reduction_pct=80.0,
+            trials=[{"snapshot_sha256": "secret"}],
+        )
+        public = delta_v2_ab._public_summary(result)
+        self.assertNotIn("trials", public)
+        self.assertNotIn("snapshot_sha256", repr(public))
 
     def test_post_link_temp_cleanup_failure_keeps_successful_publish(self):
         old = b"event-1\n"
