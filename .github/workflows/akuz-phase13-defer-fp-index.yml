@@ -56,7 +56,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $privateRoot = 'E:\Software\Project\LogAkusExplorer\akuzlogparser'
-          $result = Join-Path $privateRoot ("diagnostics\phase13_defer_fp_" + $env:GITHUB_RUN_ID + ".json")
+          $result = Join-Path $privateRoot ("diagnostics\phase13_defer_fp_replicated_" + $env:GITHUB_RUN_ID + ".json")
           & python -B scripts/bench_phase13_defer_fp_index_replicated.py `
             --config (Join-Path $privateRoot 'ConnectConf.cfg') `
             --app-root $privateRoot `
