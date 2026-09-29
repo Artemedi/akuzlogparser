@@ -2,6 +2,7 @@
 """AKUZ Explorer: localhost inventory, dated reports and error analytics."""
 from __future__ import annotations
 import argparse
+import errno
 from collections import Counter
 from contextlib import ExitStack, nullcontext
 from datetime import date, datetime, timedelta
@@ -40,6 +41,21 @@ from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
 from akuz_win_job_spawn import get_job_bound_spawn_context
 from akuz_version import __version__
 from akuz_diagnostics import event as perf_event, phase as perf_phase
+
+def _phase11_link_fallback_allowed(exc: OSError) -> bool:
+    """Only capability/volume limitations may downgrade promotion to serial."""
+    portable = {
+        errno.EXDEV,
+        getattr(errno, "ENOTSUP", errno.EXDEV),
+        getattr(errno, "EOPNOTSUPP", errno.EXDEV),
+    }
+    if getattr(exc, "errno", None) in portable:
+        return True
+    if os.name == "nt" and getattr(exc, "winerror", None) in {1, 17, 50}:
+        # ERROR_INVALID_FUNCTION / NOT_SAME_DEVICE / NOT_SUPPORTED.
+        return True
+    return False
+
 
 ROOT = app_root()
 STATIC = {'index.html', 'event.html', 'errors.html', 'errors.js', 'style.css', 'common.js', 'index.js',
@@ -642,7 +658,10 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                     root, 'process.prefetch',
                     'rollback_inventory_save_failed',
                     source_index=ids.index(next_fid) + 1,
-                    reason=reason)
+                    reason=reason,
+                    error_kind=type(exc).__name__,
+                    errno=(getattr(exc, 'errno', None) or 0),
+                    winerror=(getattr(exc, 'winerror', None) or 0))
                 raise ProcessFetchUnsafeError(
                     'Не удалось надёжно сохранить откат индекса '
                     'предзагрузки') from exc
@@ -693,14 +712,26 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             raise FetchError(
                 'Снимок следующего файла уже появился вне индекса. '
                 'Проверьте downloads.') from exc
-        except OSError:
+        except OSError as exc:
             rollback_and_cleanup('link_failed')
-            perf_event(root, 'process.prefetch', 'promotion_fallback',
-                       source_index=ids.index(next_fid) + 1, enabled=0)
-            state.set_stage(
-                'Не удалось атомарно принять предзагрузку; '
-                'продолжаю обычной загрузкой…')
-            return
+            if _phase11_link_fallback_allowed(exc):
+                perf_event(
+                    root, 'process.prefetch', 'promotion_fallback',
+                    source_index=ids.index(next_fid) + 1, enabled=0,
+                    errno=(getattr(exc, 'errno', None) or 0),
+                    winerror=(getattr(exc, 'winerror', None) or 0))
+                state.set_stage(
+                    'Файловая система не поддерживает атомарное принятие '
+                    'предзагрузки; продолжаю обычной загрузкой…')
+                return
+            perf_event(
+                root, 'process.prefetch', 'promotion_error',
+                source_index=ids.index(next_fid) + 1,
+                error_kind=type(exc).__name__,
+                errno=(getattr(exc, 'errno', None) or 0),
+                winerror=(getattr(exc, 'winerror', None) or 0))
+            raise FetchError(
+                'Не удалось атомарно принять предзагрузку') from exc
 
         try:
             remove_owned_snapshot(
