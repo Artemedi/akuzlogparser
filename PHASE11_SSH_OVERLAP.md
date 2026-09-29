@@ -408,3 +408,60 @@ Before integrating one-ahead fetch into `perform_build`:
 - interruption/restart and portable Windows validation.
 
 No production integration is authorized by the smoke alone.
+
+
+## Production acceptance — v4.8.0
+
+Phase 11 process-isolated one-ahead SSH prefetch is accepted for the v4.8.0
+Windows portable runtime after the complete normal-app, failure, restart,
+Windows Job Object, portable and independent-review gates.
+
+Production policy is deliberately narrow:
+
+- Windows client only;
+- SSH/Linux source adapter only;
+- two or more selected files;
+- built-in compatible SSH fetch and built-in report generator only;
+- at most one next-file child process;
+- `AKUZ_PHASE11_PROCESS_PREFETCH=0` is the immediate rollback switch;
+- SSH compression remains independently configured and defaults OFF;
+- local, SMB/UNC and custom fetch/generator paths retain the historical
+  sequential scheduler.
+
+The production child is created with the dedicated Windows Job-bound spawn
+context. The process is created suspended, assigned to a
+`KILL_ON_JOB_CLOSE` Job Object before its primary thread is resumed, and
+uses bounded JSON IPC. A hard lifecycle/cleanup uncertainty raises
+`ProcessFetchUnsafeError` and does **not** start a second serial writer.
+Ordinary child/fetch failures safely fall back to the historical serial path.
+
+Completed child snapshots are revalidated in the parent by full SHA-256 and
+stable Windows file/parent identities. Windows hashing and cleanup use exact
+reparse-safe HANDLE ownership. Promotion is inventory-intent-first plus
+atomic no-overwrite hard-link creation. Unsupported/cross-volume hard-link
+capability may fall back to serial after rollback; permission, disk-full and
+other real I/O errors remain visible failures.
+
+Final independent Fable review:
+[Actions #36538397765](https://github.com/Artemedi/akuzlogparser/actions/runs/36538397765)
+completed SUCCESS with **LIFECYCLE=ACCEPT, TRANSACTION=ACCEPT,
+OVERALL=ACCEPT**. The reviewer explicitly found no reproduced blockers in
+the atomic Job-bound lifecycle or transaction/cache path.
+
+Latest full synthetic Windows regression before version bump:
+[Actions #36537874019](https://github.com/Artemedi/akuzlogparser/actions/runs/36537874019),
+exact runtime candidate `b1f408225839c2e95151feee2384c219b79a0b61`:
+**318 Python tests PASS, 3 skips, 130.379 s**, browser controls PASS and
+`git diff --check` PASS.
+
+Pre-final release-candidate real evidence on 857,563,363 bytes
+[Actions #36530992011](https://github.com/Artemedi/akuzlogparser/actions/runs/36530992011)
+showed serial 329.511191 s versus process 277.481652 s, about **15.8% lower
+wall**, with inventory, analytics SQL and analytics export parity PASS.
+The corresponding portable Job-bound spawn/smoke gate
+[#36531019151](https://github.com/Artemedi/akuzlogparser/actions/runs/36531019151)
+also passed. These gates are repeated on the final v4.8.0 versioned SHA
+before publication.
+
+Phase 11 thread overlap remains rejected. The accepted implementation is the
+separate process-isolated candidate only.
