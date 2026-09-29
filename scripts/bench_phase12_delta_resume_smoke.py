@@ -282,12 +282,20 @@ def _delta_trial(cfg, day: str, previous: Path, previous_sha: str,
             client, cfg, quoted, previous_bytes, bound-previous_bytes,
             use_sudo, delta_path)
 
-        after_raw, _ = _remote_metadata(client, cfg, quoted, use_sudo)
-        if after_raw is None or after_raw[:2] != before_raw[:2] or after_raw[2] != bound:
+        transfer_after, _ = _remote_metadata(client, cfg, quoted, use_sudo)
+        if (transfer_after is None or transfer_after[:2] != before_raw[:2]
+                or transfer_after[2] != bound):
             raise AssertionError("Fixed source changed during delta transfer")
 
         new_remote_sha, new_sha_wall, new_sha_cpu = _remote_prefix_sha(
             client, cfg, quoted, bound, use_sudo)
+
+        # The identity check must bracket the FINAL remote prefix proof too.
+        # Otherwise a pathname rotation between stat_after and sha256sum could
+        # bind proof bytes to a different inode.
+        after_raw, _ = _remote_metadata(client, cfg, quoted, use_sudo)
+        if after_raw is None or after_raw[:2] != before_raw[:2] or after_raw[2] != bound:
+            raise AssertionError("Fixed source changed during final prefix proof")
 
         final = workspace / "delta_full.log"
         assemble0, assemble_cpu0 = perf_counter(), process_time()
