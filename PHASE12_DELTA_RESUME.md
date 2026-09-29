@@ -217,3 +217,38 @@ performance conclusion. A combined Phase-11+12 scheduler requires a separate
 failure/portable/A-B gate before it can be enabled.
 
 No published Release is changed by this design checkpoint.
+
+
+## P12-03 replicated single-proof A/B — PASS
+
+Actions `#36556610689`, exact workflow/code SHA `8a95a5b`, DBA-008D,
+25-Sep trusted AKUZ application log, compression OFF.
+
+Balanced order: `F, D, D, F, F, D`. All six accepted snapshots had the
+same SHA; device/inode identity stayed stable. Fixed prefix:
+**644,567,384 B**. Previous snapshot: **644,034,993 B**. Delta:
+**532,391 B**.
+
+| Median metric | Full bounded fetch | v2 single-proof delta |
+|---|---:|---:|
+| wall | 120.066999 s | 7.214775 s |
+| client CPU | 16.296875 s | 2.937500 s |
+| logical SSH payload | 644,567,384 B | 532,391 B |
+| socket RX | 645,865,840 B | 535,296 B |
+| delta transfer wall | n/a | 0.498503 s |
+| final remote prefix SHA wall | n/a | 3.314393 s |
+| final remote SHA server CPU | n/a | 3.670000 s |
+| local assemble/verify wall | n/a | 2.935482 s |
+
+Measured median reduction: **93.991% wall**, **99.917% logical payload** and
+**99.917% socket RX**. Full-fetch wall values were 120.066999, 124.983901 and
+99.652259 s; v2 delta wall values were 7.214775, 7.223271 and 6.935688 s.
+
+This closes the replicated proof-cost/performance gate for the tested fixed
+prefix. It does **not** by itself enable production runtime. P12-04
+hard-exit/restart and full Windows regression of the owner-unique temp change
+remain the next gate, followed by opt-in normal-app integration and a new
+end-to-end cache/failure/portable gate.
+
+No raw log artifact was uploaded, normal app cache was unchanged, and no
+GitHub Release changed.
