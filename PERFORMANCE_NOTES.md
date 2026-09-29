@@ -3061,3 +3061,28 @@ Portable gate #36531019151 PASS for frozen Job-bound spawn and packaged smoke.
 
 Final real A/B, evidence audit and portable gates are repeated after the
 v4.8.0 version bump and before release publication.
+
+
+## v4.8.0 final release-candidate evidence (2026-09-29)
+
+After the final independent Fable review returned
+**LIFECYCLE=ACCEPT, TRANSACTION=ACCEPT, OVERALL=ACCEPT**
+(Actions #36538397765), the versioned v4.8.0 candidate repeated all release
+gates without further runtime changes.
+
+- Windows regression #36539318506: exact `3bfa8b054f363c3241105605b9005f5d46e435ae`,
+  **318 Python tests PASS, 3 skips**, browser controls PASS, diff-check PASS.
+- Real normal-app A/B #36540421782 on 857,563,363 bytes:
+  serial **356.467622 s**, process-prefetch **325.069935 s**,
+  **-8.808% wall**; total CPU 256.734375 -> 251.703250 s;
+  peak private 988,049,408 -> 1,077,604,352 B; prefetch_downloads=3.
+- Inventory parity, analytics SQL parity and analytics export parity PASS.
+- Numeric evidence audit #36540580395 PASS, including workspace cleanup and
+  no source SHA/path/host/payload output.
+- Frozen portable Job-bound spawn/self-test and packaged smoke
+  #36540426274 PASS; no Release or Actions artifact was published by the gate.
+
+This is the final hardened production evidence for v4.8.0. The measured
+speedup is workload-specific; the release claim is the demonstrated ~8.8%
+wall reduction on this final DBA-008D workload, not the larger figures from
+earlier less-hardened candidates.
