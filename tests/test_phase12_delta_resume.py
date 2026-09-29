@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import akuz_delta
 from akuz_delta import RemoteMeta, ResumeRejected, assemble_delta_contract
+from scripts import bench_phase12_delta_resume_smoke as delta_smoke
 
 
 def digest_bytes(data: bytes) -> str:
@@ -224,6 +225,34 @@ class Phase12DeltaResumeContractTests(unittest.TestCase):
         self.assertEqual(self.final.read_bytes(), b"other-writer")
         self.assertEqual(self.previous.read_bytes(), old)
         self.assertFalse(self.final.with_name(self.final.name + ".part").exists())
+
+    def test_smoke_public_metrics_redact_sha_and_source_identity(self):
+        row = dict(
+            mode="strict_delta",
+            bound_bytes=100,
+            previous_bytes=80,
+            logical_transfer_bytes=20,
+            wall_s=1.25,
+            client_cpu_s=0.5,
+            old_prefix_sha_wall_s=0.2,
+            transfer_wall_s=0.3,
+            new_prefix_sha_wall_s=0.4,
+            assemble_wall_s=0.35,
+            socket_rx_bytes=123,
+            socket_tx_bytes=45,
+            snapshot_sha256="secret-digest",
+            delta_sha256="secret-delta",
+            host="secret-host",
+            remote_path="/secret/path",
+            inode=777,
+        )
+        public = delta_smoke._public_row(row)
+        self.assertEqual(public["mode"], "strict_delta")
+        self.assertEqual(public["logical_transfer_bytes"], 20)
+        for forbidden in (
+                "snapshot_sha256", "delta_sha256", "host",
+                "remote_path", "inode"):
+            self.assertNotIn(forbidden, public)
 
     def test_post_link_temp_cleanup_failure_keeps_successful_publish(self):
         old = b"event-1\n"
