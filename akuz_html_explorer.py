@@ -221,12 +221,19 @@ python akuz_html_explorer.py .\\latest_akuz_sevas.log -o .\\AKUZ_Explorer --date
 """
 
 
-def js_json(value: Any) -> str:
-    """Produce inert JS data, including malicious-looking log fragments safely."""
-    return (json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-            .replace("<", "\\u003c").replace(">", "\\u003e")
+def _json_compact(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _escape_js_json(text: str) -> str:
+    return (text.replace("<", "\\u003c").replace(">", "\\u003e")
             .replace("&", "\\u0026").replace("\u2028", "\\u2028")
             .replace("\u2029", "\\u2029"))
+
+
+def js_json(value: Any) -> str:
+    """Produce inert JS data, including malicious-looking log fragments safely."""
+    return _escape_js_json(_json_compact(value))
 
 
 def read_input(source: Path, base: date | None, stats: Counter[str],
@@ -295,6 +302,14 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     started = perf_counter()
     cpu_started = thread_time()
     shard_time = 0.0
+    shard_json_time = 0.0
+    shard_escape_time = 0.0
+    shard_io_time = 0.0
+    shard_bytes = 0
+    catalog_json_time = 0.0
+    catalog_escape_time = 0.0
+    catalog_io_time = 0.0
+    catalog_bytes = 0
     read_time = 0.0
     classify_time = 0.0
     normalize_time = 0.0
@@ -324,8 +339,10 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     # second read of every shard during publication.
     output_hashes: dict[str, tuple[str, int]] = {}
 
-    def emit(dest: Path, text: str) -> None:
-        output_hashes[dest.relative_to(out).as_posix()] = write_report_text(dest, text)
+    def emit(dest: Path, text: str) -> tuple[str, int]:
+        result = write_report_text(dest, text)
+        output_hashes[dest.relative_to(out).as_posix()] = result
+        return result
 
     error_fingerprints: dict[str,str] = {}
     prev_end = 0
@@ -335,11 +352,21 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
     prev_day = prev_ms = None
 
     def flush(part: int) -> None:
-        nonlocal shard_time
+        nonlocal shard_time, shard_json_time, shard_escape_time
+        nonlocal shard_io_time, shard_bytes
+        total_stamp = perf_counter()
         stamp = perf_counter()
+        serialized = _json_compact(raw_shard)
+        shard_json_time += perf_counter() - stamp
+        stamp = perf_counter()
+        escaped = _escape_js_json(serialized)
+        shard_escape_time += perf_counter() - stamp
         dest = data / f"raw_{part:05d}.js"
-        emit(dest, "window.AKUZ_RAW=" + js_json(raw_shard) + ";\n")
-        shard_time += perf_counter() - stamp
+        stamp = perf_counter()
+        _, size = emit(dest, "window.AKUZ_RAW=" + escaped + ";\n")
+        shard_io_time += perf_counter() - stamp
+        shard_bytes += size
+        shard_time += perf_counter() - total_stamp
 
     events_iter = iter(read_input(source, base, stats, defer_classify=True)
                        if event_source is None else event_source)
@@ -369,6 +396,10 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                        normalize_s=round(normalize_time, 3),
                        errors_s=round(error_time, 3),
                        shard_write_s=round(shard_time, 3),
+                       shard_json_s=round(shard_json_time, 3),
+                       shard_escape_s=round(shard_escape_time, 3),
+                       shard_io_s=round(shard_io_time, 3),
+                       shard_bytes=shard_bytes,
                        duration_s=round(duration_time, 3),
                        fold_s=round(fold_time, 3),
                        error_recognize_calls=stats["error_recognize_calls"],
@@ -475,6 +506,10 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                lines=prev_end, shards=(len(rows)+chunk_size-1)//chunk_size,
                raw_chars=raw_chars, max_event_chars=max_event_chars,
                elapsed_s=round(total, 3), shard_write_s=round(shard_time, 3),
+               shard_json_s=round(shard_json_time, 3),
+               shard_escape_s=round(shard_escape_time, 3),
+               shard_io_s=round(shard_io_time, 3),
+               shard_bytes=shard_bytes,
                source_next_s=round(read_total, 3), classify_s=round(classify_total, 3),
                normalize_s=round(normalize_time, 3), errors_s=round(error_time, 3),
                duration_s=round(duration_time, 3), fold_s=round(fold_time, 3),
@@ -518,7 +553,17 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
                    category_counts=[[catids[k],v] for k,v in category.most_common()],
                    patterns=patterns, durations=dur, requests=request.most_common(15))
     with perf_phase(perf_root, 'generate.catalog', events=len(rows)):
-        emit(data / "catalog.js", "window.AKUZ_DATA="+js_json(catalog)+";\n")
+        stamp = perf_counter()
+        catalog_serialized = _json_compact(catalog)
+        catalog_json_time = perf_counter() - stamp
+        stamp = perf_counter()
+        catalog_escaped = _escape_js_json(catalog_serialized)
+        catalog_escape_time = perf_counter() - stamp
+        stamp = perf_counter()
+        _, catalog_bytes = emit(
+            data / "catalog.js",
+            "window.AKUZ_DATA=" + catalog_escaped + ";\n")
+        catalog_io_time = perf_counter() - stamp
     # One authoritative UI source for the initial page and every generated report.
     # The embedded v2 strings above remain as historical fallback, not a second v4 UI.
     ui = Path(__file__).resolve().parent
@@ -535,6 +580,21 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         emit(out/name, (ui/name).read_text(encoding="utf-8"))
     perf_event(perf_root, 'generate.assets', 'done', elapsed_s=round(perf_counter()-started, 3),
                events=len(rows))
+    perf_event(
+        perf_root, 'generate.serialization', 'summary',
+        events=len(rows),
+        shards=actual_shards,
+        shard_json_s=round(shard_json_time, 6),
+        shard_escape_s=round(shard_escape_time, 6),
+        shard_io_s=round(shard_io_time, 6),
+        shard_total_s=round(shard_time, 6),
+        shard_bytes=shard_bytes,
+        catalog_json_s=round(catalog_json_time, 6),
+        catalog_escape_s=round(catalog_escape_time, 6),
+        catalog_io_s=round(catalog_io_time, 6),
+        catalog_bytes=catalog_bytes,
+        report_files=len(output_hashes),
+        report_output_bytes=sum(size for _, size in output_hashes.values()))
     meta['_output_hashes'] = output_hashes
     return meta
 
