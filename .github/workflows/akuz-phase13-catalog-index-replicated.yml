@@ -1,0 +1,72 @@
+name: AKUZ Phase 13 replicated catalog-index A-B
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/akuz-phase13-catalog-index-replicated.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akuz-phase13-catalog-index-replicated
+  cancel-in-progress: true
+
+jobs:
+  replicated:
+    name: Balanced 3x3 real analytics A-B
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out exact Phase 13 replicated revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify runner and focused replicated contract
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
+            throw 'DBA-008D only'
+          }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:GITHUB_SHA) {
+            throw 'Checkout does not match GITHUB_SHA'
+          }
+          & python -B -m unittest discover -s tests -p 'test_phase13*.py' -q
+          if ($LASTEXITCODE -ne 0) { throw 'Phase 13 replicated contract failed' }
+          Write-Host "EXACT_SHA=$actual"
+          Write-Host 'PHASE13_REPLICATED_PRE_GATE=PASS'
+
+      - name: Run balanced six-trial analytics A-B
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $privateRoot = 'E:\Software\Project\LogAkusExplorer\akuzlogparser'
+          $result = Join-Path $privateRoot ("diagnostics\phase13_replicated_" + $env:GITHUB_RUN_ID + ".json")
+          & python -B scripts/bench_phase13_catalog_error_index_replicated.py `
+            --config (Join-Path $privateRoot 'ConnectConf.cfg') `
+            --app-root $privateRoot `
+            --result $result
+          if ($LASTEXITCODE -ne 0) { throw 'Phase 13 replicated A-B failed' }
+          Write-Host 'REAL_REPORTS=23_24_25_SEP'
+          Write-Host 'ORDER=B_C_C_B_B_C'
+          Write-Host 'SETUP_WORKSPACE=DISPOSABLE'
+          Write-Host 'RAW_LOG_ARTIFACT_UPLOAD=NO'
+          Write-Host 'APP_CACHE_CHANGED=NO'
+          Write-Host 'RELEASE_CHANGED=NO'
+
+      - name: Diff hygiene
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
+          Write-Host 'DIFF_CHECK=PASS'
