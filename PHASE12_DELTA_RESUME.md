@@ -252,3 +252,20 @@ end-to-end cache/failure/portable gate.
 
 No raw log artifact was uploaded, normal app cache was unchanged, and no
 GitHub Release changed.
+
+
+## P12-04 hard-exit/restart gate — PASS
+
+Exact code SHA `9ef6aed`, Actions `#36557160723`, DBA-008D:
+**342 Python tests PASS, 3 skipped**, browser controls PASS, diff hygiene PASS.
+
+The v2 assembler uses an owner-unique same-directory temp candidate. A
+subprocess test hard-exits exactly at publication, proving that an abandoned
+candidate does not become a trusted final snapshot. A later invocation ignores
+that foreign orphan and safely publishes a newly verified snapshot; the orphan
+is not silently deleted as another writer's state. Existing network-short,
+rotation, truncation, checksum/proof mismatch, disk-full, replay, unfinished
+tail and no-overwrite race gates remain green.
+
+This closes the isolated P12-04 restart contract. Normal-app fallback,
+inventory metadata and portable integration remain P12-05 work.
