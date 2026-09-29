@@ -1,0 +1,76 @@
+name: AKUZ Phase 13 deferred ix-fp A-B
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/akuz-phase13-defer-fp-index.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akuz-phase13-defer-fp-index
+  cancel-in-progress: true
+
+jobs:
+  ab:
+    name: Real catalog-index plus deferred ix-fp A-B
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out exact P13-03 revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify runner and focused P13-03 contract
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
+            throw 'DBA-008D only'
+          }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:GITHUB_SHA) {
+            throw 'Checkout does not match GITHUB_SHA'
+          }
+          & python -B -m unittest discover -s tests -p 'test_analytics.py' -q
+          if ($LASTEXITCODE -ne 0) { throw 'Analytics contract failed' }
+          & python -B -m unittest discover -s tests -p 'test_phase13_defer_fp_index.py' -q
+          if ($LASTEXITCODE -ne 0) { throw 'P13-03 benchmark guard failed' }
+          Write-Host "EXACT_SHA=$actual"
+          Write-Host 'PHASE13_DEFER_FP_PRE_GATE=PASS'
+
+      - name: Run real 23-24-25 deferred ix-fp A-B
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $privateRoot = 'E:\Software\Project\LogAkusExplorer\akuzlogparser'
+          $result = Join-Path $privateRoot ("diagnostics\phase13_defer_fp_" + $env:GITHUB_RUN_ID + ".json")
+          & python -B scripts/bench_phase13_defer_fp_index.py `
+            --config (Join-Path $privateRoot 'ConnectConf.cfg') `
+            --app-root $privateRoot `
+            --result $result
+          if ($LASTEXITCODE -ne 0) { throw 'P13-03 real A-B failed' }
+          Write-Host 'REAL_REPORTS=23_24_25_SEP'
+          Write-Host 'CATALOG_ERROR_INDEX=ON_BOTH_MODES'
+          Write-Host 'IX_LINE_UNCHANGED=YES'
+          Write-Host 'JOURNAL_MODE=DELETE'
+          Write-Host 'SETUP_WORKSPACE=DISPOSABLE'
+          Write-Host 'RAW_LOG_ARTIFACT_UPLOAD=NO'
+          Write-Host 'APP_CACHE_CHANGED=NO'
+          Write-Host 'RELEASE_CHANGED=NO'
+
+      - name: Diff hygiene
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
+          Write-Host 'DIFF_CHECK=PASS'
