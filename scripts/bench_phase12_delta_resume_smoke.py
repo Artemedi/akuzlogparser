@@ -27,7 +27,9 @@ from time import perf_counter, process_time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from akuz_delta import RemoteMeta, assemble_delta_contract
+from akuz_delta import (
+    RemoteMeta, assemble_delta_contract, assemble_delta_final_proof,
+)
 from akuz_fetch import (_listing, _remote_metadata, load_config,
                         sudo_prefix)
 
@@ -353,6 +355,90 @@ def _delta_trial(cfg, day: str, previous: Path, previous_sha: str,
             new_prefix_sha_client_cpu_s=round(new_sha_cpu, 6),
             new_prefix_sha_server_cpu_s=round(new_sha_server_cpu, 6),
             remote_sha_server_cpu_s=round(old_sha_server_cpu + new_sha_server_cpu, 6),
+            assemble_wall_s=round(assemble_wall, 6),
+            assemble_client_cpu_s=round(assemble_cpu, 6),
+            socket_rx_bytes=counted.rx_bytes-rx0,
+            socket_tx_bytes=counted.tx_bytes-tx0,
+        )
+    finally:
+        client.close()
+
+
+def _delta_trial_v2(cfg, day: str, previous: Path, previous_sha: str,
+                    previous_bytes: int, expected_identity, workspace: Path,
+                    fixed_bound: int | None = None):
+    """Single final remote SHA proof; no separate old-prefix remote hash."""
+    client, counted = _connect_counted(cfg)
+    try:
+        selected = _trusted_source(client, cfg, day)
+        quoted = shlex.quote(selected["path"])
+        before_raw, use_sudo = _metadata(client, cfg, quoted)
+        if before_raw[:2] != expected_identity:
+            raise AssertionError("Remote identity changed before v2 delta trial")
+        bound = before_raw[2] if fixed_bound is None else fixed_bound
+        if before_raw[2] < bound:
+            raise AssertionError("Remote source shrank below fixed v2 prefix")
+        if bound <= previous_bytes:
+            raise AssertionError("No remote append remains for v2 delta trial")
+
+        rx0, tx0 = counted.rx_bytes, counted.tx_bytes
+        wall0, cpu0 = perf_counter(), process_time()
+
+        delta_path = workspace / "delta.bin"
+        delta_sha, copied, transfer_wall, transfer_cpu = _transfer_range(
+            client, cfg, quoted, previous_bytes, bound-previous_bytes,
+            use_sudo, delta_path)
+
+        transfer_after, _ = _remote_metadata(client, cfg, quoted, use_sudo)
+        if (transfer_after is None or transfer_after[:2] != before_raw[:2]
+                or transfer_after[2] < bound):
+            raise AssertionError(
+                "Fixed source rotated/truncated during v2 delta transfer")
+
+        new_remote_sha, new_sha_wall, new_sha_cpu, new_sha_server_cpu = (
+            _remote_prefix_sha(client, cfg, quoted, bound, use_sudo))
+
+        after_raw, _ = _remote_metadata(client, cfg, quoted, use_sudo)
+        if (after_raw is None or after_raw[:2] != before_raw[:2]
+                or after_raw[2] < bound):
+            raise AssertionError(
+                "Fixed source rotated/truncated during v2 final proof")
+
+        final = workspace / "delta_full.log"
+        assemble0, assemble_cpu0 = perf_counter(), process_time()
+        published_size, published_sha = assemble_delta_final_proof(
+            previous,
+            previous_sha256=previous_sha,
+            previous_device=expected_identity[0],
+            previous_inode=expected_identity[1],
+            before=RemoteMeta(before_raw[0], before_raw[1], bound, before_raw[3]),
+            delta=delta_path,
+            transfer_bound=bound,
+            publish_size=bound,
+            after=RemoteMeta(*after_raw),
+            remote_published_prefix_sha256=new_remote_sha,
+            final=final,
+        )
+        assemble_wall = perf_counter()-assemble0
+        assemble_cpu = process_time()-assemble_cpu0
+        wall_s, cpu_s = perf_counter()-wall0, process_time()-cpu0
+        if published_size != bound or published_sha != new_remote_sha:
+            raise AssertionError("V2 delta publication proof mismatch")
+        return dict(
+            mode="single_proof_delta",
+            bound_bytes=bound,
+            previous_bytes=previous_bytes,
+            logical_transfer_bytes=copied,
+            delta_sha256=delta_sha,
+            snapshot_sha256=published_sha,
+            wall_s=round(wall_s, 6),
+            client_cpu_s=round(cpu_s, 6),
+            transfer_wall_s=round(transfer_wall, 6),
+            transfer_client_cpu_s=round(transfer_cpu, 6),
+            new_prefix_sha_wall_s=round(new_sha_wall, 6),
+            new_prefix_sha_client_cpu_s=round(new_sha_cpu, 6),
+            new_prefix_sha_server_cpu_s=round(new_sha_server_cpu, 6),
+            remote_sha_server_cpu_s=round(new_sha_server_cpu, 6),
             assemble_wall_s=round(assemble_wall, 6),
             assemble_client_cpu_s=round(assemble_cpu, 6),
             socket_rx_bytes=counted.rx_bytes-rx0,
