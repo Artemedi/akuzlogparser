@@ -325,6 +325,24 @@ jobs:
           Re-review the actual latest code; do not transfer the prior BLOCK
           verdict to this candidate without reproducing a current blocker.
 
+          Since the most recent Fable MODIFY/MODIFY review, the current
+          candidate additionally:
+          - ProcessFetch.abort() prefers synchronous JobBoundPopen
+            terminate_job_and_wait() so the whole assigned Job tree is
+            terminated and the direct child is reaped before serial fallback;
+          - promotion/cleanup keeps parent-directory identity evidence through
+            Windows handle-based deletion and rejects mismatched replacement;
+          - rollback tests prove durable recovery when inventory persistence
+            fails during promotion compensation;
+          - crash-intent recovery rejects an external final snapshot by full
+            SHA-256 instead of trusting only pathname/size;
+          - targeted Windows regressions cover whole-Job abort ordering,
+            parent-directory cleanup mismatch and crash-intent external final
+            substitution.
+
+          Re-review these exact post-MODIFY changes rather than inheriting the
+          prior MODIFY verdict.
+
           Since the previous Fable BLOCK, the current code additionally:
           - tracks CreatePipe -> CRT fd ownership explicitly and resumes the
             already Job-bound suspended child before writing the spawn payload,
