@@ -19,8 +19,8 @@ from time import perf_counter
 from urllib.parse import unquote, urlsplit
 import webbrowser
 
-from akuz_fetch import (FetchError, fetch_selected, list_remote, load_config,
-                        selected_snapshot_path)
+from akuz_fetch import (DeltaResumeFallback, FetchError, fetch_selected,
+                        list_remote, load_config, selected_snapshot_path)
 from akuz_windows import fetch_windows, list_windows, load_windows_config
 from akuz_local import fetch_local, list_local, load_local_config, verify_local_source_sha
 from akuz_html_explorer import generate
@@ -356,6 +356,69 @@ def _cleanup_phase11_prefetch_orphans(root: Path, local_dest: Path) -> int:
     return removed
 
 
+def _phase12_delta_requested(env=None) -> bool:
+    """Parse the default-off Phase 12 rollback switch."""
+    values = os.environ if env is None else env
+    name = 'AKUZ_PHASE12_DELTA_RESUME'
+    if name not in values:
+        return False
+    flag = str(values[name]).strip().lower()
+    if flag in ('1', 'true', 'yes', 'on'):
+        return True
+    if flag in ('0', 'false', 'no', 'off'):
+        return False
+    raise FetchError('Неверное значение AKUZ_PHASE12_DELTA_RESUME')
+
+
+def _phase12_resume_candidate(store, cfg, remote):
+    """Return the largest proven prior prefix for this exact SSH identity."""
+    device, inode = remote.get('device'), remote.get('inode')
+    current_size = remote.get('size')
+    if (device is None or inode is None
+            or not isinstance(current_size, int)
+            or isinstance(current_size, bool) or current_size <= 0):
+        return None
+    try:
+        local_root = Path(cfg.local_dest).resolve()
+    except OSError:
+        return None
+    candidates = []
+    for entry in store.get('downloads', {}).values():
+        if (not isinstance(entry, dict)
+                or entry.get('host') != cfg.host
+                or entry.get('remote') != remote.get('path')):
+            continue
+        snapshot = entry.get('snapshot')
+        if (not isinstance(snapshot, dict)
+                or snapshot.get('delta_proof_version') != 1
+                or (snapshot.get('device'), snapshot.get('inode'))
+                   != (device, inode)):
+            continue
+        size = entry.get('size')
+        if (not isinstance(size, int) or isinstance(size, bool)
+                or size <= 0 or size >= current_size
+                or snapshot.get('stored_bytes') != size):
+            continue
+        digest = entry.get('sha256')
+        if (not isinstance(digest, str)
+                or re.fullmatch(r'[0-9a-f]{64}', digest) is None):
+            continue
+        try:
+            path = Path(entry['path'])
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(local_root)
+            st = path.lstat()
+        except (KeyError, TypeError, OSError, ValueError):
+            continue
+        if path.is_symlink() or not path.is_file() or st.st_size != size:
+            continue
+        candidates.append((size, str(path), entry))
+    if not candidates:
+        return None
+    # Prefer the largest proven prefix. Path is only a deterministic tie-breaker.
+    return max(candidates, key=lambda row: (row[0], row[1]))[2]
+
+
 def _phase11_process_requested(env=None) -> bool:
     """Parse the default-on rollback switch; explicit empty is invalid."""
     values = os.environ if env is None else env
@@ -401,11 +464,14 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
     if use_derived_spool is None:
         use_derived_spool = os.environ.get('AKUZ_PHASE9_DERIVED_SPOOL', '1').strip().lower() not in ('0', 'false', 'no', 'off')
     process_requested = _phase11_process_requested()
+    delta_resume_requested = _phase12_delta_requested()
     with state.lock:
         source = state.source
         local_path = state.local_path
-    process_allowed = _phase11_process_allowed(
-        process_requested, source, selections, fetch_fn, gen_fn)
+    process_allowed = (
+        not delta_resume_requested
+        and _phase11_process_allowed(
+            process_requested, source, selections, fetch_fn, gen_fn))
 
     (root/'cache').mkdir(parents=True, exist_ok=True)
     with ExitStack() as stack:
@@ -439,12 +505,15 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
             except OSError:
                 perf_event(root, 'process.prefetch', 'setup_fallback', enabled=0)
 
-        return _perform_build(root, state, selections, fetch_fn, gen_fn,
-                              refresh_remote, spool_root, process_prefetch_root)
+        return _perform_build(
+            root, state, selections, fetch_fn, gen_fn, refresh_remote,
+            spool_root, process_prefetch_root,
+            delta_resume_requested=delta_resume_requested)
 
 
 def _perform_build(root, state, selections, fetch_fn, gen_fn,
-                   refresh_remote, spool_root, process_prefetch_root=None):
+                   refresh_remote, spool_root, process_prefetch_root=None,
+                   delta_resume_requested=False):
     build_started = perf_counter()
     with state.lock:
         source = state.source
@@ -513,6 +582,8 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
     singles_reused = 0
     process_prefetch_downloads = 0
     process_prefetch_child_cpu_s = 0.0
+    delta_resume_downloads = 0
+    delta_resume_fallbacks = 0
     prefetched_downloads = {}
     process_ctx = (get_job_bound_spawn_context()
                    if process_prefetch_root is not None else None)
@@ -524,18 +595,56 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             dropped_bytes += details.get('dropped_tail_bytes', 0)
 
     def download(remote):
+        nonlocal delta_resume_downloads, delta_resume_fallbacks
         with perf_phase(root, 'source.fetch', bytes_expected=remote.get('size', 0),
                         source_kind={'linux': 1, 'windows': 2, 'local': 3}.get(source, 0)):
             if source == 'linux':
-                # Only our built-in SSH adapter accepts the optional trace_root.
-                # Preserve the signature of caller-injected fetch functions.
-                result = (fetch_fn(cfg, remote, state.set_stage, trace_root=root)
-                          if getattr(fetch_fn, '_akuz_process_prefetch_compatible', False)
-                          else fetch_fn(cfg, remote, state.set_stage))
+                supports_trace = getattr(
+                    fetch_fn, '_akuz_process_prefetch_compatible', False)
+                supports_delta = getattr(
+                    fetch_fn, '_akuz_delta_resume_compatible', False)
+                resume = (
+                    _phase12_resume_candidate(store, cfg, remote)
+                    if delta_resume_requested and supports_delta else None)
+
+                def call_ssh(resume_entry=None):
+                    kwargs = {}
+                    if supports_trace:
+                        kwargs['trace_root'] = root
+                    if resume_entry is not None:
+                        kwargs['resume'] = resume_entry
+                    return fetch_fn(cfg, remote, state.set_stage, **kwargs)
+
+                if resume is not None:
+                    state.set_stage(
+                        'Проверяю докачивание только добавленных байтов…')
+                    try:
+                        result = call_ssh(resume)
+                    except DeltaResumeFallback:
+                        delta_resume_fallbacks += 1
+                        perf_event(
+                            root, 'source.ssh.delta', 'fallback_full',
+                            enabled=0)
+                        state.set_stage(
+                            'Delta не доказан; выполняю полную безопасную загрузку…')
+                        result = call_ssh()
+                    else:
+                        delta_resume_downloads += 1
+                else:
+                    result = call_ssh()
             else:
                 result = source_fetch(cfg, source, remote, state.set_stage)
         path, digest = result[:2]
-        details = result[2] if len(result) > 2 else {}
+        details = dict(result[2]) if len(result) > 2 else {}
+        # Seed proof metadata only while Phase 12 opt-in is active. Default
+        # v4.8 inventory bytes/semantics remain unchanged.
+        if source == 'linux' and delta_resume_requested:
+            device, inode = remote.get('device'), remote.get('inode')
+            if (isinstance(device, int) and not isinstance(device, bool)
+                    and isinstance(inode, int) and not isinstance(inode, bool)):
+                details['device'] = device
+                details['inode'] = inode
+                details['delta_proof_version'] = 1
         perf_event(root, 'source.fetch', 'summary', bytes_saved=path.stat().st_size,
                    source_kind={'linux': 1, 'windows': 2, 'local': 3}.get(source, 0))
         record_capture(details)
@@ -957,11 +1066,15 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                skipped_identical=len(skipped), active_snapshots=active_count,
                process_prefetch_downloads=process_prefetch_downloads,
                process_prefetch_child_cpu_s=round(process_prefetch_child_cpu_s, 3),
+               delta_resume_downloads=delta_resume_downloads,
+               delta_resume_fallbacks=delta_resume_fallbacks,
                combined_status=(0 if combined is None else (1 if combined['reused'] else 2)),
                analytics_warning=bool(analytics_warning),
                elapsed_s=round(perf_counter() - build_started, 3))
     result = dict(reports=reports, combined=combined, skipped_identical=skipped,
                   active_snapshots=active_count, dropped_tail_bytes=dropped_bytes,
+                  delta_resume_downloads=delta_resume_downloads,
+                  delta_resume_fallbacks=delta_resume_fallbacks,
                   report_url=(combined or (reports[0] if reports else {})).get('url'),
                   analytics_warning=analytics_warning,
                   reused=all(r['reused'] for r in reports) and
