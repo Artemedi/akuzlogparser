@@ -184,10 +184,6 @@ def _setup_seed(root: Path, cfg):
         "AKUZ_PHASE12_DELTA_RESUME": "0",
         "AKUZ_PHASE13_CATALOG_ERROR_INDEX": "1",
     }
-    with patch.dict("os.environ", env, clear=False):
-        pass
-    # patch.dict requires a mapping object, not its dotted name; keep the real
-    # build block below explicit so the benchmark cannot silently skip it.
     import os
     with patch.dict(os.environ, env, clear=False), \
          patch.object(akuz_app, "source_config", return_value=cfg):
@@ -207,8 +203,7 @@ def _setup_seed(root: Path, cfg):
     }
 
 
-def _run_trial(root: Path, cfg, state: State, selected, mode: str,
-               original_compact):
+def _run_trial(root: Path, cfg, state: State, selected, mode: str):
     _reset_reports_keep_downloads(root)
     offset = _trace_count(root)
     wall0, cpu0 = perf_counter(), process_time()
@@ -240,7 +235,6 @@ def _run_trial(root: Path, cfg, state: State, selected, mode: str,
 
 
 def run(config_path: Path, app_root: Path):
-    original_compact = akuz_html_explorer._json_compact
     with tempfile.TemporaryDirectory(
             prefix="akuz-phase14-orjson-",
             dir=app_root / "diagnostics") as temp:
@@ -255,8 +249,7 @@ def run(config_path: Path, app_root: Path):
         reference = None
         trials = []
         for ordinal, mode in enumerate(ORDER, start=1):
-            trial = _run_trial(
-                root, cfg, state, selected, mode, original_compact)
+            trial = _run_trial(root, cfg, state, selected, mode)
             store = load_store(root)
             if store["downloads"] != downloads_before:
                 raise AssertionError("P14-01 trial mutated cached snapshots")
