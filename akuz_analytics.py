@@ -85,19 +85,12 @@ def read_js(path,prefix):
     if not text.startswith(prefix) or not text.endswith(";"):
         raise ValueError("Неизвестный формат отчёта: "+path.name)
     return json.loads(text[len(prefix):-1])
-def connect(root,journal_mode="DELETE"):
+def connect(root):
     directory=root/"cache"
     directory.mkdir(parents=True,exist_ok=True)
     db=sqlite3.connect(str(directory/"error_analytics.sqlite"),timeout=30)
     db.row_factory=sqlite3.Row
-    mode=str(journal_mode).strip().upper()
-    if mode not in ("DELETE","WAL"):
-        db.close()
-        raise ValueError("Неверный SQLite journal_mode")
-    actual=str(db.execute("PRAGMA journal_mode="+mode).fetchone()[0]).upper()
-    if actual!=mode:
-        db.close()
-        raise RuntimeError("SQLite не применил запрошенный journal_mode")
+    db.execute("PRAGMA journal_mode=DELETE")
     db.executescript("""
     CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS indexed(id TEXT PRIMARY KEY,stamp TEXT NOT NULL);
@@ -168,16 +161,6 @@ def _phase13_catalog_error_index_requested(env=None):
     if flag in ("0", "false", "no", "off"):
         return False
     raise ValueError("Неверное значение AKUZ_PHASE13_CATALOG_ERROR_INDEX")
-
-
-def _phase13_journal_mode_requested(env=None):
-    """Parse isolated P13-04 journal-mode experiment; default remains DELETE."""
-    values = os.environ if env is None else env
-    name = "AKUZ_PHASE13_JOURNAL_MODE"
-    value = str(values.get(name, "DELETE")).strip().upper()
-    if value not in ("DELETE", "WAL"):
-        raise ValueError("Неверное значение AKUZ_PHASE13_JOURNAL_MODE")
-    return value
 
 
 def _trusted_catalog_error_index(info, catalog_path, catalog, requested):
@@ -544,16 +527,14 @@ def update_source_date(root,identity,first_date):
         return dict(updated_reports=changed,overview=overview)
 
 
-def refresh(root,use_catalog_error_index=None,journal_mode=None):
+def refresh(root,use_catalog_error_index=None):
     """Idempotent processing of *reports*, never a network operation."""
     from akuz_diagnostics import event as perf_event, phase as perf_phase
     root=Path(root)
     if use_catalog_error_index is None:
         use_catalog_error_index = _phase13_catalog_error_index_requested()
-    if journal_mode is None:
-        journal_mode = _phase13_journal_mode_requested()
     with LOCK:
-        db=connect(root,journal_mode)
+        db=connect(root)
         try:
             migrated=db.total_changes>0
             with perf_phase(root, 'analytics.inventory'):
