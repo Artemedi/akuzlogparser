@@ -11,6 +11,7 @@ No raw payload, host, path, digest or private evidence is printed.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -32,7 +33,7 @@ from scripts.bench_phase13_catalog_error_index import (
 
 def _index_schema(root: Path):
     path = root / "cache" / "error_analytics.sqlite"
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db:
         return [
             tuple(row) for row in db.execute(
                 "SELECT name,sql FROM sqlite_master "
