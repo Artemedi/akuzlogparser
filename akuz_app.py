@@ -545,27 +545,6 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             # the adapter cannot provide that proof.
             return None
         final = selected_snapshot_path(cfg, next_remote)
-        def cleanup_prefetch_temp_and_operation():
-            cleanup_error = None
-            try:
-                remove_owned_snapshot(
-                    result.path, expected_identity=result.cleanup_identity)
-            except BaseException as exc:
-                cleanup_error = exc
-            try:
-                operation.close()
-            except BaseException as close_exc:
-                if cleanup_error is not None:
-                    try:
-                        close_exc.add_note(
-                            'Phase 11 temp cleanup also failed: ' +
-                            type(cleanup_error).__name__)
-                    except BaseException:
-                        pass
-                raise
-            if cleanup_error is not None:
-                raise cleanup_error
-
         if final.exists():
             return None
         target = process_prefetch_root / (
@@ -622,6 +601,27 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                 'Предзагрузка следующего файла не удалась; '
                 'продолжаю обычной загрузкой…')
             return
+        def cleanup_prefetch_temp_and_operation():
+            cleanup_error = None
+            try:
+                remove_owned_snapshot(
+                    result.path, expected_identity=result.cleanup_identity)
+            except BaseException as exc:
+                cleanup_error = exc
+            try:
+                operation.close()
+            except BaseException as close_exc:
+                if cleanup_error is not None:
+                    try:
+                        close_exc.add_note(
+                            'Phase 11 temp cleanup also failed: ' +
+                            type(cleanup_error).__name__)
+                    except BaseException:
+                        pass
+                raise
+            if cleanup_error is not None:
+                raise cleanup_error
+
         final = selected_snapshot_path(cfg, next_remote)
         if final.exists():
             cleanup_prefetch_temp_and_operation()
