@@ -3363,3 +3363,56 @@ remains `journal_mode=DELETE` with accepted P13-01 catalog error index.
 P13-05 single-transaction is the next independent SQLite candidate.
 
 P13-04 post-removal cleanup gate: exact `6a691b36ee505e203209c75d01f934537014e57f`, Windows Actions #36629956908 — **362 Python tests PASS, 3 skipped**, browser **9/9 PASS**, diff/no-production-publish PASS. This confirms the accepted DELETE/P13-01 production baseline after all WAL experiment runtime and workflow code was removed.
+
+
+## Phase 13 P13-05 single transaction — rejected (2026-09-29)
+
+Hypothesis: keep the accepted catalog error index, normal indexes,
+`journal_mode=DELETE` and SQL semantics unchanged, but ingest all pending
+reports inside one SQLite transaction instead of committing each report
+separately. The isolated switch was
+`AKUZ_PHASE13_SINGLE_TRANSACTION=1`; default remained OFF.
+
+Safety contract:
+- an injected failure on report 2 rolls back report 1 as well;
+- after the failure `indexed=0` and `errors=0`;
+- retry produces the same SQL and analytics JS as baseline;
+- final SQLite layout remains unchanged.
+
+Single real A/B:
+- exact SHA `ed805531a9d2c50a6e913d609754830a17c57110`;
+- real Actions #36630531695, trusted 23/24/25 Sep,
+  956,307,242 B / 4 immutable reports;
+- baseline wall/CPU/ingest:
+  **24.066619 / 23.187500 / 19.638546 s**;
+- candidate wall/CPU/ingest:
+  **23.516938 / 23.453125 / 19.788881 s**;
+- wall improved **2.284%**, but CPU regressed **1.146%**;
+- transaction commits **4 -> 1 (-75%)**;
+- final DB remained **32,649,216 B / 7,971 pages**;
+- exact/semantic outputs and inventory PASS.
+Exact Windows #36630531565: **365 Python tests PASS, 3 skipped**, browser
+**9/9 PASS**, diff/no-production-publish PASS.
+
+Because the wall result was small and CPU moved in the wrong direction, the
+same immutable report set was replicated in balanced order **B/C/C/B/B/C**.
+
+Replicated A/B:
+- exact SHA `3976e99e65060e13ce02ed7993c884dd21604a5f`;
+- real Actions #36631816238;
+- baseline median wall/CPU/ingest:
+  **23.523164 / 23.343750 / 19.679112 s**;
+- candidate median wall/CPU/ingest:
+  **23.587496 / 23.406250 / 19.781481 s**;
+- candidate regressed **0.273% wall**, **0.268% CPU** and **0.520% ingest**;
+- transaction commits remained **4 -> 1**;
+- DB/page_count identical and exact/semantic parity plus inventory PASS.
+Exact Windows #36631815949: **367 Python tests PASS, 3 skipped**, browser
+**9/9 PASS**, diff/no-production-publish PASS.
+
+Decision: **REJECTED**. Fewer commits did not produce a reproducible
+end-to-end gain. Remove the single-transaction runtime switch, transaction
+instrumentation used only by this experiment, both A/B harnesses, experiment
+tests and workflow. Production remains the accepted P13-01 catalog index with
+per-report commits, `journal_mode=DELETE` and normal secondary-index
+maintenance. No Release was changed and no raw log payload was uploaded.
