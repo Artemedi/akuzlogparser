@@ -194,20 +194,6 @@ class ErrorAnalyticsTests(unittest.TestCase):
         self.assertIsNone(_trusted_catalog_error_index(
             future, catalog_path, catalog, True))
 
-    def test_phase13_defer_fp_index_switch(self):
-        from akuz_analytics import _phase13_defer_fp_index_requested
-        self.assertFalse(_phase13_defer_fp_index_requested({}))
-        for value in ("1", "true", "YES", "on"):
-            self.assertTrue(_phase13_defer_fp_index_requested(
-                {"AKUZ_PHASE13_DEFER_FP_INDEX": value}))
-        for value in ("0", "false", "NO", "off"):
-            self.assertFalse(_phase13_defer_fp_index_requested(
-                {"AKUZ_PHASE13_DEFER_FP_INDEX": value}))
-        with self.assertRaisesRegex(
-                ValueError, "AKUZ_PHASE13_DEFER_FP_INDEX"):
-            _phase13_defer_fp_index_requested(
-                {"AKUZ_PHASE13_DEFER_FP_INDEX": "maybe"})
-
     def test_catalog_error_index_default_on_and_explicit_rollback(self):
         normal = "".join(
             f"12:{n:02}:00.100,AKUZ,session,user: normal event {n}\n"
@@ -233,59 +219,6 @@ class ErrorAnalyticsTests(unittest.TestCase):
         self.assertEqual(rollback, baseline)
         self.assertEqual(_analytics_db_snapshot(self.root), baseline_db)
         self.assertEqual(_analytics_js_snapshot(self.root), baseline_js)
-
-    def test_deferred_fp_index_is_equivalent_and_restored(self):
-        normal = "".join(
-            f"12:{n:02}:00.100,AKUZ,session,user: normal event {n}\n"
-            for n in range(8))
-        self.report(
-            "phase13_defer_fp",
-            normal + self.event("13:00:00.100", "1234")
-            + self.event("13:01:00.100", "5678"))
-
-        baseline = refresh(
-            self.root, use_catalog_error_index=True, defer_fp_index=False)
-        baseline_db = _analytics_db_snapshot(self.root)
-        baseline_js = _analytics_js_snapshot(self.root)
-
-        (self.root / "cache" / "error_analytics.sqlite").unlink()
-        shutil.rmtree(self.root / "data")
-        candidate = refresh(
-            self.root, use_catalog_error_index=True, defer_fp_index=True)
-
-        self.assertEqual(candidate, baseline)
-        self.assertEqual(_analytics_db_snapshot(self.root), baseline_db)
-        self.assertEqual(_analytics_js_snapshot(self.root), baseline_js)
-        with closing(connect(self.root)) as db:
-            indexes = {
-                row[1] for row in db.execute("PRAGMA index_list(errors)")
-            }
-        self.assertIn("ix_fp", indexes)
-        self.assertIn("ix_line", indexes)
-
-    def test_deferred_fp_index_restores_after_ingest_failure(self):
-        self.report(
-            "phase13_defer_fail",
-            self.event("13:00:00.100", "1234"))
-        import akuz_analytics
-        original = akuz_analytics.ingest
-
-        def fail_after_ingest(*args, **kwargs):
-            original(*args, **kwargs)
-            raise RuntimeError("synthetic ingest failure")
-
-        from unittest.mock import patch
-        with patch("akuz_analytics.ingest", side_effect=fail_after_ingest):
-            with self.assertRaisesRegex(RuntimeError, "synthetic ingest failure"):
-                refresh(
-                    self.root, use_catalog_error_index=True,
-                    defer_fp_index=True)
-        with closing(connect(self.root)) as db:
-            indexes = {
-                row[1] for row in db.execute("PRAGMA index_list(errors)")
-            }
-        self.assertIn("ix_fp", indexes)
-        self.assertIn("ix_line", indexes)
 
     def test_catalog_error_index_candidate_is_sql_and_export_equivalent(self):
         normal = "".join(
