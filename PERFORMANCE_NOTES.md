@@ -3354,6 +3354,7 @@ one immutable disposable report set. Exact
 - final WAL/SHM/journal sidecars remained 0 B after clean close;
 - exact/semantic outputs, inventory, logical counts and final schema PASS;
 - no raw payload/artifact and no Release mutation.
+- exact-SHA Windows #36628486403: **367 Python tests PASS, 3 skipped**, browser **9/9 PASS**, diff/no-production-publish PASS.
 
 Decision: **REJECTED**. The single-run gain did not reproduce; balanced evidence
 shows a small wall/CPU regression with no persistent-storage benefit. Remove
