@@ -13,7 +13,6 @@ from unittest.mock import patch
 from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
                                 ProcessFetchUnsafeError,
                                 _close_windows_handle,
-                                _create_kill_on_close_job,
                                 _owned_snapshot_stat,
                                 _same_path_lexical, _sha256_owned_snapshot,
                                 _windows_handle_value,
