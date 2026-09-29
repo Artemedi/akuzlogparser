@@ -145,12 +145,16 @@ def assemble_delta_contract(
         # early existence check, os.link fails rather than replacing it.
         os.link(part, final)
         linked = True
-        part.unlink()
+        # From this point the verified immutable final exists. Failure to
+        # remove the second hard-link name is cleanup debt, not publication
+        # failure: surfacing it as failure could make a caller start another
+        # writer even though the snapshot is already safely published.
+        try:
+            os.unlink(part)
+        except OSError:
+            pass
         return publish_size, published_sha
     except BaseException:
-        part.unlink(missing_ok=True)
-        # A linked final is already a fully verified immutable snapshot. Do
-        # not delete it if cleanup of the temporary name fails later.
         if not linked:
-            pass
+            part.unlink(missing_ok=True)
         raise
