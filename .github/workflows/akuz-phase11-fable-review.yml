@@ -426,3 +426,4 @@ jobs:
           '@ | python -B -
           if ($LASTEXITCODE -ne 0) { throw 'Fable independent review failed' }
 # Re-review requested after sync failed-spawn termination, parent identity binding, sender-close unsafe propagation, and legacy Job helper removal.
+# Re-review requested after validated snapshot promotion HANDLE guard and exact resume/close retry regressions.
