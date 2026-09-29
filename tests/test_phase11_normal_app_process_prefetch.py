@@ -363,6 +363,92 @@ class NormalAppProcessPrefetchTests(unittest.TestCase):
             self.assertEqual(len(result["reports"]), 3)
             self.assertIsNotNone(result["combined"])
 
+    def test_promotion_cleanup_failure_still_closes_operation(self):
+        class TrackingProcessFetch(FakeProcessFetch):
+            close_calls = 0
+
+            @classmethod
+            def reset(cls):
+                super().reset()
+                cls.close_calls = 0
+
+            def close(self):
+                type(self).close_calls += 1
+                return super().close()
+
+        with TemporaryDirectory(prefix="akuz_p11_cleanup_close_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+
+            TrackingProcessFetch.reset()
+            with patch(
+                    "akuz_app.os.link",
+                    side_effect=FileExistsError("injected final race")), \
+                 patch(
+                    "akuz_app.remove_owned_snapshot",
+                    side_effect=ProcessFetchUnsafeError(
+                        "injected temp cleanup failure")):
+                with self.assertRaisesRegex(
+                        ProcessFetchUnsafeError, "temp cleanup failure"):
+                    self.build(
+                        root, rows, process=True,
+                        process_class=TrackingProcessFetch)
+
+            self.assertEqual(TrackingProcessFetch.close_calls, 1)
+            self.assertEqual(TrackingProcessFetch.active, 0)
+            store = load_store(root)
+            self.assertEqual(len(store["downloads"]), 1)
+            self.assertEqual(len(store["reports"]), 1)
+
+    def test_rollback_persistence_failure_is_hard_fail_and_restart_recovers(self):
+        with TemporaryDirectory(prefix="akuz_p11_rollback_persist_") as td:
+            home = Path(td)
+            rows = self.make_remote(home)
+            root = home / "app"
+            real_save = akuz_app.save_store
+            phase = {"prefetch_committed": False}
+
+            def fail_rollback_save(app_root, store):
+                downloads = len(store["downloads"])
+                reports = len(store["reports"])
+                if downloads == 2 and reports == 1:
+                    phase["prefetch_committed"] = True
+                    return real_save(app_root, store)
+                if (phase["prefetch_committed"]
+                        and downloads == 1 and reports == 1):
+                    raise OSError("injected rollback persistence failure")
+                return real_save(app_root, store)
+
+            FakeProcessFetch.reset()
+            with patch(
+                    "akuz_app.os.link",
+                    side_effect=OSError("injected hard-link failure")), \
+                 patch(
+                    "akuz_app.save_store",
+                    side_effect=fail_rollback_save):
+                with self.assertRaisesRegex(
+                        ProcessFetchUnsafeError,
+                        "сохранить откат индекса"):
+                    self.build(root, rows, process=True)
+
+            self.assertTrue(phase["prefetch_committed"])
+            self.assertEqual(FakeProcessFetch.active, 0)
+            stale = load_store(root)
+            self.assertEqual(len(stale["downloads"]), 2)
+            second_final = selected_snapshot_path(
+                self.config(root), rows[1])
+            self.assertFalse(second_final.exists())
+
+            # The stale durable entry points to a missing path. Normal cache
+            # validation rejects it, and a clean restart refetches/rebuilds.
+            FakeProcessFetch.reset()
+            recovered, calls = self.build(root, rows, process=True)
+            self.assertIsNotNone(recovered["combined"])
+            self.assertIn(rows[1]["name"], calls)
+            self.assertEqual(len(load_store(root)["downloads"]), 3)
+            self.assertEqual(FakeProcessFetch.active, 0)
+
     def test_atomic_promotion_never_overwrites_external_final_race(self):
         with TemporaryDirectory(prefix="akuz_p11_final_race_") as td:
             home = Path(td)
