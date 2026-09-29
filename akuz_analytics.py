@@ -163,6 +163,20 @@ def _phase13_catalog_error_index_requested(env=None):
     raise ValueError("Неверное значение AKUZ_PHASE13_CATALOG_ERROR_INDEX")
 
 
+def _phase13_defer_fp_index_requested(env=None):
+    """Parse isolated P13-03 ix_fp deferral experiment; default stays off."""
+    values = os.environ if env is None else env
+    name = "AKUZ_PHASE13_DEFER_FP_INDEX"
+    if name not in values:
+        return False
+    flag = str(values[name]).strip().lower()
+    if flag in ("1", "true", "yes", "on"):
+        return True
+    if flag in ("0", "false", "no", "off"):
+        return False
+    raise ValueError("Неверное значение AKUZ_PHASE13_DEFER_FP_INDEX")
+
+
 def _trusted_catalog_error_index(info, catalog_path, catalog, requested):
     """Use negative fingerprint lookups only for an integrity-proven catalog."""
     if not requested:
@@ -527,15 +541,22 @@ def update_source_date(root,identity,first_date):
         return dict(updated_reports=changed,overview=overview)
 
 
-def refresh(root,use_catalog_error_index=None):
+def refresh(root,use_catalog_error_index=None,defer_fp_index=None):
     """Idempotent processing of *reports*, never a network operation."""
     from akuz_diagnostics import event as perf_event, phase as perf_phase
     root=Path(root)
     if use_catalog_error_index is None:
         use_catalog_error_index = _phase13_catalog_error_index_requested()
+    if defer_fp_index is None:
+        defer_fp_index = _phase13_defer_fp_index_requested()
     with LOCK:
         db=connect(root)
+        fp_index_deferred=False
         try:
+            if defer_fp_index:
+                with db:
+                    db.execute("DROP INDEX IF EXISTS ix_fp")
+                fp_index_deferred=True
             migrated=db.total_changes>0
             with perf_phase(root, 'analytics.inventory'):
                 available=reports(root)
@@ -563,10 +584,25 @@ def refresh(root,use_catalog_error_index=None):
                         for sha,key in aliases.items():
                             db.execute("INSERT OR IGNORE INTO source_files VALUES(?,?)",(sha,key))
                 changed=True
+            if fp_index_deferred:
+                with perf_phase(root, 'analytics.index_build', index_kind=1):
+                    with db:
+                        db.execute(
+                            "CREATE INDEX IF NOT EXISTS ix_fp ON errors(fp)")
+                fp_index_deferred=False
             if changed or not (root/"data"/"analytics.js").exists():
                 with perf_phase(root, 'analytics.export'):
                     export(db,root)
             with perf_phase(root, 'analytics.overview'):
                 return overview(db)
         finally:
+            if fp_index_deferred:
+                try:
+                    with db:
+                        db.execute(
+                            "CREATE INDEX IF NOT EXISTS ix_fp ON errors(fp)")
+                except sqlite3.Error:
+                    # Preserve the original exception. connect() recreates
+                    # the secondary index on the next successful open.
+                    pass
             db.close()
