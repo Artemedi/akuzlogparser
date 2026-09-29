@@ -143,11 +143,11 @@ class ProcessFetch:
     def _release_kill_job(self):
         if self._kill_job is None:
             return
-        # Transfer ownership out of object state before closing it. The
-        # atomic Windows spawn context exposes an idempotent owner; legacy
-        # integer handles remain supported only by isolated unit helpers.
+        # Keep the exact owner reachable until its close succeeds. _JobOwner
+        # is retry-safe: a failed CloseHandle retains its raw HANDLE, so
+        # clearing this alias before success would orphan the only explicit
+        # retry path during abort/finally cleanup.
         handle = self._kill_job
-        self._kill_job = None
         close = getattr(handle, "close", None)
         if callable(close):
             try:
@@ -156,7 +156,13 @@ class ProcessFetch:
                 raise ProcessFetchUnsafeError(
                     "Could not close Windows kill Job Object") from exc
         else:
-            _close_windows_handle(handle)
+            try:
+                _close_windows_handle(handle)
+            except BaseException as exc:
+                raise ProcessFetchUnsafeError(
+                    "Could not close Windows kill Job Object") from exc
+        if self._kill_job is handle:
+            self._kill_job = None
 
     def finish(self) -> ProcessFetchResult:
         if self.child is None or self.receiver is None or self.started_at is None:
@@ -355,11 +361,13 @@ class ProcessFetch:
             try:
                 close()
             except BaseException as exc:
+                # Keep the alias to the same _JobOwner on failure. abort()
+                # can then retry the exact owner before retrying any remaining
+                # process/pipe HANDLE slots held by JobBoundPopen.
                 raise ProcessFetchUnsafeError(
                     "Could not close spawned child process handles") from exc
-            finally:
-                # Atomic JobBoundPopen owns this same _JobOwner instance.
-                self._kill_job = None
+            # Atomic JobBoundPopen closed this same _JobOwner successfully.
+            self._kill_job = None
             return
 
         # Unit/benchmark callers without the production JobBound context.
