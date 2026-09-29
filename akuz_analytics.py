@@ -163,20 +163,6 @@ def _phase13_catalog_error_index_requested(env=None):
     raise ValueError("Неверное значение AKUZ_PHASE13_CATALOG_ERROR_INDEX")
 
 
-def _phase13_single_transaction_requested(env=None):
-    """Parse isolated P13-05 transaction experiment; default stays off."""
-    values = os.environ if env is None else env
-    name = "AKUZ_PHASE13_SINGLE_TRANSACTION"
-    if name not in values:
-        return False
-    flag = str(values[name]).strip().lower()
-    if flag in ("1", "true", "yes", "on"):
-        return True
-    if flag in ("0", "false", "no", "off"):
-        return False
-    raise ValueError("Неверное значение AKUZ_PHASE13_SINGLE_TRANSACTION")
-
-
 def _trusted_catalog_error_index(info, catalog_path, catalog, requested):
     """Use negative fingerprint lookups only for an integrity-proven catalog."""
     if not requested:
@@ -541,14 +527,12 @@ def update_source_date(root,identity,first_date):
         return dict(updated_reports=changed,overview=overview)
 
 
-def refresh(root,use_catalog_error_index=None,single_transaction=None):
+def refresh(root,use_catalog_error_index=None):
     """Idempotent processing of *reports*, never a network operation."""
     from akuz_diagnostics import event as perf_event, phase as perf_phase
     root=Path(root)
     if use_catalog_error_index is None:
         use_catalog_error_index = _phase13_catalog_error_index_requested()
-    if single_transaction is None:
-        single_transaction = _phase13_single_transaction_requested()
     with LOCK:
         db=connect(root)
         try:
@@ -567,48 +551,18 @@ def refresh(root,use_catalog_error_index=None,single_transaction=None):
             aliases={r["sha"]:r["source_key"] for r in
                      db.execute("SELECT sha,source_key FROM source_files")}
             changed=removed or migrated
-            pending=[
-                (report_index,rid,info,catalog,stamp)
-                for report_index,(rid,info,catalog,stamp)
-                in enumerate(available,1)
-                if rid not in prior
-            ]
-            transaction_commits=0
-
-            def ingest_one(report_index,rid,info,catalog,stamp):
-                nonlocal changed
-                with perf_phase(
-                        root,'analytics.ingest',
-                        report_index=report_index):
-                    ingest(
-                        db,rid,info,catalog,aliases,
-                        use_catalog_error_index=use_catalog_error_index)
-                    db.execute("INSERT INTO indexed VALUES(?,?)",(rid,stamp))
-                    for sha,key in aliases.items():
-                        db.execute(
-                            "INSERT OR IGNORE INTO source_files VALUES(?,?)",
-                            (sha,key))
+            for report_index, (rid,info,catalog,stamp) in enumerate(available, 1):
+                if rid in prior:
+                    continue
+                with perf_phase(root, 'analytics.ingest', report_index=report_index):
+                    with db:
+                        ingest(
+                            db,rid,info,catalog,aliases,
+                            use_catalog_error_index=use_catalog_error_index)
+                        db.execute("INSERT INTO indexed VALUES(?,?)",(rid,stamp))
+                        for sha,key in aliases.items():
+                            db.execute("INSERT OR IGNORE INTO source_files VALUES(?,?)",(sha,key))
                 changed=True
-
-            if single_transaction and pending:
-                with perf_phase(
-                        root,'analytics.transaction_batch',
-                        reports=len(pending)):
-                    with db:
-                        for item in pending:
-                            ingest_one(*item)
-                transaction_commits=1
-            else:
-                for item in pending:
-                    with db:
-                        ingest_one(*item)
-                    transaction_commits+=1
-
-            perf_event(
-                root,'analytics.sqlite','summary',
-                pending_reports=len(pending),
-                transaction_commits=transaction_commits,
-                single_transaction=int(bool(single_transaction)))
             if changed or not (root/"data"/"analytics.js").exists():
                 with perf_phase(root, 'analytics.export'):
                     export(db,root)
