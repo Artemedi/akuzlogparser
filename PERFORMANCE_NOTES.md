@@ -3025,3 +3025,39 @@ Decision for v4.7: positive research result, **NOT integrated**. Release keeps
 sequential normal-app SSH scheduling and the validated ephemeral derived spool.
 Process overlap requires a future normal-app cancellation/failure/mixed-cache/
 inventory/restart + portable gate before production use.
+
+
+## Phase 11 production acceptance (2026-09-29)
+
+Process-isolated one-ahead SSH prefetch has passed the production gate for
+the v4.8.0 Windows portable path.
+
+Accepted scope: Windows client, SSH/Linux source, built-in compatible fetch,
+built-in generator, at least two sources, one child maximum. Rollback switch:
+`AKUZ_PHASE11_PROCESS_PREFETCH=0`. SSH compression remains default OFF.
+
+Reliability hardening includes atomic suspended Job-bound spawn,
+KILL_ON_JOB_CLOSE assignment before ResumeThread, bounded JSON IPC,
+synchronous whole-Job termination on abort, full parent-side SHA-256,
+reparse-safe exact Windows HANDLE identity, exact-HANDLE owned-temp deletion,
+inventory rollback, no-overwrite hard-link promotion, crash/restart recovery,
+and no serial second writer after unsafe lifecycle failure.
+
+Independent review:
+Actions #36538397765 — Fable LIFECYCLE=ACCEPT,
+TRANSACTION=ACCEPT, OVERALL=ACCEPT; no private log payload or secrets were
+sent, and the ephemeral review private key was destroyed after acceptance.
+
+Synthetic regression:
+Actions #36537874019, exact `b1f408225839c2e95151feee2384c219b79a0b61`:
+318 Python PASS, 3 skips, 130.379 s; browser controls and diff-check PASS.
+
+Latest pre-final real A/B:
+Actions #36530992011 on 857,563,363 source bytes:
+serial 329.511191 s, process 277.481652 s (~15.8% lower wall);
+inventory/analytics SQL/analytics export parity PASS, workspace cleanup PASS,
+no raw payload/digest output, user cache unchanged.
+Portable gate #36531019151 PASS for frozen Job-bound spawn and packaged smoke.
+
+Final real A/B, evidence audit and portable gates are repeated after the
+v4.8.0 version bump and before release publication.
