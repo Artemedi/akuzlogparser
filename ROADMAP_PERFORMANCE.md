@@ -204,3 +204,14 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 ## 10. Короткая инструкция для нового чата
 
 «Продолжай AKUZ Log Explorer по файлу `ROADMAP_PERFORMANCE.md` из `Artemedi/akuzlogparser`. Подключись к Windows DBA-008D, восстанови актуальный Git HEAD и ознакомься с Phase 6–8 и `PERFORMANCE_NOTES.md`. Сначала Phase 9.0: воспроизводимый benchmark + фактический Windows RSS + тестовый baseline; затем Phase 9.1: безопасная экстракция derived-контракта. Не выбирай A/B до изолированных прототипов Phase 9.2/9.3 и не смешивай SSH/SQLite/delta. Обязательны byte-equivalence, mixed-cache, source identity, fail-safe, тесты, commit/push каждого принятого этапа. Не менять Release и не удалять рабочие источники, кэш и конфиг. Прогнозы экономии — только гипотезы до реального Windows-прогона».
+
+
+**2026-09-29 v4.8.0 final gate:** after Fable #36538397765 returned
+LIFECYCLE=ACCEPT and TRANSACTION=ACCEPT, exact versioned regression
+#36539318506 passed 318 Python tests (3 skips), browser/diff PASS.
+Final real normal-app A/B #36540421782 on 857,563,363 bytes measured
+356.467622 s serial vs 325.069935 s process-prefetch (-8.808% wall);
+inventory/analytics SQL/export parity PASS. Numeric audit #36540580395 and
+portable atomic Job-bound spawn/self-test + packaged smoke #36540426274 PASS.
+Phase 11 is therefore release-accepted for v4.8.0 within the documented
+Windows+SSH scope; Phase 12-16 remain independent future work.
