@@ -3416,3 +3416,31 @@ instrumentation used only by this experiment, both A/B harnesses, experiment
 tests and workflow. Production remains the accepted P13-01 catalog index with
 per-report commits, `journal_mode=DELETE` and normal secondary-index
 maintenance. No Release was changed and no raw log payload was uploaded.
+
+
+## Phase 13 final closure (2026-09-29)
+
+P13-05 post-removal cleanup gate:
+- exact SHA `79756356ccf90e575b97f634dcf842e926db34e4`;
+- Windows Actions #36645052727;
+- **362 Python tests PASS, 3 skipped**;
+- browser controls **9/9 PASS**;
+- diff hygiene and no-production-publish PASS.
+
+Phase 13 is therefore **DONE**. Final production analytics configuration:
+- P13-01 catalog error index: **ACCEPTED, default ON**;
+- rollback: `AKUZ_PHASE13_CATALOG_ERROR_INDEX=0`;
+- P13-02 SQL preload/batching: **REJECTED and removed**;
+- P13-03 deferred `ix_fp`: **REJECTED and removed**;
+- P13-04 WAL: **REJECTED and removed**;
+- P13-05 single transaction: **REJECTED and removed**;
+- SQLite remains `journal_mode=DELETE`;
+- per-report transaction commits remain;
+- `ix_fp` remains maintained normally;
+- historical insert/ambiguity strategy remains;
+- generic benchmark correctness fixes from P13-03 remain because they are
+  instrumentation fixes, not a rejected optimization.
+
+No published Release or public asset was changed. No raw AKUZ log payload,
+credentials, private paths or private source identifiers were uploaded.
+P14-00 may now begin as measurement-only instrumentation.
