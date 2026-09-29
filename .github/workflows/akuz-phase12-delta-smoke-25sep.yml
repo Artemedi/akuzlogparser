@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: akuz-phase12-delta-smoke-25sep
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   smoke:
@@ -65,3 +65,5 @@ jobs:
           Write-Host 'APP_CACHE_CHANGED=NO'
           Write-Host 'NO_RELEASE_CHANGE=PASS'
           Write-Host 'RAW_LOG_ARTIFACT_UPLOAD=NO'
+
+# Rerun after final remote-prefix proof was bracketed by a second identity stat.
