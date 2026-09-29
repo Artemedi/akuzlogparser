@@ -3176,8 +3176,18 @@ recognition on 619,886 known non-error events, not from material raw I/O or
 SQLite write reduction. The catalog SHA verification itself costs about
 0.84 s median and is already included in candidate wall time.
 
-Decision at this checkpoint: **candidate accepted; default-on gate pending**.
-The default path has been switched to the accepted candidate with explicit
-rollback `AKUZ_PHASE13_CATALOG_ERROR_INDEX=0`, but production-default status
-remains TEST until exact `e8118a8` completes both full Windows regression and
-the real default-path A/B. P13-02 (SQL preload/batching) remains independent.
+Decision: **P13-01 accepted and default-on** with explicit rollback
+`AKUZ_PHASE13_CATALOG_ERROR_INDEX=0`.
+
+Exact default-path acceptance `e8118a8`:
+- real 23/24/25 A/B Actions #36575345791 PASS: baseline 39.308057 s wall /
+  38.906250 s CPU; production-default candidate 25.178127 s wall /
+  24.750000 s CPU, **-35.947% wall**;
+- exact SQL/export and semantic SQL/export parity PASS; inventory unchanged;
+  `recognize_error` remained 657,738 -> 37,852 and raw read reduction 0.673%;
+- full Windows Actions #36575345743: **360 Python tests PASS, 3 skipped**,
+  browser controls PASS, diff hygiene PASS.
+
+P13-02 (SQL preload/batching) remains an independent default-OFF experiment
+with rollback `AKUZ_PHASE13_SQL_BATCH=0`; it must not be inferred accepted
+from P13-01 evidence.
