@@ -603,9 +603,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             return
         final = selected_snapshot_path(cfg, next_remote)
         if final.exists():
-            remove_owned_snapshot(
-                result.path, expected_identity=result.cleanup_identity)
-            operation.close()
+            cleanup_prefetch_temp_and_operation()
             raise FetchError(
                 'Снимок следующего файла уже появился вне индекса. Проверьте downloads.')
         details = dict(result.metadata)
@@ -614,18 +612,60 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         # snapshot metadata remains byte/semantic-compatible with serial fetch.
         details["remote_path"] = next_remote["path"]
 
+        def cleanup_prefetch_temp_and_operation():
+            cleanup_error = None
+            try:
+                remove_owned_snapshot(
+                    result.path, expected_identity=result.cleanup_identity)
+            except BaseException as exc:
+                cleanup_error = exc
+            try:
+                operation.close()
+            except BaseException as close_exc:
+                if cleanup_error is not None:
+                    try:
+                        close_exc.add_note(
+                            'Phase 11 temp cleanup also failed: ' +
+                            type(cleanup_error).__name__)
+                    except BaseException:
+                        pass
+                raise
+            if cleanup_error is not None:
+                raise cleanup_error
+
         def rollback_prefetch_inventory(reason):
             store['downloads'].pop(next_fid, None)
             try:
                 save_store(root, store)
-            except BaseException:
-                # A stale persisted entry still points to a missing/untrusted
-                # path and cached_download() revalidates size+SHA before reuse.
+            except BaseException as exc:
                 perf_event(
                     root, 'process.prefetch',
                     'rollback_inventory_save_failed',
                     source_index=ids.index(next_fid) + 1,
                     reason=reason)
+                raise ProcessFetchUnsafeError(
+                    'Не удалось надёжно сохранить откат индекса '
+                    'предзагрузки') from exc
+
+        def rollback_and_cleanup(reason):
+            rollback_error = None
+            try:
+                rollback_prefetch_inventory(reason)
+            except BaseException as exc:
+                rollback_error = exc
+            try:
+                cleanup_prefetch_temp_and_operation()
+            except BaseException as cleanup_exc:
+                if rollback_error is not None:
+                    try:
+                        cleanup_exc.add_note(
+                            'Phase 11 inventory rollback also failed: ' +
+                            type(rollback_error).__name__)
+                    except BaseException:
+                        pass
+                raise
+            if rollback_error is not None:
+                raise rollback_error
 
         # Commit inventory BEFORE promotion. If the parent hard-exits before
         # promotion, restart sees an indexed missing path and safely refetches.
@@ -637,9 +677,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
             save_store(root, store)
         except BaseException:
             store['downloads'].pop(next_fid, None)
-            remove_owned_snapshot(
-                result.path, expected_identity=result.cleanup_identity)
-            operation.close()
+            cleanup_prefetch_temp_and_operation()
             raise
 
         try:
@@ -651,18 +689,12 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                     result.path, result.cleanup_identity):
                 os.link(result.path, final)
         except FileExistsError as exc:
-            rollback_prefetch_inventory('final_exists')
-            remove_owned_snapshot(
-                result.path, expected_identity=result.cleanup_identity)
-            operation.close()
+            rollback_and_cleanup('final_exists')
             raise FetchError(
                 'Снимок следующего файла уже появился вне индекса. '
                 'Проверьте downloads.') from exc
         except OSError:
-            rollback_prefetch_inventory('link_failed')
-            remove_owned_snapshot(
-                result.path, expected_identity=result.cleanup_identity)
-            operation.close()
+            rollback_and_cleanup('link_failed')
             perf_event(root, 'process.prefetch', 'promotion_fallback',
                        source_index=ids.index(next_fid) + 1, enabled=0)
             state.set_stage(
@@ -673,12 +705,13 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         try:
             remove_owned_snapshot(
                 result.path, expected_identity=result.cleanup_identity)
-        except ProcessFetchError:
+        except Exception as cleanup_exc:
             # final is already atomically linked and indexed. Keep the valid
             # snapshot; app-root-scoped orphan cleanup retries temp removal on
             # the next run rather than discarding a proven final snapshot.
             perf_event(root, 'process.prefetch', 'temp_cleanup_deferred',
-                       source_index=ids.index(next_fid) + 1)
+                       source_index=ids.index(next_fid) + 1,
+                       cleanup_kind=type(cleanup_exc).__name__)
         prefetched_downloads[next_fid] = (final, result.digest, details)
         process_prefetch_downloads += 1
         if result.child_cpu_s is not None:
