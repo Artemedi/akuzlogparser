@@ -3191,3 +3191,30 @@ Exact default-path acceptance `e8118a8`:
 P13-02 (SQL preload/batching) remains an independent default-OFF experiment
 with rollback `AKUZ_PHASE13_SQL_BATCH=0`; it must not be inferred accepted
 from P13-01 evidence.
+
+
+## Phase 13 P13-02 SQL preload/batching — rejected (2026-09-29)
+
+Isolated candidate exact `1671744`, Windows regression Actions
+#36577055045: **362 Python tests PASS, 3 skipped**, browser controls and
+diff hygiene PASS.
+
+Real 23/24/25 Sep A/B Actions #36577054931 kept the accepted catalog error
+index ON in both modes and changed only the ambiguity lookup / insert strategy.
+
+Measured values:
+- baseline wall 24.176579 s; CPU 23.921875 s;
+- SQL-batch candidate wall 24.350007 s; CPU 23.828125 s;
+- wall **regressed 0.717%**; CPU improved only 0.392%;
+- point raw-SHA SELECT calls 37,852 -> 0;
+- candidate used 3 preload queries and 3 INSERT batches;
+- matched errors and logical INSERT attempts remained 37,852;
+- final SQLite size 32,649,216 B and page_count 7,971 were identical;
+- exact SQL/export and semantic SQL/export equivalence PASS;
+- inventory unchanged; no raw payload retained; Release unchanged.
+
+Conclusion: reducing Python/SQLite call count did **not** reduce end-to-end wall time
+on the real workload. The experiment is rejected rather than retained behind a
+hidden switch. Candidate runtime code, benchmark-only workflow and public
+surface guard are removed from `main` after this evidence checkpoint.
+Future index and journal-mode experiments remain separate hypotheses.

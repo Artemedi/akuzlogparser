@@ -163,20 +163,6 @@ def _phase13_catalog_error_index_requested(env=None):
     raise ValueError("Неверное значение AKUZ_PHASE13_CATALOG_ERROR_INDEX")
 
 
-def _phase13_sql_batch_requested(env=None):
-    """Parse isolated P13-02 SQL-batch experiment; default stays off."""
-    values = os.environ if env is None else env
-    name = "AKUZ_PHASE13_SQL_BATCH"
-    if name not in values:
-        return False
-    flag = str(values[name]).strip().lower()
-    if flag in ("1", "true", "yes", "on"):
-        return True
-    if flag in ("0", "false", "no", "off"):
-        return False
-    raise ValueError("Неверное значение AKUZ_PHASE13_SQL_BATCH")
-
-
 def _trusted_catalog_error_index(info, catalog_path, catalog, requested):
     """Use negative fingerprint lookups only for an integrity-proven catalog."""
     if not requested:
@@ -215,8 +201,7 @@ def source_key(info,rid,sid,aliases):
         aliases[identity]=key
     return key
 
-def ingest(db,rid,info,catalog_path,aliases,use_catalog_error_index=False,
-           use_sql_batch=False):
+def ingest(db,rid,info,catalog_path,aliases,use_catalog_error_index=False):
     from akuz_diagnostics import event as perf_event
     from time import perf_counter
     started = perf_counter()
@@ -263,24 +248,6 @@ def ingest(db,rid,info,catalog_path,aliases,use_catalog_error_index=False,
         mapping[sid]=(key,skip,bool(identity and db.execute(
             "SELECT conflict FROM source_dates WHERE sha=?",
             (identity,)).fetchone()["conflict"]),has_source_date,chosen)
-    ambiguity_preload_queries=0
-    ambiguity_preload_rows=0
-    known_raw={}
-    if use_sql_batch:
-        source_keys=sorted({
-            value[0] for value in mapping.values() if not value[1]
-        })
-        if source_keys:
-            placeholders=",".join("?" for _ in source_keys)
-            ambiguity_preload_queries=1
-            for prior in db.execute(
-                    "SELECT source_key,line_no,raw_sha FROM errors "
-                    "WHERE source_key IN ("+placeholders+")",
-                    source_keys):
-                ambiguity_preload_rows += 1
-                known_raw.setdefault(
-                    (prior["source_key"],int(prior["line_no"])),set()
-                ).add(prior["raw_sha"])
     part=None
     raw_shard=[]
     index_skipped_no_error=0
@@ -291,9 +258,6 @@ def ingest(db,rid,info,catalog_path,aliases,use_catalog_error_index=False,
     raw_sha_lookup_calls=0
     insert_attempts=0
     ambiguous_update_calls=0
-    insert_batches=0
-    pending_inserts=[]
-    ambiguous_positions=set()
     rows = catalog["rows"]
     for index, row in enumerate(rows, 1):
         if index % 50000 == 0:
@@ -330,25 +294,14 @@ def ingest(db,rid,info,catalog_path,aliases,use_catalog_error_index=False,
         matched_errors += 1
         line,end=int(row[8]),int(row[9])
         raw_sha=hashlib.sha256(raw.encode("utf-8")).hexdigest()
-        if use_sql_batch:
-            position=(key,line)
-            prior=known_raw.get(position,set())
-            ambiguous=any(value!=raw_sha for value in prior)
-            known_raw.setdefault(position,set()).add(raw_sha)
-            if ambiguous:
-                ambiguous_positions.add(position)
-        else:
-            raw_sha_lookup_calls += 1
-            prior=db.execute(
-                "SELECT raw_sha FROM errors WHERE source_key=? AND line_no=?",
-                (key,line)).fetchall()
-            ambiguous=any(r["raw_sha"]!=raw_sha for r in prior)
-            if ambiguous:
-                ambiguous_update_calls += 1
-                db.execute(
-                    "UPDATE errors SET ambiguous=1 "
-                    "WHERE source_key=? AND line_no=?",
-                    (key,line))
+        raw_sha_lookup_calls += 1
+        prior=db.execute("SELECT raw_sha FROM errors WHERE source_key=? AND line_no=?",
+                         (key,line)).fetchall()
+        ambiguous=any(r["raw_sha"]!=raw_sha for r in prior)
+        if ambiguous:
+            ambiguous_update_calls += 1
+            db.execute("UPDATE errors SET ambiguous=1 WHERE source_key=? AND line_no=?",
+                       (key,line))
         merged_offset=int(row[1])
         relative_day=merged_offset
         source_day=date.fromisoformat(chosen_source_date) if has_source_date else None
@@ -366,30 +319,13 @@ def ingest(db,rid,info,catalog_path,aliases,use_catalog_error_index=False,
                       if source_day else None)
         when=(calendar_day.isoformat() if calendar_day and not date_conflict else None)
         insert_attempts += 1
-        values=(
-            match["fp"],match["exception"],match["family"],match["template"],
-            match["method"],key,line,end,raw_sha,when,str(row[2]),
-            rid,event_id,int(ambiguous),relative_day)
-        if use_sql_batch:
-            pending_inserts.append(values)
-        else:
-            db.execute("""INSERT OR IGNORE INTO errors
-              (fp,exception,family,template,method,source_key,line_no,end_line,raw_sha,
-               day,clock,report_id,event_id,ambiguous,relative_day)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", values)
-    if use_sql_batch and pending_inserts:
-        db.executemany("""INSERT OR IGNORE INTO errors
+        db.execute("""INSERT OR IGNORE INTO errors
           (fp,exception,family,template,method,source_key,line_no,end_line,raw_sha,
            day,clock,report_id,event_id,ambiguous,relative_day)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", pending_inserts)
-        insert_batches=1
-        if ambiguous_positions:
-            ordered=sorted(ambiguous_positions)
-            db.executemany(
-                "UPDATE errors SET ambiguous=1 "
-                "WHERE source_key=? AND line_no=?",
-                ordered)
-            ambiguous_update_calls=len(ordered)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+          (match["fp"],match["exception"],match["family"],match["template"],
+           match["method"],key,line,end,raw_sha,when,str(row[2]),
+           rid,event_id,int(ambiguous),relative_day))
     perf_event(
         perf_root, 'analytics.ingest', 'summary',
         events=len(rows),
@@ -400,12 +336,8 @@ def ingest(db,rid,info,catalog_path,aliases,use_catalog_error_index=False,
         raw_shard_bytes_loaded=raw_shard_bytes_loaded,
         matched_errors=matched_errors,
         raw_sha_lookup_calls=raw_sha_lookup_calls,
-        ambiguity_preload_queries=ambiguity_preload_queries,
-        ambiguity_preload_rows=ambiguity_preload_rows,
         insert_attempts=insert_attempts,
-        insert_batches=insert_batches,
         ambiguous_update_calls=ambiguous_update_calls,
-        sql_batch=int(use_sql_batch),
         catalog_verify_s=round(catalog_verify_s, 6),
         elapsed_s=round(perf_counter()-started, 6))
 def signature_label(number):
@@ -595,14 +527,12 @@ def update_source_date(root,identity,first_date):
         return dict(updated_reports=changed,overview=overview)
 
 
-def refresh(root,use_catalog_error_index=None,use_sql_batch=None):
+def refresh(root,use_catalog_error_index=None):
     """Idempotent processing of *reports*, never a network operation."""
     from akuz_diagnostics import event as perf_event, phase as perf_phase
     root=Path(root)
     if use_catalog_error_index is None:
         use_catalog_error_index = _phase13_catalog_error_index_requested()
-    if use_sql_batch is None:
-        use_sql_batch = _phase13_sql_batch_requested()
     with LOCK:
         db=connect(root)
         try:
@@ -628,8 +558,7 @@ def refresh(root,use_catalog_error_index=None,use_sql_batch=None):
                     with db:
                         ingest(
                             db,rid,info,catalog,aliases,
-                            use_catalog_error_index=use_catalog_error_index,
-                            use_sql_batch=use_sql_batch)
+                            use_catalog_error_index=use_catalog_error_index)
                         db.execute("INSERT INTO indexed VALUES(?,?)",(rid,stamp))
                         for sha,key in aliases.items():
                             db.execute("INSERT OR IGNORE INTO source_files VALUES(?,?)",(sha,key))
