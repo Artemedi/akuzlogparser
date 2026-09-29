@@ -42,7 +42,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $actual -ne $env:GITHUB_SHA) {
             throw 'Checkout does not match GITHUB_SHA'
           }
-          & python -B -m unittest tests.test_phase12_delta_resume -q
+          & python -B -m unittest discover -s tests -p 'test_phase12_delta_resume.py' -q
           if ($LASTEXITCODE -ne 0) { throw 'Phase 12 synthetic contract failed' }
           Write-Host "EXACT_SHA=$actual"
           Write-Host 'PHASE12_SYNTHETIC_PRE_GATE=PASS'
@@ -67,3 +67,4 @@ jobs:
           Write-Host 'RAW_LOG_ARTIFACT_UPLOAD=NO'
 
 # Rerun after final remote-prefix proof was bracketed by a second identity stat.
+# Use discover so the gate does not depend on tests being a Python package.
