@@ -5,6 +5,7 @@ It does not know about AKUZ inventory/cache and is not wired into perform_build.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 import hashlib
@@ -605,6 +606,112 @@ def _windows_parent_identity(path: Path):
         _close_windows_handle(handle)
 
 
+def _windows_open_promotion_guard_handle(path: Path, *, directory=False):
+    """Open an identity guard that prevents pathname replacement on Windows.
+
+    The file guard requests GENERIC_READ and shares only READ. This blocks
+    writers, rename and deletion while the guard is alive. The directory
+    guard omits FILE_SHARE_DELETE so the owned parent cannot be swapped while
+    a hard-link promotion resolves the source pathname.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+        ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+
+    generic_read = 0x80000000
+    file_read_attributes = 0x00000080
+    share_read = 0x00000001
+    share_write = 0x00000002
+    open_existing = 3
+    open_reparse_point = 0x00200000
+    backup_semantics = 0x02000000
+
+    access = file_read_attributes if directory else generic_read
+    share = share_read | share_write if directory else share_read
+    flags = open_reparse_point | (backup_semantics if directory else 0)
+    handle = kernel32.CreateFileW(
+        str(path), access, share, None, open_existing, flags, None)
+    value = getattr(handle, "value", handle)
+    invalid = ctypes.c_void_p(-1).value
+    if value in (None, invalid):
+        error = ctypes.get_last_error()
+        raise ProcessFetchUnsafeError(
+            "Could not lock owned snapshot identity for promotion"
+        ) from OSError(error, "CreateFileW promotion guard failed")
+    return handle
+
+
+@contextmanager
+def owned_snapshot_promotion_guard(path: Path, expected_identity):
+    """Freeze the validated Windows file+parent identity across promotion.
+
+    Phase 11 production prefetch runs only on Windows. Non-Windows callers
+    use the historical benchmark/test path and get a no-op guard.
+    """
+    if os.name != "nt":
+        yield
+        return
+    if (not isinstance(expected_identity, tuple)
+            or len(expected_identity) != 2
+            or expected_identity[0] is None
+            or expected_identity[1] is None):
+        raise ProcessFetchUnsafeError(
+            "Validated Windows snapshot identity is unavailable")
+
+    target = Path(path)
+    expected_file, expected_parent = expected_identity
+    parent_handle = None
+    file_handle = None
+    close_errors = []
+    try:
+        parent_handle = _windows_open_promotion_guard_handle(
+            target.parent, directory=True)
+        if _windows_directory_identity(parent_handle) != expected_parent:
+            raise ProcessFetchUnsafeError(
+                "Owned snapshot parent changed before promotion")
+
+        file_handle = _windows_open_promotion_guard_handle(target)
+        if _windows_cleanup_identity(file_handle) != expected_file:
+            raise ProcessFetchUnsafeError(
+                "Owned snapshot changed before promotion")
+
+        # Re-read the already-open parent HANDLE after the file HANDLE exists.
+        # Both stay open without delete sharing until the caller completes the
+        # hard-link operation, closing the pathname replacement window.
+        if _windows_directory_identity(parent_handle) != expected_parent:
+            raise ProcessFetchUnsafeError(
+                "Owned snapshot parent changed during promotion setup")
+
+        yield
+
+        if _windows_cleanup_identity(file_handle) != expected_file:
+            raise ProcessFetchUnsafeError(
+                "Owned snapshot changed during promotion")
+        if _windows_directory_identity(parent_handle) != expected_parent:
+            raise ProcessFetchUnsafeError(
+                "Owned snapshot parent changed during promotion")
+    finally:
+        if file_handle is not None:
+            try:
+                _close_windows_handle(file_handle)
+            except BaseException as exc:
+                close_errors.append(exc)
+        if parent_handle is not None:
+            try:
+                _close_windows_handle(parent_handle)
+            except BaseException as exc:
+                close_errors.append(exc)
+        if close_errors:
+            raise ProcessFetchUnsafeError(
+                "Could not close owned snapshot promotion guard"
+            ) from close_errors[0]
+
+
 def _windows_open_cleanup_handle(path: Path, access: int):
     import ctypes
     from ctypes import wintypes
@@ -887,13 +994,23 @@ def _sha256_owned_snapshot(
     finally:
         os.close(fd)
 
-    visible = _owned_snapshot_stat(target)
-    if _snapshot_identity(visible) != _snapshot_identity(after):
-        raise ProcessFetchError(
-            "Process fetch snapshot path changed while hashing")
+    token = (cleanup_identity, parent_cleanup_identity)
+    if os.name == "nt":
+        # Re-open authoritative file+parent HANDLE identities after the hash
+        # descriptor closes. The returned token is later held again across
+        # os.link() by owned_snapshot_promotion_guard().
+        with owned_snapshot_promotion_guard(target, token):
+            visible = _owned_snapshot_stat(target)
+            if _snapshot_identity(visible) != _snapshot_identity(after):
+                raise ProcessFetchError(
+                    "Process fetch snapshot path changed while hashing")
+    else:
+        visible = _owned_snapshot_stat(target)
+        if _snapshot_identity(visible) != _snapshot_identity(after):
+            raise ProcessFetchError(
+                "Process fetch snapshot path changed while hashing")
     value = digest.hexdigest()
     if return_cleanup_identity:
-        token = (cleanup_identity, parent_cleanup_identity)
         return value, token
     return value
 
