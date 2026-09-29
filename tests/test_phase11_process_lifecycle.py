@@ -16,6 +16,7 @@ from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
                                 _owned_snapshot_stat,
                                 _same_path_lexical, _sha256_owned_snapshot,
                                 _windows_handle_value,
+                                owned_snapshot_promotion_guard,
                                 remove_owned_snapshot, ssh_fetch_child)
 from akuz_fetch import ConnectConfig
 from akuz_win_job_spawn import (JobBoundSpawnError,
@@ -418,6 +419,32 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             self.assertEqual(result.digest, digest)
             self.assertTrue(dest.is_file())
 
+    @unittest.skipUnless(os.name == "nt", "Windows promotion identity guard")
+    def test_windows_promotion_guard_freezes_validated_source_path(self):
+        with TemporaryDirectory(prefix="akuz_process_promotion_guard_") as td:
+            root = Path(td)
+            source = root / "snapshot.log"
+            replacement = root / "replacement.log"
+            final = root / "final.log"
+            source.write_bytes(b"owned validated snapshot")
+            replacement.write_bytes(b"external replacement")
+            expected = _owned_snapshot_stat(source)
+            digest, token = _sha256_owned_snapshot(
+                source, expected, return_cleanup_identity=True)
+            self.assertEqual(
+                digest, hashlib.sha256(source.read_bytes()).hexdigest())
+
+            with owned_snapshot_promotion_guard(source, token):
+                # No-delete sharing on the exact file HANDLE must prevent a
+                # pathname replacement during CreateHardLink promotion.
+                with self.assertRaises(OSError):
+                    os.replace(replacement, source)
+                os.link(source, final)
+
+            self.assertEqual(final.read_bytes(), b"owned validated snapshot")
+            self.assertEqual(source.read_bytes(), b"owned validated snapshot")
+            self.assertEqual(replacement.read_bytes(), b"external replacement")
+
     @unittest.skipUnless(os.name == "nt", "Windows handle deletion")
     def test_windows_handle_cleanup_deletes_exact_owned_file(self):
         with TemporaryDirectory(prefix="akuz_process_win_delete_") as td:
@@ -487,6 +514,57 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
                     with self.assertRaisesRegex(
                             ProcessFetchUnsafeError, "could not be removed"):
                         remove_owned_snapshot(dest, attempts=3, delay_s=.01)
+            self.assertTrue(dest.exists())
+
+    def test_finish_retry_does_not_hide_first_partial_close_failure(self):
+        class RetryCloseChild:
+            exitcode = 0
+
+            def __init__(self):
+                self.close_calls = 0
+                self.join_calls = 0
+
+            def is_alive(self):
+                return False
+
+            def join(self, timeout=None):
+                self.join_calls += 1
+
+            def close(self):
+                self.close_calls += 1
+                if self.close_calls == 1:
+                    raise JobBoundSpawnError("first partial close failure")
+
+        with TemporaryDirectory(prefix="akuz_process_finish_retry_") as td:
+            root = Path(td)
+            dest = root / "snapshot.log"
+            payload = b"validated retry snapshot"
+            dest.write_bytes(payload)
+            digest = hashlib.sha256(payload).hexdigest()
+            receiver = FakeReceiver(
+                ("ok", str(dest), digest, len(payload), .2, .5))
+            child = RetryCloseChild()
+            op = ProcessFetch(
+                FakeContext(receiver, child),
+                lambda *args: None, (), dest,
+                poll_timeout_s=.01, join_timeout_s=.01, kill_timeout_s=.01)
+            # Exercise the production close branch without requiring a real
+            # spawned process. JobBoundPopen.close itself is separately tested
+            # to clear each successful HANDLE slot before a retry.
+            op.require_kill_job = True
+            op.receiver = receiver
+            op.child = child
+            op.started_at = time.perf_counter()
+
+            with self.assertRaisesRegex(
+                    ProcessFetchUnsafeError,
+                    "Could not close spawned child process handles") as cm:
+                op.finish()
+
+            self.assertIsInstance(cm.exception.__cause__, JobBoundSpawnError)
+            self.assertIn("first partial close failure",
+                          str(cm.exception.__cause__))
+            self.assertEqual(child.close_calls, 2)
             self.assertTrue(dest.exists())
 
     def test_job_close_failure_after_validation_is_not_double_closed(self):
@@ -1197,6 +1275,49 @@ class RealSpawnLifecycleTests(unittest.TestCase):
 
             self.assertEqual(
                 sorted(closed), sorted(created["handles"]))
+            self.assertIsNone(op.child)
+            self.assertFalse(target.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows Job Object semantics")
+    def test_atomic_resume_failure_closes_primary_thread_handle(self):
+        import akuz_win_job_spawn as job_spawn
+
+        with TemporaryDirectory(prefix="akuz_process_resume_fail_") as td:
+            root = Path(td)
+            target = root / "snapshot.log"
+            real_close = job_spawn._winapi.CloseHandle
+            observed = {}
+            closed = []
+
+            def fail_resume(handle):
+                observed["thread"] = int(handle)
+                raise OSError("injected ResumeThread failure")
+
+            def close_and_record(handle):
+                closed.append(int(handle))
+                return real_close(handle)
+
+            op = ProcessFetch(
+                get_job_bound_spawn_context(),
+                real_spawn_hanging_child, (), target,
+                poll_timeout_s=5, join_timeout_s=2, kill_timeout_s=2,
+                expected_listed_bytes=1,
+                require_kill_job=True, safe_ipc=True)
+            with patch(
+                    "akuz_win_job_spawn._resume_thread",
+                    side_effect=fail_resume), \
+                 patch(
+                    "akuz_win_job_spawn._winapi.CloseHandle",
+                    side_effect=close_and_record):
+                with self.assertRaisesRegex(
+                        OSError, "ResumeThread failure"):
+                    op.start()
+
+            self.assertIn("thread", observed)
+            self.assertIn(observed["thread"], closed)
+            self.assertEqual(
+                closed.count(observed["thread"]), 1,
+                "primary thread HANDLE must be closed exactly once")
             self.assertIsNone(op.child)
             self.assertFalse(target.exists())
 
