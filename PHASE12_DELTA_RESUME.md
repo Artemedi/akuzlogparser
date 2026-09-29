@@ -180,3 +180,40 @@ one observation. This is deliberately **not acceptance evidence yet**:
 
 Next gate is P12-03: balanced 3+3 full/strict-delta A/B on one fixed prefix,
 with server proof CPU accounting added before any runtime integration.
+
+
+## P12-04 / P12-05 integration boundary — 2026-09-29
+
+The v2 candidate now has a restart-safety workstream on `main`:
+
+- owner-unique same-directory candidates are used instead of one fixed
+  `final.part` pathname;
+- a hard process exit may leave an orphan, but that orphan is never trusted,
+  never blocks the next writer and is not deleted as another writer's state;
+- publication remains a no-overwrite hard link after the full-prefix SHA proof;
+- the exact Windows regression for this work is still a gate until its Action
+  completes successfully.
+
+Normal-app integration, when implemented, is intentionally **opt-in first**:
+
+`AKUZ_PHASE12_DELTA_RESUME=1`
+
+Default v4.8 behavior stays unchanged. A resume candidate is eligible only
+when all of these facts already exist in the application's own inventory:
+same SSH host/path, local previous snapshot path+SHA+stored byte count, and
+remote device/inode captured for that snapshot. Legacy cache rows without
+device/inode proof are not guessed or upgraded; they use a full bounded fetch.
+
+The resume offset is `stored_bytes`, not the earlier remote capture bound.
+This preserves the existing active-log rule where an unfinished physical tail
+is discarded. Any proof/source/network failure before publication falls back
+to a newly opened full bounded fetch (or fails closed if even that cannot be
+proven). A successful delta snapshot is stored through the same inventory
+transaction as a full snapshot.
+
+For the first runtime gate, Phase 11 one-ahead process-prefetch is disabled
+whenever Phase 12 delta opt-in is enabled. This is deliberate isolation, not a
+performance conclusion. A combined Phase-11+12 scheduler requires a separate
+failure/portable/A-B gate before it can be enabled.
+
+No published Release is changed by this design checkpoint.
