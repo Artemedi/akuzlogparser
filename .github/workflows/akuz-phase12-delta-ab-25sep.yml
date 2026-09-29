@@ -64,3 +64,5 @@ jobs:
           Write-Host 'APP_CACHE_CHANGED=NO'
           Write-Host 'NO_RELEASE_CHANGE=PASS'
           Write-Host 'RAW_LOG_ARTIFACT_UPLOAD=NO'
+
+# Rerun after fixed-prefix gate was made append-tolerant outside the bound.
