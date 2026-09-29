@@ -233,7 +233,8 @@ def _setup_previous(cfg, day: str, previous_bytes: int, workspace: Path):
         client.close()
 
 
-def _full_trial(cfg, day: str, expected_identity, workspace: Path):
+def _full_trial(cfg, day: str, expected_identity, workspace: Path,
+                fixed_bound: int | None = None):
     client, counted = _connect_counted(cfg)
     try:
         selected = _trusted_source(client, cfg, day)
@@ -241,7 +242,9 @@ def _full_trial(cfg, day: str, expected_identity, workspace: Path):
         before, use_sudo = _metadata(client, cfg, quoted)
         if before[:2] != expected_identity:
             raise AssertionError("Remote identity changed before full trial")
-        bound = before[2]
+        bound = before[2] if fixed_bound is None else fixed_bound
+        if before[2] < bound:
+            raise AssertionError("Remote source shrank below fixed full prefix")
         rx0, tx0 = counted.rx_bytes, counted.tx_bytes
         target = workspace / "full.log"
         wall0, cpu0 = perf_counter(), process_time()
@@ -249,8 +252,8 @@ def _full_trial(cfg, day: str, expected_identity, workspace: Path):
             client, cfg, quoted, 0, bound, use_sudo, target)
         after, _ = _remote_metadata(client, cfg, quoted, use_sudo)
         wall_s, cpu_s = perf_counter() - wall0, process_time() - cpu0
-        if after is None or after[:2] != before[:2] or after[2] != bound:
-            raise AssertionError("Fixed source changed during full trial")
+        if after is None or after[:2] != before[:2] or after[2] < bound:
+            raise AssertionError("Fixed source rotated/truncated during full trial")
         return dict(
             mode="full",
             bound_bytes=bound,
@@ -268,7 +271,8 @@ def _full_trial(cfg, day: str, expected_identity, workspace: Path):
 
 
 def _delta_trial(cfg, day: str, previous: Path, previous_sha: str,
-                 previous_bytes: int, expected_identity, workspace: Path):
+                 previous_bytes: int, expected_identity, workspace: Path,
+                 fixed_bound: int | None = None):
     client, counted = _connect_counted(cfg)
     try:
         selected = _trusted_source(client, cfg, day)
@@ -276,7 +280,9 @@ def _delta_trial(cfg, day: str, previous: Path, previous_sha: str,
         before_raw, use_sudo = _metadata(client, cfg, quoted)
         if before_raw[:2] != expected_identity:
             raise AssertionError("Remote identity changed before delta trial")
-        bound = before_raw[2]
+        bound = before_raw[2] if fixed_bound is None else fixed_bound
+        if before_raw[2] < bound:
+            raise AssertionError("Remote source shrank below fixed delta prefix")
         if bound <= previous_bytes:
             raise AssertionError("No remote append remains for delta trial")
 
@@ -295,8 +301,8 @@ def _delta_trial(cfg, day: str, previous: Path, previous_sha: str,
 
         transfer_after, _ = _remote_metadata(client, cfg, quoted, use_sudo)
         if (transfer_after is None or transfer_after[:2] != before_raw[:2]
-                or transfer_after[2] != bound):
-            raise AssertionError("Fixed source changed during delta transfer")
+                or transfer_after[2] < bound):
+            raise AssertionError("Fixed source rotated/truncated during delta transfer")
 
         new_remote_sha, new_sha_wall, new_sha_cpu, new_sha_server_cpu = _remote_prefix_sha(
             client, cfg, quoted, bound, use_sudo)
@@ -305,8 +311,8 @@ def _delta_trial(cfg, day: str, previous: Path, previous_sha: str,
         # Otherwise a pathname rotation between stat_after and sha256sum could
         # bind proof bytes to a different inode.
         after_raw, _ = _remote_metadata(client, cfg, quoted, use_sudo)
-        if after_raw is None or after_raw[:2] != before_raw[:2] or after_raw[2] != bound:
-            raise AssertionError("Fixed source changed during final prefix proof")
+        if after_raw is None or after_raw[:2] != before_raw[:2] or after_raw[2] < bound:
+            raise AssertionError("Fixed source rotated/truncated during final prefix proof")
 
         final = workspace / "delta_full.log"
         assemble0, assemble_cpu0 = perf_counter(), process_time()
@@ -315,7 +321,7 @@ def _delta_trial(cfg, day: str, previous: Path, previous_sha: str,
             previous_sha256=previous_sha,
             previous_device=expected_identity[0],
             previous_inode=expected_identity[1],
-            before=RemoteMeta(*before_raw),
+            before=RemoteMeta(before_raw[0], before_raw[1], bound, before_raw[3]),
             remote_previous_prefix_sha256=old_remote_sha,
             delta=delta_path,
             transfer_bound=bound,
@@ -374,19 +380,19 @@ def run(config_path: Path, app_root: Path, day: str, previous_bytes: int):
         full_dir.mkdir()
         delta_dir.mkdir()
 
-        full = _full_trial(cfg, day, expected_identity, full_dir)
+        fixed_bound = selected["size"]
+        full = _full_trial(
+            cfg, day, expected_identity, full_dir, fixed_bound=fixed_bound)
         delta = _delta_trial(
             cfg, day, previous, previous_sha, previous_bytes,
-            expected_identity, delta_dir)
+            expected_identity, delta_dir, fixed_bound=fixed_bound)
 
         if full["bound_bytes"] != delta["bound_bytes"]:
             raise AssertionError("Full and delta trials used different bounds")
         if full["snapshot_sha256"] != delta["snapshot_sha256"]:
             raise AssertionError("Full and strict-delta snapshot bytes differ")
         if full["bound_bytes"] != selected["size"]:
-            # The first listing is part of evidence; abort rather than silently
-            # comparing different source versions.
-            raise AssertionError("Remote size changed after setup listing")
+            raise AssertionError("Fixed prefix contract changed unexpectedly")
 
         result = dict(
             status="PHASE12_STRICT_DELTA_SMOKE",
