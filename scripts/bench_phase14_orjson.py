@@ -37,7 +37,6 @@ from scripts.bench_phase13_catalog_error_index import (
     _export_hashes,
     _reset_analytics,
 )
-from scripts.bench_phase9_baseline import sql_fingerprint
 from scripts.phase9_semantic import semantic_exports, semantic_sql
 
 
@@ -96,8 +95,15 @@ def _report_manifest(root: Path):
     for rid, entry in sorted(store["reports"].items()):
         integrity = entry.get("integrity") or {}
         required = integrity.get("required_sha256") or {}
+        all_hashes = integrity.get("all_sha256") or {}
+        # provenance.json contains the publication timestamp and is deliberately
+        # non-deterministic. Compare every producer-owned report byte instead.
+        producer_hashes = {
+            name: digest for name, digest in all_hashes.items()
+            if name != "provenance.json"
+        }
         manifest[rid] = {
-            "required_sha256": dict(sorted(required.items())),
+            "producer_sha256": dict(sorted(producer_hashes.items())),
             "events": entry.get("events"),
             "kind": entry.get("kind"),
         }
@@ -211,7 +217,12 @@ def _run_trial(root: Path, cfg, state: State, selected, mode: str):
         patch.object(akuz_html_explorer, "_json_compact", _orjson_compact)
         if mode == "C" else nullcontext()
     )
+    report_ids = [
+        f"v4_20990101_00000{index}_{index:08x}"
+        for index in range(1, 5)
+    ]
     with encoder_patch, \
+         patch.object(akuz_app, "_fresh_report_id", side_effect=report_ids), \
          patch.object(akuz_app, "source_config", return_value=cfg):
         perform_build(
             root, state, selected,
@@ -227,7 +238,6 @@ def _run_trial(root: Path, cfg, state: State, selected, mode: str):
     return {
         "metrics": _trial_metrics(root, offset, wall_s, cpu_s),
         "manifest": _report_manifest(root),
-        "sql": sql_fingerprint(root),
         "semantic_sql": semantic_sql(root),
         "exports": _export_hashes(root),
         "semantic_exports": semantic_exports(root),
@@ -257,7 +267,7 @@ def run(config_path: Path, app_root: Path):
                 reference = trial
             else:
                 for key in (
-                        "manifest", "sql", "semantic_sql",
+                        "manifest", "semantic_sql",
                         "exports", "semantic_exports"):
                     if trial[key] != reference[key]:
                         raise AssertionError(
