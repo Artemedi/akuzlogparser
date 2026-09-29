@@ -303,6 +303,28 @@ jobs:
           Review the actual implementation and tests; do not accept these
           claims without checking ownership/double-close/error paths.
 
+          Since the immediately previous Fable BLOCK, the current code now
+          additionally:
+          - synchronously terminates and waits for an already assigned child
+            tree if Job-bound spawn fails before Finalize ownership exists;
+          - retains _JobOwner.handle until CloseHandle succeeds, making a
+            failed Job close explicitly retryable rather than silently losing
+            KILL_ON_JOB_CLOSE ownership;
+          - normal synchronous close happens before quiet GC Finalize fallback,
+            and new regressions prove retryable Job ownership plus pre-Finalize
+            synchronous teardown;
+          - obsolete non-atomic Job-assignment helpers were removed from the
+            production module surface;
+          - validated snapshot identity is held through hard-link promotion;
+            cleanup carries the exact Windows file identity obtained during
+            validation and exact-handle cleanup refuses pathname replacement;
+          - Windows owned-temp deletion is performed through a DELETE handle
+            and SetFileInformationByHandle rather than Path.unlink by name;
+          - cleanup/promotion identity swap and handle retry behavior have
+            dedicated Windows regressions.
+          Re-review the actual latest code; do not transfer the prior BLOCK
+          verdict to this candidate without reproducing a current blocker.
+
           Since the previous Fable BLOCK, the current code additionally:
           - tracks CreatePipe -> CRT fd ownership explicitly and resumes the
             already Job-bound suspended child before writing the spawn payload,
