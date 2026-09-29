@@ -3,6 +3,7 @@ from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import shutil
+import json
 import sqlite3
 from contextlib import closing
 import unittest
