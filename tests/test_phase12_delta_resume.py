@@ -10,6 +10,8 @@ from __future__ import annotations
 import errno
 import hashlib
 import io
+import subprocess
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -118,6 +120,8 @@ class Phase12DeltaResumeContractTests(unittest.TestCase):
         self.assertEqual(self.previous.read_bytes(), old)
         self.assertFalse(self.final.exists())
         self.assertFalse(self.final.with_name(self.final.name + ".part").exists())
+        self.assertEqual(
+            list(self.final.parent.glob(self.final.name + ".part-*")), [])
 
     def test_append_publishes_byte_exact_full_snapshot(self):
         old = b"event-1\nevent-2\n"
@@ -284,6 +288,84 @@ class Phase12DeltaResumeContractTests(unittest.TestCase):
                 old, remote, fail_after_written=len(old) + 2)
         self.assertEqual(caught.exception.errno, errno.ENOSPC)
         self.assert_failure_preserves_previous(old)
+
+    def test_v2_retry_ignores_foreign_stale_part_names(self):
+        old = b"event-1\n"
+        remote = old + b"event-2\n"
+        legacy = self.final.with_name(self.final.name + ".part")
+        foreign = self.final.with_name(self.final.name + ".part-stale")
+        legacy.write_bytes(b"legacy-untrusted")
+        foreign.write_bytes(b"foreign-untrusted")
+        size, sha = self.run_contract_v2(old, remote)
+        self.assertEqual(size, len(remote))
+        self.assertEqual(sha, digest_bytes(remote))
+        self.assertEqual(self.final.read_bytes(), remote)
+        self.assertEqual(legacy.read_bytes(), b"legacy-untrusted")
+        self.assertEqual(foreign.read_bytes(), b"foreign-untrusted")
+
+    def test_v2_hard_exit_leaves_orphan_but_restart_can_publish(self):
+        old = b"event-1\n"
+        remote = old + b"event-2\nevent-3\n"
+        self.previous.write_bytes(old)
+        self.delta.write_bytes(remote[len(old):])
+        script = r"""
+import os
+import sys
+from pathlib import Path
+import akuz_delta
+from akuz_delta import RemoteMeta, assemble_delta_final_proof
+
+previous = Path(sys.argv[1])
+delta = Path(sys.argv[2])
+final = Path(sys.argv[3])
+old_sha = sys.argv[4]
+new_sha = sys.argv[5]
+device = int(sys.argv[6])
+inode = int(sys.argv[7])
+bound = int(sys.argv[8])
+
+def hard_exit(source, target):
+    os._exit(77)
+
+akuz_delta.os.link = hard_exit
+assemble_delta_final_proof(
+    previous,
+    previous_sha256=old_sha,
+    previous_device=device,
+    previous_inode=inode,
+    before=RemoteMeta(device, inode, bound, 200),
+    delta=delta,
+    transfer_bound=bound,
+    publish_size=bound,
+    after=RemoteMeta(device, inode, bound, 200),
+    remote_published_prefix_sha256=new_sha,
+    final=final,
+)
+"""
+        completed = subprocess.run(
+            [
+                sys.executable, "-B", "-c", script,
+                str(self.previous), str(self.delta), str(self.final),
+                digest_bytes(old), digest_bytes(remote),
+                str(self.device), str(self.inode), str(len(remote)),
+            ],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 77)
+        self.assertFalse(self.final.exists())
+        self.assertEqual(self.previous.read_bytes(), old)
+        orphans = list(self.root.glob(self.final.name + ".part-*"))
+        self.assertEqual(len(orphans), 1)
+        self.assertEqual(orphans[0].read_bytes(), remote)
+
+        size, sha = self.run_contract_v2(old, remote)
+        self.assertEqual(size, len(remote))
+        self.assertEqual(sha, digest_bytes(remote))
+        self.assertEqual(self.final.read_bytes(), remote)
+        # Restart never trusts or deletes a foreign orphan. A bounded
+        # app-root cleanup policy can remove it later.
+        self.assertTrue(orphans[0].exists())
 
     def test_existing_target_is_never_overwritten(self):
         old = b"event-1\n"
