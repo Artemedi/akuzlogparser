@@ -203,6 +203,8 @@ See `PHASE12_DELTA_RESUME.md`. Final exact-SHA Windows regression
 3. **P13-01 default-on ACCEPTED.** Rollback: `AKUZ_PHASE13_CATALOG_ERROR_INDEX=0`. Exact `e8118a8`: real default-path A/B #36575345791 **39.308057 → 25.178127 s (-35.947% wall)**, exact/semantic SQL+JS parity PASS, inventory unchanged; full Windows #36575345743 **360 tests PASS, 3 skipped**, browser/diff PASS.
 4. **P13-02 SQL preload/batching — REJECTED.** Real 23/24/25 A/B #36577054931 exact `1671744`: point raw-SHA SELECTs **37,852 → 0**, but wall **24.176579 → 24.350007 s (+0.717%)**; CPU **23.921875 → 23.828125 s (-0.392%)**. Exact SQL/export + semantic parity and inventory PASS; final DB bytes/page_count identical. Candidate runtime/harness/workflow removed after evidence was recorded. Следующие независимые эксперименты: secondary indexes/write amplification и `journal_mode=DELETE` vs WAL — только отдельными A/B; не переносить старый несовместимый `error_events`.
 
+5. **P13-03 deferred ix_fp — TEST, default OFF.** Recovery HEAD `1cfcc81`: real #36581527908 failed PermissionError, follow-up #36584151066 failed AssertionError; Windows #36584150994 SUCCESS. No usable real performance decision. Benchmark recovery fixes lost stage names (zero index-build timing) and deterministic SQLite metrics-handle closure; two red-to-green synthetic regressions added. Corrected exact-SHA Windows and real A/B required before ACCEPT/REJECT. See PERFORMANCE_NOTES.md P13-03 benchmark recovery.
+
 ### Phase 14 — JS serialization, catalog, browser usability [OPEN]
 1. Разделить `shard_write_s` на CPU `json.dumps`/escaping и файловую запись, замерить output bytes и RSS.
 2. Проверить наличие лишних проходов `raw.count("\ufffd")`, повторных преобразований, стоимости каталога и большого `rows`, не меняя `raw_*.js` и `catalog.js` вслепую.
@@ -241,3 +243,4 @@ inventory/analytics SQL/export parity PASS. Numeric audit #36540580395 and
 portable atomic Job-bound spawn/self-test + packaged smoke #36540426274 PASS.
 Phase 11 is therefore release-accepted for v4.8.0 within the documented
 Windows+SSH scope; Phase 12-16 remain independent future work.
+

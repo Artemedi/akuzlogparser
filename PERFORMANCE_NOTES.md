@@ -3218,3 +3218,35 @@ on the real workload. The experiment is rejected rather than retained behind a
 hidden switch. Candidate runtime code, benchmark-only workflow and public
 surface guard are removed from `main` after this evidence checkpoint.
 Future index and journal-mode experiments remain separate hypotheses.
+
+
+## P13-03 benchmark recovery (2026-09-29)
+
+Recovery HEAD: `1cfcc81b83e44d086855638266777b77354f0cc2`.
+Initial real Action #36581527908 at `defd960` failed with PermissionError;
+its Windows regression #36581527906 logged 364 tests OK (3 skipped),
+9 browser tests and diff PASS, but job conclusion was cancelled.
+The subsequent `_index_schema` handle fix at `1cfcc81` passed Windows
+#36584150994, while real #36584151066 failed with AssertionError.
+Neither failed real run provides accepted performance or parity evidence.
+
+Two benchmark defects reproduced with failing synthetic tests:
+- `_trace_after` removes the `stage=` prefix; `_parse` previously discarded
+  the remaining bare stage name. All done-stage sums, including index build,
+  became zero. The P13-03 positive index-time assertion therefore cannot pass.
+- `_db_metrics` used a SQLite transaction context without closing the
+  connection. A retained-reference test proves the handle remains usable;
+  deterministic closure is required before Windows trial reset. The earlier
+  `_index_schema` fix remains intact.
+
+Fixes affect benchmark instrumentation only: preserve stage in parsing and
+use `contextlib.closing` in metrics. Both new regression tests fail before
+the fix and pass afterwards; all 5 Phase 13 harness tests PASS locally.
+Historical wall/CPU are independently measured and are not altered by this
+parser correction; historical done-stage values must not be treated as
+valid timings. Ingest summary elapsed values use a separate path.
+
+P13-03 remains default OFF / TEST pending a corrected real A/B and Windows
+exact-SHA gate. The real failure log suppresses assertion details, so the
+parser defect is proven in code but is not claimed as the uniquely identified
+exception site of #36584151066. No production runtime or Release change.

@@ -1,5 +1,5 @@
 name: AKUZ Phase 13 deferred ix-fp A-B
-# Rerun after Windows SQLite benchmark handle closure.
+# Rerun after stage-duration parsing and metrics SQLite handle fixes.
 
 on:
   push:

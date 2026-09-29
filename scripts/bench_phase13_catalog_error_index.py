@@ -11,6 +11,7 @@ result contains only counters and hashes; stdout omits host/path/digest/raw.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 from dataclasses import replace
 from datetime import date
 import json
@@ -52,7 +53,9 @@ def _trace_after(root: Path, offset: int):
 
 
 def _parse(line: str):
-    out = {}
+    # _trace_after strips the timestamp and 'stage=' prefix, retaining
+    # the stage value as the first token rather than a key=value pair.
+    out = {"stage": line.split(maxsplit=1)[0]} if line else {}
     for token in line.split():
         if "=" in token:
             key, value = token.split("=", 1)
@@ -81,7 +84,7 @@ def _export_hashes(root: Path):
 
 def _db_metrics(root: Path):
     path = root / "cache" / "error_analytics.sqlite"
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db:
         page_size = db.execute("PRAGMA page_size").fetchone()[0]
         page_count = db.execute("PRAGMA page_count").fetchone()[0]
         freelist = db.execute("PRAGMA freelist_count").fetchone()[0]
