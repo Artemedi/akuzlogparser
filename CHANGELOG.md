@@ -35,6 +35,12 @@
   Persistent B-lite/derived clinical metadata не включены.
 - Сохранён hotfix v4.7.1 для восстановления UI status-polling после
   transient `Failed to fetch`.
+- Финальный hardened release-candidate A/B после всех Fable-driven lifecycle
+  исправлений: **356.468 s serial → 325.070 s process (~8.8% меньше wall)**
+  на 857,563,363 байт; total CPU ~2.0% ниже, peak private memory ~9.1% выше;
+  inventory/analytics SQL/export parity и cleanup PASS.
+  Actions #36540421782, audit #36540580395; final portable spawn/smoke
+  #36540426274 PASS.
 
 ## 4.7.1 — 2026-09-28
 
