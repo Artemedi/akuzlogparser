@@ -131,15 +131,18 @@ def _metadata(client, cfg, quoted: str):
 
 
 def _remote_prefix_sha(client, cfg, quoted: str, size: int, use_sudo: bool):
-    # Benchmark-only CPU accounting for the remote proof command. GNU time is
-    # required by the Phase 12 acceptance harness; production runtime does not
-    # depend on it.
+    # Benchmark-only CPU accounting for the remote proof command. Use bash's
+    # reserved-word time instead of /usr/bin/time: the latter is an optional
+    # package and is not guaranteed on the AKUZ application server.
     pipeline = f"head -c {size} -- {quoted} | sha256sum"
-    timed = (
-        "/usr/bin/time -f 'AKUZ_PHASE12_SHA_CPU %U %S' "
-        "sh -c " + shlex.quote(pipeline)
+    script = (
+        "TIMEFORMAT='AKUZ_PHASE12_SHA_CPU %U %S'; "
+        "{ time ( " + pipeline + " ); }"
     )
-    command = sudo_prefix(use_sudo, bool(cfg.sudo_password)) + timed
+    command = (
+        sudo_prefix(use_sudo, bool(cfg.sudo_password))
+        + "bash -c " + shlex.quote(script)
+    )
     wall0 = perf_counter()
     cpu0 = process_time()
     stdin, stdout, stderr = client.exec_command(
@@ -161,7 +164,15 @@ def _remote_prefix_sha(client, cfg, quoted: str, size: int, use_sudo: bool):
         rb"AKUZ_PHASE12_SHA_CPU\s+[0-9]+(?:\.[0-9]+)?\s+[0-9]+(?:\.[0-9]+)?\s*",
         b"", error).strip()
     if status != 0 or clean_error or match is None or cpu_match is None:
-        raise AssertionError("Remote bounded prefix SHA failed")
+        # Safe numeric diagnostics only: never expose command, path, digest,
+        # credentials, or stderr text.
+        raise AssertionError(
+            "Remote bounded prefix SHA failed "
+            f"rc={status} stdout_bytes={len(data)} stderr_bytes={len(error)} "
+            f"sha_marker={int(match is not None)} "
+            f"cpu_marker={int(cpu_match is not None)} "
+            f"extra_stderr={int(bool(clean_error))}"
+        )
     server_cpu_s = float(cpu_match.group(1)) + float(cpu_match.group(2))
     return (match.group(1).decode("ascii").lower(), wall_s, cpu_s,
             server_cpu_s)
