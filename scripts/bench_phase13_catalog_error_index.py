@@ -90,20 +90,33 @@ def _db_metrics(root: Path):
         freelist = db.execute("PRAGMA freelist_count").fetchone()[0]
         errors = db.execute("SELECT count(*) FROM errors").fetchone()[0]
         indexed = db.execute("SELECT count(*) FROM indexed").fetchone()[0]
+        journal_mode = str(
+            db.execute("PRAGMA journal_mode").fetchone()[0]).upper()
+    sidecars = {}
+    for suffix in ("-wal","-shm","-journal"):
+        candidate = Path(str(path)+suffix)
+        sidecars[suffix[1:]+"_bytes"] = (
+            candidate.stat().st_size if candidate.exists() else 0)
     return dict(
         db_bytes=path.stat().st_size,
+        storage_bytes=path.stat().st_size+sum(sidecars.values()),
+        journal_mode_actual=journal_mode,
         page_size=page_size,
         page_count=page_count,
         freelist_count=freelist,
         error_rows=errors,
         indexed_reports=indexed,
+        **sidecars,
     )
 
 
-def _run_refresh(root: Path, use_index: bool | None):
+def _run_refresh(root: Path, use_index: bool | None,
+                 journal_mode: str = "DELETE"):
     offset = _trace_count(root)
     wall0, cpu0 = perf_counter(), process_time()
-    overview = refresh(root, use_catalog_error_index=use_index)
+    overview = refresh(
+        root, use_catalog_error_index=use_index,
+        journal_mode=journal_mode)
     wall = perf_counter() - wall0
     cpu = process_time() - cpu0
     trace = _trace_after(root, offset)
