@@ -323,46 +323,59 @@ if os.name == "nt":
                             "Could not clean failed atomic spawn handles"
                         ) from cleanup_error
                 else:
+                    termination_error = None
                     if hp is not None:
                         if assigned:
-                            # Closing KILL_ON_JOB_CLOSE terminates the exact
-                            # suspended/resumed process tree.
+                            # Even before Finalize exists, Job membership is
+                            # already authoritative. Terminate the exact tree
+                            # and wait for the exact process HANDLE before
+                            # releasing any ownership; KILL_ON_JOB_CLOSE alone
+                            # is asynchronous and is not sufficient here.
+                            try:
+                                _terminate_job_and_wait(owner, hp)
+                            except BaseException as exc:
+                                termination_error = exc
                             try:
                                 owner.close()
-                            except BaseException:
-                                try:
-                                    _winapi.TerminateProcess(hp, TERMINATE)
-                                except BaseException:
-                                    pass
+                            except BaseException as exc:
+                                if termination_error is None:
+                                    termination_error = exc
                         else:
                             # Assignment failed: Job does not own hp, so kill
                             # the exact suspended process handle directly.
                             try:
                                 _winapi.TerminateProcess(hp, TERMINATE)
-                            except BaseException:
-                                pass
+                            except BaseException as exc:
+                                termination_error = exc
                             if owner is not None:
                                 try:
                                     owner.close()
-                                except BaseException:
-                                    pass
+                                except BaseException as exc:
+                                    if termination_error is None:
+                                        termination_error = exc
                     elif owner is not None:
                         # Failure before CreateProcess produced hp.
                         try:
                             owner.close()
-                        except BaseException:
-                            pass
+                        except BaseException as exc:
+                            termination_error = exc
 
                     if rhandle is not None:
                         try:
                             _winapi.CloseHandle(rhandle)
-                        except BaseException:
-                            pass
+                        except BaseException as exc:
+                            if termination_error is None:
+                                termination_error = exc
                     if hp is not None:
                         try:
                             _winapi.CloseHandle(hp)
-                        except BaseException:
-                            pass
+                        except BaseException as exc:
+                            if termination_error is None:
+                                termination_error = exc
+                    if termination_error is not None:
+                        raise JobBoundSpawnError(
+                            "Could not safely tear down failed atomic spawn"
+                        ) from termination_error
                 raise
 
         def duplicate_for_child(self, handle):
