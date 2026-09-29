@@ -3361,3 +3361,5 @@ shows a small wall/CPU regression with no persistent-storage benefit. Remove
 the WAL switch/runtime, experiment tests, harnesses and workflow. Production
 remains `journal_mode=DELETE` with accepted P13-01 catalog error index.
 P13-05 single-transaction is the next independent SQLite candidate.
+
+P13-04 post-removal cleanup gate: exact `6a691b36ee505e203209c75d01f934537014e57f`, Windows Actions #36629956908 — **362 Python tests PASS, 3 skipped**, browser **9/9 PASS**, diff/no-production-publish PASS. This confirms the accepted DELETE/P13-01 production baseline after all WAL experiment runtime and workflow code was removed.
