@@ -42,7 +42,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $actual -ne $env:GITHUB_SHA) {
             throw 'Checkout does not match GITHUB_SHA'
           }
-          & python -B -m unittest tests.test_analytics -q
+          & python -B -m unittest discover -s tests -p 'test_analytics.py' -q
           if ($LASTEXITCODE -ne 0) { throw 'Analytics contract failed' }
           & python -B -m unittest discover -s tests -p 'test_phase13_catalog_index.py' -q
           if ($LASTEXITCODE -ne 0) { throw 'Phase 13 benchmark guard failed' }
