@@ -100,10 +100,13 @@ def _db_metrics(root: Path):
     )
 
 
-def _run_refresh(root: Path, use_index: bool | None):
+def _run_refresh(root: Path, use_index: bool | None,
+                 single_transaction: bool = False):
     offset = _trace_count(root)
     wall0, cpu0 = perf_counter(), process_time()
-    overview = refresh(root, use_catalog_error_index=use_index)
+    overview = refresh(
+        root, use_catalog_error_index=use_index,
+        single_transaction=single_transaction)
     wall = perf_counter() - wall0
     cpu = process_time() - cpu0
     trace = _trace_after(root, offset)
@@ -113,6 +116,10 @@ def _run_refresh(root: Path, use_index: bool | None):
         if line.startswith("analytics.ingest status=summary")
     ]
     done = [_parse(line) for line in trace if " status=done" in line]
+    sqlite_summary = [
+        _parse(line) for line in trace
+        if line.startswith("analytics.sqlite status=summary")
+    ]
 
     def done_elapsed(stage):
         return sum(_num(x.get("elapsed_s")) for x in done
@@ -126,6 +133,14 @@ def _run_refresh(root: Path, use_index: bool | None):
         export_elapsed_s=round(done_elapsed("analytics.export"), 6),
         overview_elapsed_s=round(done_elapsed("analytics.overview"), 6),
         inventory_elapsed_s=round(done_elapsed("analytics.inventory"), 6),
+        transaction_batch_elapsed_s=round(
+            done_elapsed("analytics.transaction_batch"), 6),
+        transaction_commits=sum(
+            _num(x.get("transaction_commits"), True)
+            for x in sqlite_summary),
+        pending_reports=sum(
+            _num(x.get("pending_reports"), True)
+            for x in sqlite_summary),
         reports=len(summaries),
         catalog_index_reports=sum(
             _num(x.get("catalog_error_index"), True) for x in summaries),
