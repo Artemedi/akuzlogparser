@@ -760,12 +760,22 @@ def _remove_owned_snapshot_windows(
 
     file_read_attributes = 0x00000080
     delete_access = 0x00010000
-    anchor = _windows_open_cleanup_handle(target, file_read_attributes)
-    if anchor is None:
-        return
+    parent_guard = None
+    anchor = None
+    close_errors = []
     try:
+        # Hold the exact parent directory open without FILE_SHARE_DELETE for
+        # the entire cleanup operation. This closes the directory-swap window
+        # between identity validation and SetFileInformationByHandle.
+        parent_guard = _windows_open_promotion_guard_handle(
+            target.parent, directory=True)
+        parent_identity = _windows_directory_identity(parent_guard)
+
+        anchor = _windows_open_cleanup_handle(target, file_read_attributes)
+        if anchor is None:
+            return
         owned_identity = _windows_cleanup_identity(anchor)
-        parent_identity = _windows_parent_identity(target.parent)
+
         if expected_identity is not None:
             expected_file, expected_parent = expected_identity
             if owned_identity != expected_file:
@@ -795,7 +805,7 @@ def _remove_owned_snapshot_windows(
                 if _windows_cleanup_identity(delete_handle) != owned_identity:
                     raise ProcessFetchUnsafeError(
                         "Owned process snapshot pathname was replaced")
-                if _windows_parent_identity(target.parent) != parent_identity:
+                if _windows_directory_identity(parent_guard) != parent_identity:
                     raise ProcessFetchUnsafeError(
                         "Owned process snapshot parent was replaced")
                 disposition = FILE_DISPOSITION_INFO(1)
@@ -821,8 +831,20 @@ def _remove_owned_snapshot_windows(
         raise ProcessFetchUnsafeError(
             "Owned process snapshot could not be removed") from last_error
     finally:
-        _close_windows_handle(anchor)
-
+        if anchor is not None:
+            try:
+                _close_windows_handle(anchor)
+            except BaseException as exc:
+                close_errors.append(exc)
+        if parent_guard is not None:
+            try:
+                _close_windows_handle(parent_guard)
+            except BaseException as exc:
+                close_errors.append(exc)
+        if close_errors:
+            raise ProcessFetchUnsafeError(
+                "Could not close owned snapshot cleanup guards"
+            ) from close_errors[0]
 
 def remove_owned_snapshot(
         path: Path, *, attempts=100, delay_s=0.10,
