@@ -172,6 +172,17 @@ Phase 8: `error_recognize_calls=657738`; `error_no_match_events=619886`, `error_
 2. Доказать идентичность сохранённого префикса криптографически/надёжными сегментами, проверять before/after stat, дату, inode/identity по доступности, file size и границу multiline; делать atomic commit offset **только после** успешной фиксации полного снимка/отчёта.
 3. Fault-injection для network loss, source mutation, disk full, checksum mismatch, replay, partial UTF-8 и незавершённого события. При сомнении — полный snapshot; никогда не пропускать/не дублировать события.
 
+**2026-09-29 P12-00 strict contract:** isolated `akuz_delta.py` + synthetic
+contract matrix added on main through `fedf4b6`. It is NOT imported by the
+normal app and does not change v4.8.0 behavior. The baseline requires full
+local previous SHA, remote saved-prefix SHA, exact delta length, before/after
+device+inode/non-truncation, remote accepted-prefix SHA and atomic
+no-overwrite publication. Tests include rotation/truncation, same-inode prefix
+rewrite, short transfer, disk-full, replay, partial UTF-8/unfinished tail,
+publication race and post-publish temp-cleanup failure. Full Windows regression
+is still a required gate; remote SHA acquisition/cost and replicated real A/B
+remain OPEN. See `PHASE12_DELTA_RESUME.md`.
+
 ### Phase 13 — аналитика SQLite и третий проход [OPEN]
 1. Измерить `analytics.ingest/export/overview`, SELECT/INSERT, индексы, транзакции, write amplification и повторное распознавание ошибок по raw; baseline refresh ≈37.58 s.
 2. Проверить возможность передавать сохранённые error fingerprint/derived без нарушения dedup/source identity, ambiguous dates, relative_day, migration и атомарного экспорта.
