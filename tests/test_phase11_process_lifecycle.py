@@ -1057,6 +1057,51 @@ class ProcessFetchLifecycleTests(unittest.TestCase):
             self.assertTrue(child.terminated)
             self.assertFalse(dest.exists())
 
+    def test_abort_prefers_synchronous_job_tree_termination(self):
+        class Owner:
+            def __init__(self):
+                self.calls = 0
+                self.closed = False
+
+            def close(self):
+                self.calls += 1
+                self.closed = True
+
+        with TemporaryDirectory(prefix="akuz_process_job_abort_") as td:
+            root = Path(td)
+            receiver = FakeReceiver(ready=False)
+            child = FakeChild(alive_after_start=True)
+            owner = Owner()
+            tree_calls = []
+
+            class Popen:
+                _akuz_job_owner = owner
+
+                def terminate_job_and_wait(self, timeout_s):
+                    tree_calls.append(timeout_s)
+                    child.alive = False
+                    return -15
+
+            child._popen = Popen()
+            op = ProcessFetch(
+                FakeContext(receiver, child),
+                lambda *args: None, (), root / "snapshot.log",
+                poll_timeout_s=.01, join_timeout_s=.01, kill_timeout_s=.25)
+            op.receiver = receiver
+            op.child = child
+            op.started_at = time.perf_counter()
+            op._kill_job = owner
+
+            op.abort()
+
+            self.assertEqual(tree_calls, [.25])
+            self.assertEqual(owner.calls, 1)
+            self.assertTrue(owner.closed)
+            self.assertFalse(child.terminated)
+            self.assertFalse(child.killed)
+            self.assertFalse(child.is_alive())
+            self.assertIsNone(op._kill_job)
+
     def test_abort_escalates_to_kill_when_terminate_does_not_stop(self):
         with TemporaryDirectory(prefix="akuz_process_fetch_kill_") as td:
             root = Path(td)
