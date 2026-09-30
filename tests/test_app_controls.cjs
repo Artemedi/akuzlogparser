@@ -205,3 +205,77 @@ test('transient status fetch failure retries automatically and recovers UI',asyn
   assert.equal(get('open-analytics').attrs['aria-disabled'],'false');
   assert.equal(nextDelay,2500);
 });
+
+
+test('another tab listing revision replaces authoritative source and files',async()=>{
+  const nodes=new Map();
+  const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
+  let state={
+    busy:false,source:'linux',local_path:'',listing_revision:1,stage:'Ready',
+    listing:[{id:'linux-one',name:'20260923_linux.log',path:'/srv/20260923_linux.log',
+      date:'2026-09-23',suggested_date:'2026-09-23',
+      modified_utc:'2026-09-23T12:00:00',size:100,cached:false}]
+  };
+  let nextPoll=null;
+  const context={
+    document:{getElementById:get,createElement:()=>new Element()},
+    location:{hostname:'127.0.0.1',protocol:'http:',pathname:'/',assign(){}},
+    setTimeout:fn=>{nextPoll=fn;return 1;},clearTimeout(){},confirm:()=>true,
+    fetch:async url=>({ok:true,json:async()=>url==='/api/status'?state:
+      url==='/api/reports'?{reports:[]}:{started:true}})
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../app_controls.js'),'utf8'),context);
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  await flush();
+  assert.equal(get('fetch-source').value,'linux');
+  assert.equal(get('picker-files').children[0].dataset.fid,'linux-one');
+
+  state={
+    busy:false,source:'windows',local_path:'',listing_revision:2,stage:'Other tab',
+    listing:[{id:'win-one',name:'20260924_windows.log',path:'\\\\server\\share\\20260924_windows.log',
+      date:'2026-09-24',suggested_date:'2026-09-24',
+      modified_utc:'2026-09-24T12:00:00',size:200,cached:true}]
+  };
+  await nextPoll();await flush();
+  assert.equal(get('fetch-source').value,'windows');
+  assert.equal(get('picker-files').children.length,1);
+  assert.equal(get('picker-files').children[0].dataset.fid,'win-one');
+});
+
+test('build posts the exact listing revision and surfaces stale-tab rejection',async()=>{
+  const nodes=new Map();
+  const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
+  const posted=[];
+  let state={
+    busy:false,source:'linux',local_path:'',listing_revision:5,stage:'Ready',
+    listing:[{id:'one',name:'20260923_server.log',path:'/srv/20260923_server.log',
+      date:'2026-09-23',suggested_date:'2026-09-23',
+      modified_utc:'2026-09-23T12:00:00',size:100,cached:false}]
+  };
+  const context={
+    document:{getElementById:get,createElement:()=>new Element()},
+    location:{hostname:'127.0.0.1',protocol:'http:',pathname:'/',assign(){}},
+    setTimeout:()=>1,clearTimeout(){},confirm:()=>true,
+    fetch:async (url,options)=>{
+      if(url==='/api/status')return {ok:true,json:async()=>state};
+      if(url==='/api/reports')return {ok:true,json:async()=>({reports:[]})};
+      if(url==='/api/build'){
+        posted.push(JSON.parse(options.body));
+        return {ok:false,status:409,json:async()=>({error:'Список файлов изменился в другой вкладке. Обновите список.'})};
+      }
+      return {ok:true,json:async()=>({started:true})};
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../app_controls.js'),'utf8'),context);
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  await flush();
+  const checkbox=get('picker-files').children[0].children[0];
+  checkbox.checked=true;checkbox.listeners.change();
+  // Server state changes in another tab before this tab receives its next poll.
+  state={...state,listing_revision:6};
+  get('picker-build').listeners.click();
+  await flush();
+  assert.equal(posted.length,1);
+  assert.equal(posted[0].listing_revision,5);
+  assert.match(get('fetch-status').textContent,/другой вкладке/);
+});
