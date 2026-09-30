@@ -35,6 +35,8 @@ from akuz_store_lock import inventory_transaction
 
 from akuz_runtime import DOCUMENTS, app_root, prepare_runtime
 from akuz_instance_lock import InstanceBusy, exclusive_instance
+from akuz_parallel_reports import (
+    StagedReportJob, run_staged_reports, validate_staged_report)
 from akuz_process_fetch import (ProcessFetch, ProcessFetchError,
                                 ProcessFetchUnsafeError,
                                 owned_snapshot_promotion_guard,
@@ -215,6 +217,61 @@ def _publish(root, store, key, raw_path, base, sources, label, kind,
             value['error_fingerprint_version'] = ERROR_FINGERPRINT_VERSION
         intent = write_intent(root, value, temp/'provenance.json',
                               output_hashes=producer_hashes if trusted else None)
+        temp.rename(final)
+        store['reports'][rid] = value
+        try:
+            with perf_phase(root, 'report.inventory_save'):
+                save_store(root, store)
+        except Exception:
+            store['reports'].pop(rid, None)
+            if final.exists():
+                shutil.rmtree(final)
+            raise
+        return dict(value, url='/reports/'+rid+'/index.html', reused=False)
+    finally:
+        if intent is not None:
+            retire_intent(intent)
+        if temp.exists():
+            shutil.rmtree(temp)
+
+
+def _publish_staged_report(root, store, key, stage: Path, result: dict,
+                           sources, label, kind):
+    """Commit a parent-validated Phase 15 stage through normal publication."""
+    old = cached_report(store, key, root)
+    if old is not None:
+        retire_indexed_intent(root, old, key, sources, label, kind)
+        return dict(old, url='/reports/'+old['id']+'/index.html', reused=True)
+    recovered = recover_report(root, store, key, sources, label, kind)
+    if recovered is not None:
+        return recovered
+
+    rid = _fresh_report_id(root)
+    parent = root/'reports'
+    parent.mkdir(exist_ok=True)
+    temp = parent/(rid+'.building')
+    final = parent/rid
+    intent = None
+    try:
+        if temp.exists() or temp.is_symlink() or final.exists() or final.is_symlink():
+            raise FileExistsError('Phase 15 publication target already exists')
+        stage.rename(temp)
+        if not (temp/'index.html').is_file() or not (temp/'data'/'catalog.js').is_file():
+            raise FetchError('Генератор не сохранил необходимые файлы отчёта')
+        (temp/'provenance.json').write_text(json.dumps(dict(
+            sources=sources, kind=kind,
+            generated=datetime.now().isoformat(timespec='seconds'),
+            events=result['events']), ensure_ascii=False, indent=2),
+            encoding='utf-8')
+        value = dict(
+            id=rid, key=key, label=label, kind=kind, sources=sources,
+            events=result['events'], lines=result['physical_lines'],
+            created=datetime.now().isoformat(timespec='seconds'))
+        from akuz_analytics import ERROR_FINGERPRINT_VERSION
+        value['error_fingerprint_version'] = ERROR_FINGERPRINT_VERSION
+        intent = write_intent(
+            root, value, temp/'provenance.json',
+            output_hashes=result['output_hashes'])
         temp.rename(final)
         store['reports'][rid] = value
         try:
@@ -461,6 +518,29 @@ def _phase12_resume_candidate(store, cfg, remote):
         return None
     # Prefer the largest proven prefix. Path is only a deterministic tie-breaker.
     return max(candidates, key=lambda row: (row[0], row[1]))[2]
+
+
+def _phase15_parallel_requested(env=None) -> bool:
+    """Parse the default-off Phase 15 independent-report switch."""
+    values = os.environ if env is None else env
+    name = 'AKUZ_PHASE15_PARALLEL_GENERATION'
+    if name not in values:
+        return False
+    flag = str(values[name]).strip().lower()
+    if flag in ('1', 'true', 'yes', 'on'):
+        return True
+    if flag in ('0', 'false', 'no', 'off'):
+        return False
+    raise FetchError('Неверное значение AKUZ_PHASE15_PARALLEL_GENERATION')
+
+
+def _phase15_parallel_allowed(requested, selections, gen_fn,
+                              delta_requested=False, client_os=None) -> bool:
+    """Initial Phase 15 scope: Windows, built-in generator, 2+ sources."""
+    platform = os.name if client_os is None else client_os
+    return (
+        bool(requested) and platform == 'nt' and len(selections) > 1
+        and gen_fn is generate and not delta_requested)
 
 
 def _phase11_process_requested(env=None) -> bool:
