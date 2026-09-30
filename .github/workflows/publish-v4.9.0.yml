@@ -39,7 +39,9 @@ jobs:
           $actual = (git rev-parse HEAD).Trim()
           if ($actual -ne $env:TARGET_SHA) { throw ('Wrong release checkout: ' + $actual) }
           gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -eq 0) { throw ($env:RELEASE_TAG + ' already exists; refusing to overwrite') }
+          $releaseExists = ($LASTEXITCODE -eq 0)
+          $global:LASTEXITCODE = 0
+          if ($releaseExists) { throw ($env:RELEASE_TAG + ' already exists; refusing to overwrite') }
           Write-Host ('EXACT_RELEASE_SHA=' + $actual)
           Write-Host 'EXISTING_RELEASE=NO'
 
