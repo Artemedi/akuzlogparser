@@ -37,6 +37,8 @@ def main():
         check = json.loads(result.stdout.strip())
         if not check['ok'] or Path(check['app_root']) != app.resolve():
             raise RuntimeError('Frozen app does not use the executable directory')
+        if not check.get('phase14_raw_orjson') or not check.get('orjson_version'):
+            raise RuntimeError('Frozen app does not include Phase 14 raw-json encoder')
         config = app/'ConnectConf.cfg'
         config.write_bytes(config.read_bytes()+b'\n# preserve existing operator config\n')
         saved_config = config.read_bytes()
