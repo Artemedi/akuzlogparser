@@ -589,11 +589,15 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
         use_derived_spool = os.environ.get('AKUZ_PHASE9_DERIVED_SPOOL', '1').strip().lower() not in ('0', 'false', 'no', 'off')
     process_requested = _phase11_process_requested()
     delta_resume_requested = _phase12_delta_requested()
+    phase15_requested = _phase15_parallel_requested()
+    phase15_allowed = _phase15_parallel_allowed(
+        phase15_requested, selections, gen_fn,
+        delta_requested=delta_resume_requested)
     with state.lock:
         source = state.source
         local_path = state.local_path
     process_allowed = (
-        not delta_resume_requested
+        not delta_resume_requested and not phase15_allowed
         and _phase11_process_allowed(
             process_requested, source, selections, fetch_fn, gen_fn))
 
@@ -604,6 +608,12 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
             folder = stack.enter_context(tempfile.TemporaryDirectory(
                 prefix='akuz-phase9-derived-', dir=root/'cache'))
             spool_root = Path(folder)
+
+        phase15_root = None
+        if phase15_allowed:
+            folder = stack.enter_context(tempfile.TemporaryDirectory(
+                prefix='akuz-phase15-reports-', dir=root/'cache'))
+            phase15_root = Path(folder)
 
         process_prefetch_root = None
         phase11_cfg = None
@@ -639,12 +649,13 @@ def _perform_build_transaction_body(root: Path, state: State, selections,
         return _perform_build(
             root, state, selections, fetch_fn, gen_fn, refresh_remote,
             spool_root, process_prefetch_root,
-            delta_resume_requested=delta_resume_requested)
+            delta_resume_requested=delta_resume_requested,
+            phase15_root=phase15_root)
 
 
 def _perform_build(root, state, selections, fetch_fn, gen_fn,
                    refresh_remote, spool_root, process_prefetch_root=None,
-                   delta_resume_requested=False):
+                   delta_resume_requested=False, phase15_root=None):
     build_started = perf_counter()
     with state.lock:
         source = state.source
