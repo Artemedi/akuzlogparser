@@ -3611,11 +3611,27 @@ Python 3.9 source installs, the implementation falls back to stdlib. Portable
 builds explicitly bundle `orjson==3.12.0` and their frozen self-test executes
 the native encoder and checks raw-shard byte parity.
 
-Version was advanced to **4.9.0**. Release-candidate runtime commit
+Version was advanced to **4.9.0**. Release runtime commit
 `e7d15d725c33c24397a32a32ab51eca72175eb56` contains the finalized production
-code/source compatibility fix. Package/document workflow continued to
-`188bf762fcf8dd4adc804b69f82af5c661250cef` and later CI-only commits.
-At the time of this note the mandatory DBA-008D exact Windows regression,
-production-switch real A/B and frozen portable build/smoke are queued but
-cannot execute while the self-hosted runner is offline. No public GitHub
-Release has been changed.
+code/source compatibility fix. Package/document/CI-only commits then advanced
+`main` without further runtime changes.
+
+Final release evidence:
+- production-switch real A/B #36704101732 — **PASS**;
+- exact Windows regression #36704101778 — **PASS**;
+- RC portable build/smoke #36705292177 — **PASS** on
+  `b419d537d60cde4a37be37253a7276ec56a50bab`;
+- exact release rebuild and publish #36719674493 — **PASS**;
+- final release rebuild: **376 Python tests PASS, 3 skipped**;
+- browser regression: **9/9 PASS**;
+- frozen portable smoke: **PASS**;
+- packaged `orjson` hook/import path: **PASS**;
+- `BUILD_INFO.json`: version 4.9.0 and exact target SHA **PASS**;
+- `SHA256SUMS.txt`: EXE and ZIP verification **PASS**;
+- public release verification: **PASS**.
+
+GitHub Release **v4.9.0** was published on 2026-09-30 and targets
+`b419d537d60cde4a37be37253a7276ec56a50bab`. Published assets are:
+`AKUZLogExplorer.exe`, `AKUZLogExplorer-windows-x64.zip`, and
+`SHA256SUMS.txt`. No raw AKUZ logs, filled credentials, working reports or
+private diagnostics were published.
