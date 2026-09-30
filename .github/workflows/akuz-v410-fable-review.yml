@@ -14,7 +14,7 @@ jobs:
   review:
     name: Independent Claude Fable release review
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         shell: pwsh
@@ -28,7 +28,7 @@ jobs:
       - name: Run independent Fable review
         env:
           PYTHONUTF8: '1'
-          FABLE_ENV_FILE: 'E:\Software\Project\LogAkusExplorer\secrets\fable.env'
+          PYTHONDONTWRITEBYTECODE: '1'
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
