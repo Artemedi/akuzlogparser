@@ -4,8 +4,12 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 from pathlib import Path
+import sys
 import tempfile
 from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 import akuz_app
 from akuz_app import State, perform_build_current, perform_clear, perform_list
