@@ -1,100 +1,102 @@
-# AKUZ Log Explorer 4.8.0 — Windows 10/11 x64 portable
+# AKUZ Log Explorer 4.9.0 — Windows 10/11 x64 portable
 
-## Главное в v4.8.0
+## Главное в v4.9.0
 
-### Быстрее обработка нескольких SSH-журналов
+### Быстрее аналитика ошибок — Phase 13
 
-На Windows при выборе двух и более файлов источника Linux/SSH Explorer теперь
-по умолчанию получает следующий snapshot отдельным process одновременно с
-разбором уже скачанного файла. Одновременно работает не более одного
-fetch-child. Local и SMB/UNC источники не менялись.
+Индекс аналитики теперь использует уже опубликованные и проверенные
+`errorFingerprints` из каталога отчёта как отрицательный фильтр. Положительные
+события по-прежнему перечитываются из raw-shard и повторно проходят
+`recognize_error`, поэтому семантика распознавания не заменена доверием к
+кэшу.
 
-На финальном hardened A/B после version bump, Fable ACCEPT и всех lifecycle
-исправлений, на наборе из 857,563,363 байт:
+На default-path real A/B для 23/24/25 сентября:
 
-- последовательный normal-app: **356.468 с**;
-- process-prefetch: **325.070 с**;
-- wall уменьшился примерно на **8.8%**;
-- total CPU: **256.734 → 251.703 с** (~2.0% ниже);
-- peak private memory: **988,049,408 → 1,077,604,352 B** (~9.1% выше);
-- inventory parity — PASS;
-- analytics SQL parity — PASS;
-- analytics exports parity — PASS;
-- workspace cleanup / privacy gate — PASS.
+- wall: **39.308 → 25.178 с** (**-35.95%**);
+- SQL/export и semantic parity — PASS;
+- inventory — PASS.
 
-Actions: #36540421782; numeric audit: #36540580395.
-
-Это измерение конкретной рабочей нагрузки DBA-008D, а не гарантированный
-процент ускорения на любом сервере.
-
-### Fail-closed Windows process lifecycle
-
-Дочерний процесс создаётся приостановленным, помещается в Windows
-`KILL_ON_JOB_CLOSE` Job Object **до начала исполнения**, затем запускается.
-Это закрывает окно, в котором child мог пережить аварийное завершение parent.
-
-IPC — ограниченный JSON. Parent заново проверяет скачанный snapshot полным
-SHA-256, размером и exact Windows file/parent identity. Hashing, promotion и
-удаление owned temp используют reparse-safe HANDLE semantics.
-
-Обычная ошибка предзагрузки возвращает приложение к прежней
-последовательной загрузке. Если невозможно доказать безопасное завершение
-child/Job Object или корректную очистку, Explorer завершает операцию с
-ошибкой вместо запуска второго writer.
-
-Для немедленного отключения оптимизации:
-
+Rollback:
 ```powershell
-$env:AKUZ_PHASE11_PROCESS_PREFETCH = '0'
+$env:AKUZ_PHASE13_CATALOG_ERROR_INDEX = '0'
 .\AKUZLogExplorer.exe
 ```
 
-Удалите переменную, чтобы вернуть default-on режим.
+### Быстрее сериализация raw-shards — Phase 14
 
-### Cache / crash / promotion
+Portable включает `orjson 3.12.0` и использует его **только** для массивов
+строк `raw_*.js`. Каталог `data/catalog.js` остаётся на штатном
+`json.dumps`.
 
-Prefetch child не пишет inventory. Parent принимает только полностью
-проверенный snapshot. Promotion — atomic no-overwrite hard-link после
-durable inventory intent. Внешний файл назначения не перезаписывается.
+Replicated B/C/C/B/B/C benchmark на 956,307,242 байт / 4 отчётах /
+1,315,476 событиях:
 
-Restart после crash проверяет warm download по существованию файла, точному
-размеру и полному SHA-256. Отсутствующий final или same-size внешний файл с
-неверным SHA не считается валидным кэшем.
+- wall: **195.911 → 185.269 с** (**-5.43%**);
+- CPU: **187.281 → 177.344 с** (**-5.31%**);
+- generation: **161.769 → 151.682 с** (**-6.24%**);
+- измеренное JSON-время: **16.852 → 8.409 с** (**-50.10%**);
+- полный producer manifest — byte-identical;
+- analytics exact/semantic parity — PASS;
+- cached downloads — unchanged.
 
-Unsupported/cross-volume hard-link может откатить только оптимизацию и
-продолжить serial path. Permission, disk-full и другие реальные I/O ошибки
-не маскируются повторной загрузкой.
+Для немедленного возврата к stdlib:
 
-### Независимое ревью и проверки
+```powershell
+$env:AKUZ_PHASE14_RAW_ORJSON = '0'
+.\AKUZLogExplorer.exe
+```
 
-Финальное независимое Claude Fable review:
-Actions #36538397765 — **LIFECYCLE=ACCEPT,
-TRANSACTION=ACCEPT, OVERALL=ACCEPT**.
+При запуске из исходников Python 3.9 остаётся поддержан: `orjson` требует
+Python >=3.10, поэтому на Python 3.9 Explorer автоматически использует прежний
+stdlib encoder. Portable собирается на Python 3.12 и содержит ускоритель.
 
-До version bump полный Windows suite:
-Actions #36537874019 — **318 Python tests PASS, 3 skips**,
-browser controls PASS, `git diff --check` PASS.
+### Phase 12 delta/resume остаётся opt-in
 
-Финальные pre-release gates уже пройдены:
-- exact versioned SHA regression #36539318506 — 318 Python tests PASS,
-  3 skips, browser controls и diff-check PASS;
-- real normal-app A/B #36540421782 — PASS;
-- numeric evidence audit #36540580395 — PASS;
-- frozen portable atomic Job-bound spawn/self-test + packaged smoke
-  #36540426274 — PASS.
-BUILD_INFO и SHA256SUMS повторно проверяются самим release workflow
-непосредственно перед публикацией.
+Режим докачивания выросшего Linux/SSH журнала включается только явно:
 
-## Остальное поведение
+```powershell
+$env:AKUZ_PHASE12_DELTA_RESUME = '1'
+.\AKUZLogExplorer.exe
+```
 
+Принятый snapshot требует доказанный предыдущий SHA/identity и полный SHA-256
+удалённого принятого префикса. При обычной ошибке доказательства Explorer
+возвращается к полной bounded-загрузке; небезопасные коллизии остаются
+fail-closed. Пока Phase 12 включён, Phase 11 process-prefetch намеренно
+отключается.
+
+Измерения принятой Phase 12 матрицы:
+
+- transport A/B: **120.067 → 7.215 с** median (**-93.99% wall**);
+- normal-app integration: **265.223 → 92.686 с** (**-65.05% wall**);
+- snapshot/report/semantic SQL/export parity — PASS.
+
+Default остаётся OFF.
+
+## Сохранено из v4.8.0
+
+- Windows SSH process-prefetch Phase 11 остаётся default-on для двух и более
+  SSH-файлов; rollback: `AKUZ_PHASE11_PROCESS_PREFETCH=0`.
 - Phase 9 ephemeral derived spool остаётся production-архитектурой combined.
-  Persistent B-lite metadata не создаётся.
-- SSH compression остаётся `compression=false` по умолчанию и включается
-  только явно.
-- Hotfix v4.7.1 status-polling сохранён: transient `Failed to fetch` не
-  останавливает UI polling, а POST-команда build автоматически не повторяется.
-- Старые reports, inventory, downloads, analytics и ConnectConf.cfg
-  совместимы.
+- SSH compression остаётся `compression=false` по умолчанию.
+- Transient `Failed to fetch` в status polling не оставляет UI навсегда
+  отключённым.
+- Старые reports, inventory, downloads, analytics и `ConnectConf.cfg`
+  остаются совместимыми.
+
+## Release-candidate gates
+
+Перед публикацией v4.9.0 выполняются на exact versioned SHA:
+
+- полный Windows Python + browser regression;
+- production stdlib/orjson real B/C/C/B/B/C на фиксированных snapshot;
+- PyInstaller Windows x64 build;
+- frozen `--self-test` с фактическим импортом/исполнением orjson;
+- packaged offline smoke без Python/pip в child PATH;
+- проверка `BUILD_INFO.json` и `SHA256SUMS.txt`.
+
+Публичный GitHub Release не заменяется автоматически: публикация выполняется
+отдельно после финального gate.
 
 ## Обновление
 
@@ -102,8 +104,8 @@ BUILD_INFO и SHA256SUMS повторно проверяются самим rele
 заменить `AKUZLogExplorer.exe`. Сохраните свой `ConnectConf.cfg`,
 `downloads/`, `reports/`, `cache/` и `data/`.
 
-В поставку не входят заполненный конфиг, реальные журналы, медицинские
-данные, рабочие отчёты или private diagnostics.
+В поставку не входят заполненный конфиг, реальные журналы, медицинские данные,
+рабочие отчёты или private diagnostics.
 
 ## Файлы выпуска
 
@@ -111,5 +113,5 @@ BUILD_INFO и SHA256SUMS повторно проверяются самим rele
 - `AKUZLogExplorer-windows-x64.zip`
 - `SHA256SUMS.txt`
 
-Архив содержит `BUILD_INFO.json` с точным Git SHA сборки. EXE не подписан
-Authenticode.
+Архив содержит `BUILD_INFO.json` с точным Git SHA сборки и версиями Python/
+пакетов. EXE не подписан Authenticode.
