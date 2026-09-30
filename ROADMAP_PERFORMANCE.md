@@ -235,10 +235,10 @@ Phase 13 is closed; subsequent work begins with P14-00 measurement only.
 
 **После релиза:** сначала **Phase 16** (cache correctness / mixed-cache / stale-session / UI-связность и UX-метрики), затем **Phase 15** (concurrency / multiprocessing research). Phase 15 не должен задерживать текущий выпуск ради неопределённого дополнительного выигрыша CPU.
 
-### Phase 15 — concurrency / multiprocessing [POST-RELEASE, после Phase 16]
-1. После Phase 9 и A/B I/O-измерений проверить, остался ли CPU bottleneck; сравнить процессы против IPC/serialization/memory, Windows spawn и PyInstaller.
-2. Не параллелить сериализацию или SQL без понимания ownership, source order, SHA и rollback.
-3. При отсутствии выигрыша или удвоении памяти оставить однопроцессную архитектуру.
+### Phase 15 — concurrency / multiprocessing [DONE POST-RELEASE / v4.10.0]
+1. **Production opt-in — ACCEPTED.** Windows-only, 2+ selections, built-in `generate`, Phase 12 delta disabled. Parent stages work through two worker processes, validates outputs, then publishes deterministically. Rollback/default behavior: `AKUZ_PHASE15_PARALLEL_GENERATION` absent/false keeps the serial path.
+2. **Real normal-app B/C/C/B/B/C — PASS.** 956,307,242 source bytes / 4 reports / 657,738 events: wall median **192.513628 -> 165.654935 s (-13.952%)**; CPU **194.078125 -> 197.843750 s (+1.94%)**; peak private bytes **1,562,357,760 -> 1,563,148,288 (+0.051%)**. Exact output, analytics, downloads invariants PASS; no network during trials, no raw payload retention, no Release mutation.
+3. **Release policy for v4.10.0:** accepted as **default-OFF opt-in**. Phase 11 process-prefetch is disabled while Phase 15 is active; Phase 12 delta and Phase 15 are not combined. Public v4.9.0 remains unchanged.
 
 ### Phase 16 — оптимизация локального кэша и UI-связности [DONE POST-RELEASE]
 1. **Mixed/per-folder cache — PASS.** Исправлен `clear_cache`: он удаляет из inventory только snapshot, доказанно принадлежащие текущим разрешённым cache roots. Старый/custom `local_dest` больше не превращается в неиндексированный orphan; retained entries явно считаются/показываются. Missing snapshot внутри разрешённого root безопасно удаляется только из индекса. Synthetic Windows gate #36727761073 PASS.
