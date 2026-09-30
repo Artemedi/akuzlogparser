@@ -3531,16 +3531,51 @@ The first real same-snapshot pair completed:
 These performance numbers are only directional because parity failed before a
 replicated A/B could complete. Safe structural diagnostics proved the first
 exact producer-manifest mismatch at:
-`v4_20990101_000004_00000004:data/catalog.js`
-(the deterministic combined report catalog). No raw text or digest was logged.
+`v4_20990101_000004_00000004:data/catalog.js`. No raw text or digest was logged.
+A later stdlib-only repeat control proved that this combined catalog was **not**
+byte-deterministic in the benchmark because its `meta.source` included the
+random `akuz-v4-merge-*.jsonl` scratch basename.
 
-Decision: **REJECTED for full-report encoding**. Exact-byte compatibility is
-mandatory and overrides the apparent speedup. The failure is consistent with
-the fact that stdlib and orjson may render some semantically equal numeric
-values with different JSON bytes. No production serializer or Release was
-changed.
+Decision at the time was to stop the full-report candidate. This parity result
+is now **superseded / inconclusive**, not valid rejection evidence: exact SHA
+`518b1d61acef1327e89687b51c1aaa88a2f479d1`, stdlib-only repeat Actions
+#36677796060 regenerated the same cached snapshots twice and reproduced the
+same combined `data/catalog.js` mismatch with no candidate enabled. Static
+inspection identified the source: `perform_build()` creates a random
+`akuz-v4-merge-*.jsonl` scratch file and `generate()` stores `source.name` in
+`catalog.meta.source`. No production serializer or Release was changed.
 
 Follow-up P14-02 is a new, narrower hypothesis: use orjson only for raw shards,
 which are top-level string arrays and accounted for 13.154682 s of the P14-00
 17.064567 s JSON cost, while retaining stdlib for catalog serialization. It
 must pass complete producer-manifest parity and replicated same-snapshot A/B.
+
+
+## Phase 14 baseline-repeat determinism control (2026-09-30)
+
+Exact SHA `518b1d61acef1327e89687b51c1aaa88a2f479d1`, Actions
+#36677796060. This diagnostic deliberately ran **stdlib vs stdlib** on the same
+three cached snapshots, with deterministic report IDs and no candidate encoder.
+
+Trial 1: wall/CPU/generation/JSON **198.395068 / 190.015625 / 164.779 /
+17.148002 s**.
+
+Trial 2: wall/CPU/generation/JSON **194.874681 / 187.265625 / 161.235 /
+16.818249 s**.
+
+Both produced **1,315,476 events**, **4 reports**, and **2,275,367,801 B**.
+Nevertheless the producer manifest differed at the same path previously blamed
+on P14-01/P14-02:
+`v4_20990101_000004_00000004:data/catalog.js`.
+
+Root cause is benchmark nondeterminism, not an encoder result. The normal
+combined path creates `NamedTemporaryFile(prefix="akuz-v4-merge-")`; that
+random basename reaches `generate(raw=...)`, and `generate()` writes
+`raw.name` into `catalog.meta.source`. Therefore repeated identical builds
+cannot have an identical combined catalog unless the benchmark stabilizes this
+pre-existing scratch metadata.
+
+Correction policy: stabilize **only the benchmark's combined scratch basename**
+while preserving the production path unchanged. Then rerun P14-02
+B/C/C/B/B/C. Previous P14-01/P14-02 speed samples remain directional only and
+their parity failures must not be treated as candidate failures.
