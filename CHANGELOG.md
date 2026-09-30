@@ -1,5 +1,13 @@
 # История изменений AKUZ Log Explorer
 
+## 4.10.0 — 2026-09-30
+
+- **Phase 16 cache/UI hardening accepted.** `clear_cache` now removes/unindexes only entries proven inside currently allowed cache roots, retains historical/custom-root entries safely, and fails closed on symlink/external/unproven paths. Browser builds are bound to `listing_revision`, so stale tabs are rejected with HTTP 409 before work starts; report history identity is `host + remote_path`.
+- **Phase 15 Windows parallel report generation accepted as default-OFF opt-in.** With `AKUZ_PHASE15_PARALLEL_GENERATION=1`, Windows builds with 2+ selections, the built-in generator, and Phase 12 delta disabled can stage report generation through two worker processes while the parent validates and publishes deterministically. Real normal-app B/C/C/B/B/C on 956,307,242 source bytes / 4 reports: median wall **192.514 -> 165.655 s (-13.95%)**, CPU **+1.94%**, peak private memory **+0.051%**; exact report parity, analytics parity, downloads invariants and no-network/no-raw-retention gates PASS.
+- Phase 15 remains **opt-in / default OFF** for this release. Phase 11 process-prefetch is disabled while Phase 15 is active to avoid competing process schedulers; Phase 12 delta and Phase 15 are not enabled together.
+- Post-v4.9.0 cleanup removed obsolete phase branches and experimental workflows. Repository branch set is reduced to `main`; permanent CI is reduced to Windows regression and portable build.
+- v4.9.0 remains immutable and unchanged. v4.10.0 is the release line for accepted Phase 15/16 work.
+
 ## 4.9.0 — 2026-09-30
 
 - **Phase 13 analytics optimization accepted.** Catalog `errorFingerprints`
