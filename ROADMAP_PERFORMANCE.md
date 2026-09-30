@@ -230,22 +230,25 @@ Phase 13 is closed; subsequent work begins with P14-00 measurement only.
 5. Измерить время первого открытия и интерактивности браузера для 657 738 событий, фильтры, даты, повторяющиеся ошибки, графики, память вкладки. Lazy loading/виртуализация — отдельный проект с проверкой совместимости standalone/offline UI.
 6. Предыдущий `str.translate` вместо JS escaping не подтвердил устойчивый выигрыш; не повторять без новой гипотезы.
 
-### Текущая граница релиза и post-release порядок
-**v4.9.0 опубликован 2026-09-30.** Production-switch A/B, portable build/smoke, final Windows regression и release verification завершены успешно; Phase 15 и Phase 16 не входили в блокирующий release scope.
 
-**После релиза:** сначала **Phase 16** (cache correctness / mixed-cache / stale-session / UI-связность и UX-метрики), затем **Phase 15** (concurrency / multiprocessing research). Phase 15 не должен задерживать текущий выпуск ради неопределённого дополнительного выигрыша CPU.
+### Текущая граница релиза
 
-### Phase 15 — concurrency / multiprocessing [DONE POST-RELEASE / v4.10.0]
+**v4.9.0 опубликован 2026-09-30** и остаётся неизменяемым baseline для Phase 13/14.
+
+**v4.10.0 объединяет два post-v4.9 workstream:** Phase 16 cache/UI hardening и Phase 15 Windows parallel generation. Phase 16 входит в обычный production path. Phase 15 принят только как **default-OFF opt-in** `AKUZ_PHASE15_PARALLEL_GENERATION=1`; Phase 11 process-prefetch отключается, пока Phase 15 активен, а Phase 12 delta с ним не совмещается.
+
+Независимый Fable review для v4.10.0 был попыткой дополнительного, но не обязательного gate. Первая одноразовая попытка дошла до API, но не дала непустого review; повторный rerun после уничтожения ephemeral private key закономерно остановился с `FABLE_EPHEMERAL_PRIVATE_KEY=MISSING`. Для v4.10.0 **не заявлять Fable ACCEPT**. Владелец разрешил завершить релиз по executable evidence: final exact-SHA Windows regression + portable build/smoke + BUILD_INFO/SHA256 verification.
+
+### Phase 15 — concurrency / multiprocessing [DONE / v4.10.0 OPT-IN]
 1. **Production opt-in — ACCEPTED.** Windows-only, 2+ selections, built-in `generate`, Phase 12 delta disabled. Parent stages work through two worker processes, validates outputs, then publishes deterministically. Rollback/default behavior: `AKUZ_PHASE15_PARALLEL_GENERATION` absent/false keeps the serial path.
-2. **Real normal-app B/C/C/B/B/C — PASS.** 956,307,242 source bytes / 4 reports / 657,738 events: wall median **192.513628 -> 165.654935 s (-13.952%)**; CPU **194.078125 -> 197.843750 s (+1.94%)**; peak private bytes **1,562,357,760 -> 1,563,148,288 (+0.051%)**. Exact output, analytics, downloads invariants PASS; no network during trials, no raw payload retention, no Release mutation.
-3. **Release policy for v4.10.0:** accepted as **default-OFF opt-in**. Phase 11 process-prefetch is disabled while Phase 15 is active; Phase 12 delta and Phase 15 are not combined. Public v4.9.0 remains unchanged.
+2. **Real normal-app B/C/C/B/B/C — PASS.** 956,307,242 source bytes / 4 reports / 657,738 events: wall median **192.513628 -> 165.654935 s (-13.952%)**; CPU **194.078125 -> 197.843750 s (+1.94%)**; peak private bytes **1,562,357,760 -> 1,563,148,288 (+0.051%)**. Exact output, analytics, downloads invariants PASS; no network during trials, no raw payload retention.
+3. **Release policy:** default OFF. Phase 11 process-prefetch is disabled while Phase 15 is active; Phase 12 delta and Phase 15 are not combined.
 
-### Phase 16 — оптимизация локального кэша и UI-связности [DONE POST-RELEASE]
-1. **Mixed/per-folder cache — PASS.** Исправлен `clear_cache`: он удаляет из inventory только snapshot, доказанно принадлежащие текущим разрешённым cache roots. Старый/custom `local_dest` больше не превращается в неиндексированный orphan; retained entries явно считаются/показываются. Missing snapshot внутри разрешённого root безопасно удаляется только из индекса. Synthetic Windows gate #36727761073 PASS.
-2. **Stale browser / source identity — PASS.** `listing_revision` привязывает build к конкретной серверной версии списка; старая вкладка получает 409 после смены списка другой вкладкой. История single-report теперь группируется по `host + remote_path`, а не по операторской дате; разные host/path и combined остаются независимыми. Legacy/current v4 entries без новых integrity/fingerprint полей продолжают safe fallback/reuse; unknown future inventory version fail-closed.
-3. **Real cache smoke — PASS.** Exact `5dbeaeed`, Actions #36728152329, disposable real `20260923_server.log`: `downloads_removed=1`, `downloads_retained=0`, `reports_preserved=1`, preserved report reused after clear without refetch, stale listing revision invalidated. Raw payload/artifact upload/public Release mutation — NO.
-4. **UX baseline — PASS / measurement only.** Exact `7115cf8`, Actions #36727761073 executes production `common.js/index.js/errors.js` in Node VM at 657,738 events / 5,000 groups / 100,000 detail items: report initial JS CPU ~419.954 ms, quick search ~481.472 ms, component filter ~208.942 ms, analytics detail/chart ~67.756 ms, group search ~2.297 ms. This excludes disk read, JSON parse and browser layout/paint, so it is not claimed as full browser wall time. No JS hot-loop blocker justified a virtualized-UI rewrite.
-5. **Release scope:** v4.9.0 remains unchanged. Phase 16 is post-release mainline hardening; next research phase is Phase 15 multiprocessing.
+### Phase 16 — cache correctness / stale-session / UI connectivity [DONE / v4.10.0]
+1. **Mixed/per-folder cache — PASS.** `clear_cache` removes/unindexes only snapshots proven inside allowed current cache roots. Legacy/custom/external/unproven entries are retained safely; symlink/reparse cases fail closed.
+2. **Stale browser / source identity — PASS.** `listing_revision` binds a build request to the server-side listing revision; stale tabs receive HTTP 409 before work starts. Report history identity is `host + remote_path`.
+3. **Real cache smoke — PASS.** Exact `5dbeaeed`, Actions #36728152329: disposable real `20260923_server.log`, `downloads_removed=1`, `downloads_retained=0`, `reports_preserved=1`; preserved report reused after clear without refetch; stale listing invalidated.
+4. **UX baseline — measurement only.** Node VM measurements did not justify a browser virtualization rewrite; disk/JSON parse/layout/paint remain outside that microbenchmark.
 
 ## 9. Выпуск и фиксирование результатов каждого шага
 

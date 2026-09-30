@@ -1,12 +1,12 @@
-# AKUZ Log Explorer 4.7.0
+# AKUZ Log Explorer 4.10.0
 
 Локальное приложение для загрузки и разбора файловых журналов АКУЗ: HTML-отчёты, поиск событий, повторяющиеся ошибки и графики по дням/часам. Источники — файловые .log приложения АКУЗ по Linux/SSH, Windows/SMB или из локального файла/каталога. Системные журналы и VCLib в проект не входят.
 
 ## Запуск без установки Python
 
-Скачайте **AKUZLogExplorer-windows-x64.zip** из [релиза v4.7.0](https://github.com/Artemedi/akuzlogparser/releases/tag/v4.7.0), распакуйте его в доступную для записи папку и запустите `AKUZLogExplorer.exe`. `ConnectConf.cfg` заполняется **только для SSH/SMB**; локальный `.log` или каталог можно выбрать без конфигурации.
+Скачайте **AKUZLogExplorer-windows-x64.zip** из [релиза v4.10.0](https://github.com/Artemedi/akuzlogparser/releases/tag/v4.10.0), распакуйте его в доступную для записи папку и запустите `AKUZLogExplorer.exe`. `ConnectConf.cfg` заполняется **только для SSH/SMB**; локальный `.log` или каталог можно выбрать без конфигурации.
 
-Portable-версия для Windows 10/11 x64 включает Python, Paramiko и криптографические библиотеки. Дополнительно скачивать зависимости не нужно. Откроется браузер с `http://127.0.0.1:8765/`. Доступ к серверу требуется только для получения новых журналов. [Инструкция portable-версии](README_PORTABLE.md).
+Portable-версия для Windows 10/11 x64 включает Python, Paramiko, orjson и криптографические библиотеки. Дополнительно скачивать зависимости не нужно. Откроется браузер с `http://127.0.0.1:8765/`. Доступ к серверу требуется только для получения новых журналов. [Инструкция portable-версии](README_PORTABLE.md).
 
 ## Основные возможности
 
@@ -41,13 +41,18 @@ Portable-версия для Windows 10/11 x64 включает Python, Paramiko
 
 ## Как выяснить причину долгого разбора
 
-Запустите разбор в v4.7.0 и откройте **`diagnostics/performance.txt` рядом с EXE**. Сопоставьте `elapsed_s` для `source.fetch` (получение), `generate.parse` (разбор и запись частей), `generate.catalog` (индекс HTML), `combined.stream` (потоковая общая выборка внутри `report.generate`) и `analytics.ingest`/`analytics.export` (аналитика). Во время большого разбора появляются отметки прогресса каждые 50 000 событий. Остановившийся `status=start` без `done` означает незавершённый этап, а не обязательно ошибку. См. [инструкцию по диагностике](README_START_HERE.md#диагностика-медленной-обработки).
+Запустите разбор в v4.10.0 и откройте **`diagnostics/performance.txt` рядом с EXE**. Сопоставьте `elapsed_s` для `source.fetch` (получение), `generate.parse` (разбор и запись частей), `generate.catalog` (индекс HTML), `combined.stream` (потоковая общая выборка внутри `report.generate`) и `analytics.ingest`/`analytics.export` (аналитика). Во время большого разбора появляются отметки прогресса каждые 50 000 событий. Остановившийся `status=start` без `done` означает незавершённый этап, а не обязательно ошибку. См. [инструкцию по диагностике](README_START_HERE.md#диагностика-медленной-обработки).
 
-## Что изменилось в v4.7.0
 
-Поверх оптимизаций v4.6.0 normal-app получил временный derived spool для свежих отдельных отчётов: при построении общей выборки уже вычисленные классификация/длительности/error fingerprint могут безопасно переиспользоваться в рамках **той же операции**, после чего spool удаляется. Добавлены inventory-lock, single-instance guard и publication recovery для атомарного кэша/отчётов. Для локального источника доступна opt-in полная проверка `AKUZ_VERIFY_LOCAL_SOURCE_SHA=1`; по умолчанию быстрый warm-cache не выполняет дополнительное чтение исходника. Постоянный B-lite sidecar и экспериментальный process-overlap SSH в runtime не включены.
+## Что изменилось в v4.10.0
 
-Реальный replicated A/B SSH compression на журналах 23/24/25 Sep подтвердил сильное сокращение времени передачи и сетевого RX, но существенно увеличил CPU `sshd`, поэтому `compression=false` остаётся безопасным default. Подробные цифры, ограничения и exact-SHA проверки — [PERFORMANCE_NOTES.md](PERFORMANCE_NOTES.md).
+- **Phase 16 — cache/UI hardening.** Очистка кэша удаляет только доказанно принадлежащие разрешённым cache roots снимки, сохраняет безопасные custom/legacy записи и не следует за symlink/external путями. Build привязан к `listing_revision`, поэтому устаревшая вкладка получает HTTP 409 до начала работы. История источника группируется по `host + remote_path`.
+- **Phase 15 — параллельная генерация отчётов.** На Windows доступен default-OFF режим `AKUZ_PHASE15_PARALLEL_GENERATION=1`: при 2+ источниках parent запускает до двух worker-процессов, валидирует staging и публикует результаты детерминированно. На принятом real B/C/C/B/B/C median wall: **192.514 → 165.655 с (-13.95%)**; exact report/analytics/downloads parity — PASS. Пока Phase 15 активен, Phase 11 process-prefetch отключается; Phase 12 delta одновременно не используется.
+- Из **v4.9.0** сохранены Phase 13 (ускорение analytics ingest через integrity-proven catalog negative filter) и Phase 14 (orjson только для `raw_*.js`, rollback `AKUZ_PHASE14_RAW_ORJSON=0`). Phase 12 delta/resume остаётся отдельным opt-in `AKUZ_PHASE12_DELTA_RESUME=1`.
+- Из **v4.8.0** сохранён Windows SSH process-prefetch Phase 11 для двух и более SSH-файлов; rollback: `AKUZ_PHASE11_PROCESS_PREFETCH=0`. SSH compression остаётся отдельным opt-in и по умолчанию выключена.
+- Phase 9 ephemeral derived spool, transaction/inventory locking, publication recovery и source-identity guards остаются базовой архитектурой кэша и отчётов.
+
+Подробные gates, exact-SHA результаты, ограничения и отклонённые эксперименты: [ROADMAP_PERFORMANCE.md](ROADMAP_PERFORMANCE.md) и [PERFORMANCE_NOTES.md](PERFORMANCE_NOTES.md).
 
 ## Запуск из исходников
 
@@ -88,11 +93,11 @@ python scripts/build_portable.py
 python scripts/smoke_portable.py dist/AKUZLogExplorer-windows-x64.zip
 ```
 
-Workflow **Windows portable** запускается вручную в GitHub Actions (не автоматически при `push`). Он тестирует приложение, собирает EXE, проверяет готовый ZIP и публикует артефакт `AKUZLogExplorer-windows-x64`. Если включить `draft_release`, вместо артефакта создаётся черновик релиза с EXE, ZIP и SHA-256; этот режим не использует квоту артефактов Actions. `BUILD_INFO.json` внутри ZIP указывает версию, коммит и зависимости сборки. [Архитектура и выпуск](README_PROJECT.md).
+Workflow **Windows portable** запускается автоматически при релевантных изменениях в `main` и может быть запущен вручную через GitHub Actions. Он тестирует приложение, собирает EXE и проверяет готовый ZIP; публикация в draft release выполняется только при явном `draft_release`. Если включить `draft_release`, вместо артефакта создаётся черновик релиза с EXE, ZIP и SHA-256; этот режим не использует квоту артефактов Actions. `BUILD_INFO.json` внутри ZIP указывает версию, коммит и зависимости сборки. [Архитектура и выпуск](README_PROJECT.md).
 
 ## Ограничения
 
-Докачивания только новых байтов и сжатия SSH-потока пока нет. Снимок растущего файла ограничен размером, но не является транзакционным. Распознавание ошибок основано на текстовых признаках; группировка не устанавливает причину сбоя. [Методика аналитики](README_ANALYTICS.md).
+Phase 12 delta/resume и Phase 15 parallel generation доступны только как явные opt-in режимы; SSH compression также не включается автоматически. При сомнении production-путь предпочитает fail-closed/fallback к проверенному последовательному поведению. Распознавание ошибок основано на текстовых признаках; группировка не устанавливает причину сбоя. [Методика аналитики](README_ANALYTICS.md).
 
 ## Документация
 

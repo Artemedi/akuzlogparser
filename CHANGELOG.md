@@ -7,6 +7,7 @@
 - Phase 15 remains **opt-in / default OFF** for this release. Phase 11 process-prefetch is disabled while Phase 15 is active to avoid competing process schedulers; Phase 12 delta and Phase 15 are not enabled together.
 - Post-v4.9.0 cleanup removed obsolete phase branches and experimental workflows. Repository branch set is reduced to `main`; permanent CI is reduced to Windows regression and portable build.
 - v4.9.0 remains immutable and unchanged. v4.10.0 is the release line for accepted Phase 15/16 work.
+- Optional independent Fable review for the v4.10.0 candidate did not produce a usable ACCEPT verdict and is **not claimed as a passed gate**. Release confidence is based on the executable Phase 15/16 evidence plus final exact-SHA Windows regression and portable build/smoke.
 
 ## 4.9.0 — 2026-09-30
 
