@@ -9,6 +9,10 @@ on:
       - 'scripts/**'
       - 'tests/**'
       - 'requirements*.txt'
+      - 'common.js'
+      - 'errors.js'
+      - 'index.js'
+      - 'app_controls.js'
   workflow_dispatch:
 
 permissions:
