@@ -86,6 +86,25 @@ def _num(row, key):
 
 
 _STDLIB_JSON_COMPACT = akuz_html_explorer._json_compact
+_ORIGINAL_NAMED_TEMPFILE = tempfile.NamedTemporaryFile
+
+
+def _deterministic_merge_tempfile(*args, **kwargs):
+    """Stabilize only the combined scratch basename used in report metadata."""
+    if kwargs.get("prefix") != "akuz-v4-merge-":
+        return _ORIGINAL_NAMED_TEMPFILE(*args, **kwargs)
+    directory = Path(kwargs.get("dir") or ".")
+    suffix = kwargs.get("suffix", "")
+    path = directory / ("akuz-v4-merge-phase14-fixed" + suffix)
+    path.unlink(missing_ok=True)
+    mode = kwargs.get("mode", "w+b")
+    if "b" in mode:
+        return path.open(mode)
+    return path.open(
+        mode,
+        encoding=kwargs.get("encoding"),
+        newline=kwargs.get("newline"),
+    )
 
 
 def _raw_orjson_compact(value):
@@ -226,9 +245,9 @@ def _setup_seed(root: Path, cfg):
          patch.object(akuz_app, "source_config", return_value=cfg):
         perform_build_current(root, state, selected)
     if state.result["analytics_warning"]:
-        raise AssertionError("Analytics warning during P14-01 seed")
+        raise AssertionError("Analytics warning during P14-02 seed")
     if state.result["active_snapshots"]:
-        raise AssertionError("Active snapshot during P14-01 seed")
+        raise AssertionError("Active snapshot during P14-02 seed")
     store = load_store(root)
     if len(store["downloads"]) != 3 or len(store["reports"]) != 4:
         raise AssertionError("Expected three snapshots and four seed reports")
@@ -253,6 +272,9 @@ def _run_trial(root: Path, cfg, state: State, selected, mode: str):
         for index in range(1, 5)
     ]
     with encoder_patch, \
+         patch.object(
+             akuz_app.tempfile, "NamedTemporaryFile",
+             _deterministic_merge_tempfile), \
          patch.object(akuz_app, "_fresh_report_id", side_effect=report_ids), \
          patch.object(akuz_app, "source_config", return_value=cfg):
         perform_build(
@@ -263,7 +285,7 @@ def _run_trial(root: Path, cfg, state: State, selected, mode: str):
     wall_s = perf_counter() - wall0
     cpu_s = process_time() - cpu0
     if state.result["analytics_warning"]:
-        raise AssertionError("Analytics warning during P14-01 trial")
+        raise AssertionError("Analytics warning during P14-02 trial")
     if state.result["active_snapshots"]:
         raise AssertionError("Unexpected active snapshot during cached trial")
     return {
@@ -293,7 +315,7 @@ def run(config_path: Path, app_root: Path):
             trial = _run_trial(root, cfg, state, selected, mode)
             store = load_store(root)
             if store["downloads"] != downloads_before:
-                raise AssertionError("P14-01 trial mutated cached snapshots")
+                raise AssertionError("P14-02 trial mutated cached snapshots")
             public_trial = {
                 "ordinal": ordinal,
                 "mode": mode,
