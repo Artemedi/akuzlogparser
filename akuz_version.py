@@ -1,2 +1,2 @@
 """Application version shared by the launcher and portable build manifest."""
-__version__ = '4.8.0'
+__version__ = '4.9.0'
