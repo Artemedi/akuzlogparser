@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """AKUZ Log Explorer: offline browser UI for AKUZ logs or parser JSONL archives.
 
-Python >=3.9, standard library only. No HTTP server or external JavaScript/CDN.
+Python >=3.9. The core path remains stdlib-compatible; Python >=3.10 may use\noptional orjson acceleration for raw shards. No external JavaScript/CDN.
 Every original event is stored in static, on-demand JS shards to work over file://.
 """
 from __future__ import annotations
@@ -12,9 +12,15 @@ from collections import Counter, defaultdict
 from datetime import date, timedelta
 import gzip
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Iterator
+
+try:
+    import orjson as _orjson
+except ImportError:  # Python 3.9/source installs keep the stdlib path.
+    _orjson = None
 
 # Existing AKUZ parser is bundled separately: the explorer also supports JSONL
 # archives without importing it or requiring the original .log file.
@@ -225,6 +231,33 @@ def _json_compact(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
+def _phase14_raw_orjson_requested(env=None) -> bool:
+    """Parse the default-on raw-shard encoder rollback switch."""
+    values = os.environ if env is None else env
+    name = "AKUZ_PHASE14_RAW_ORJSON"
+    if name not in values:
+        return True
+    flag = str(values[name]).strip().lower()
+    if flag in ("1", "true", "yes", "on"):
+        return True
+    if flag in ("0", "false", "no", "off"):
+        return False
+    raise ValueError("Неверное значение AKUZ_PHASE14_RAW_ORJSON")
+
+
+def _phase14_raw_orjson_active(env=None) -> bool:
+    """Use the accepted encoder only when both requested and importable."""
+    return _phase14_raw_orjson_requested(env) and _orjson is not None
+
+
+def _raw_json_compact(value: list[str], *, use_orjson: bool | None = None) -> str:
+    """Serialize a raw-shard string array without changing report bytes."""
+    active = _phase14_raw_orjson_active() if use_orjson is None else use_orjson
+    if active and _orjson is not None:
+        return _orjson.dumps(value).decode("utf-8")
+    return _json_compact(value)
+
+
 def _escape_js_json(text: str) -> str:
     return (text.replace("<", "\\u003c").replace(">", "\\u003e")
             .replace("&", "\\u0026").replace("\u2028", "\\u2028")
@@ -296,6 +329,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         raise ValueError("Нельзя выбрать выходной каталог, содержащий исходный файл")
     if chunk_size < 10 or chunk_size > 10000:
         raise ValueError("--chunk-size должен быть в пределах 10–10000")
+    raw_json_orjson = _phase14_raw_orjson_active()
     data = out / "data"
     data.mkdir(parents=True, exist_ok=True)
     perf_root = out.parent.parent if out.parent.name == 'reports' else out.parent
@@ -356,7 +390,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         nonlocal shard_io_time, shard_bytes
         total_stamp = perf_counter()
         stamp = perf_counter()
-        serialized = _json_compact(raw_shard)
+        serialized = _raw_json_compact(raw_shard, use_orjson=raw_json_orjson)
         shard_json_time += perf_counter() - stamp
         stamp = perf_counter()
         escaped = _escape_js_json(serialized)
@@ -589,6 +623,7 @@ def generate(source: Path, out: Path, base: date | None, chunk_size: int, top: i
         shard_io_s=round(shard_io_time, 6),
         shard_total_s=round(shard_time, 6),
         shard_bytes=shard_bytes,
+        raw_json_orjson=int(raw_json_orjson),
         catalog_json_s=round(catalog_json_time, 6),
         catalog_escape_s=round(catalog_escape_time, 6),
         catalog_io_s=round(catalog_io_time, 6),
