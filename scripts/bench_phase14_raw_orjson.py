@@ -1,4 +1,4 @@
-"""Phase 14 P14-02 stdlib vs raw-shard-only orjson report-generation A/B.
+"""Phase 14 P14-02 production stdlib vs raw-shard orjson report-generation A/B.
 
 The trusted 23/24/25 Sep sources are fetched once into an owned disposable
 workspace. The seed reports are discarded. Six balanced B/C/C/B/B/C trials
@@ -7,16 +7,16 @@ network fetch. The candidate changes compact JSON encoding only for top-level ra
 string arrays. Catalog JSON remains on stdlib; JS escaping, write/hash, report
 layout, analytics and source identity remain unchanged.
 
-orjson is an experiment-only dependency installed by the dedicated workflow.
-No raw payload, host, remote path or digest is printed.
+The candidate uses the production AKUZ_PHASE14_RAW_ORJSON switch. No raw
+payload, host, remote path or digest is printed.
 """
 from __future__ import annotations
 
 import argparse
-from contextlib import nullcontext
 from dataclasses import replace
 from datetime import date
 import json
+import os
 from pathlib import Path
 from statistics import median
 import shutil
@@ -29,7 +29,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import akuz_app
-import akuz_html_explorer
 from akuz_app import State, perform_build, perform_build_current, perform_list
 from akuz_fetch import load_config
 from akuz_store import load_store, save_store
@@ -85,7 +84,6 @@ def _num(row, key):
     return float(value) if value is not None else 0.0
 
 
-_STDLIB_JSON_COMPACT = akuz_html_explorer._json_compact
 _ORIGINAL_NAMED_TEMPFILE = tempfile.NamedTemporaryFile
 
 
@@ -105,14 +103,6 @@ def _deterministic_merge_tempfile(*args, **kwargs):
         encoding=kwargs.get("encoding"),
         newline=kwargs.get("newline"),
     )
-
-
-def _raw_orjson_compact(value):
-    """Use orjson only for raw-shard list[str]; everything else stays stdlib."""
-    if isinstance(value, list) and all(isinstance(item, str) for item in value):
-        import orjson
-        return orjson.dumps(value).decode("utf-8")
-    return _STDLIB_JSON_COMPACT(value)
 
 
 def _report_manifest(root: Path):
@@ -239,8 +229,8 @@ def _setup_seed(root: Path, cfg):
         "AKUZ_PHASE11_PROCESS_PREFETCH": "0",
         "AKUZ_PHASE12_DELTA_RESUME": "0",
         "AKUZ_PHASE13_CATALOG_ERROR_INDEX": "1",
+        "AKUZ_PHASE14_RAW_ORJSON": "0",
     }
-    import os
     with patch.dict(os.environ, env, clear=False), \
          patch.object(akuz_app, "source_config", return_value=cfg):
         perform_build_current(root, state, selected)
@@ -263,15 +253,17 @@ def _run_trial(root: Path, cfg, state: State, selected, mode: str):
     _reset_reports_keep_downloads(root)
     offset = _trace_count(root)
     wall0, cpu0 = perf_counter(), process_time()
-    encoder_patch = (
-        patch.object(akuz_html_explorer, "_json_compact", _raw_orjson_compact)
-        if mode == "C" else nullcontext()
-    )
     report_ids = [
         f"v4_20990101_00000{index}_{index:08x}"
         for index in range(1, 5)
     ]
-    with encoder_patch, \
+    env = {
+        "AKUZ_PHASE11_PROCESS_PREFETCH": "0",
+        "AKUZ_PHASE12_DELTA_RESUME": "0",
+        "AKUZ_PHASE13_CATALOG_ERROR_INDEX": "1",
+        "AKUZ_PHASE14_RAW_ORJSON": "1" if mode == "C" else "0",
+    }
+    with patch.dict(os.environ, env, clear=False), \
          patch.object(
              akuz_app.tempfile, "NamedTemporaryFile",
              _deterministic_merge_tempfile), \
@@ -411,7 +403,7 @@ def main():
         print("EXACT_EQUIVALENCE=PASS")
         print("ANALYTICS_EQUIVALENCE=PASS")
         print("DOWNLOADS_UNCHANGED=PASS")
-        print("RAW_ORJSON_EXPERIMENT_ONLY=YES")
+        print("RAW_ORJSON_PRODUCTION_CANDIDATE=YES")
         print("RAW_PAYLOAD_RETAINED=NO")
         print("RELEASE_CHANGED=NO")
     except BaseException as exc:
