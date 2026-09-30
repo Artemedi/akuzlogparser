@@ -1,6 +1,23 @@
 # История изменений AKUZ Log Explorer
 
-## Unreleased — Phase 12 opt-in
+## 4.9.0 — 2026-09-30 (release candidate)
+
+- **Phase 13 analytics optimization accepted.** Catalog `errorFingerprints`
+  are used as an integrity-proven negative filter; positive events still read raw
+  and run `recognize_error`. Default-path real A/B: **39.308 -> 25.178 s
+  (-35.95% wall)** with SQL/export/semantic parity PASS. Rollback:
+  `AKUZ_PHASE13_CATALOG_ERROR_INDEX=0`.
+- **Phase 14 raw-shard serialization accepted as production candidate.**
+  `orjson 3.12.0` is used only for `raw_*.js`; catalog serialization remains
+  stdlib. Replicated B/C/C/B/B/C on 956,307,242 B: wall **195.911 -> 185.269 s
+  (-5.43%)**, CPU **-5.31%**, generation **-6.24%**, measured JSON **-50.10%**,
+  complete producer byte parity and analytics parity PASS. Rollback:
+  `AKUZ_PHASE14_RAW_ORJSON=0`. Python 3.9 keeps the stdlib fallback; portable
+  bundles the accelerator.
+- Phase 12 delta/resume from the unreleased branch is included as **default-OFF**
+  opt-in and remains mutually exclusive with Phase 11 process-prefetch while
+  enabled.
+
 
 - Добавлен default-OFF режим `AKUZ_PHASE12_DELTA_RESUME=1` для выросших
   Linux/SSH `.log`: используется только доказанный previous snapshot с
