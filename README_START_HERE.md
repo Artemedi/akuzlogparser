@@ -1,12 +1,12 @@
-# AKUZ Log Explorer 4.8.0 — запуск и настройка
+# AKUZ Log Explorer 4.9.0 RC — запуск и настройка
 
 Приложение работает только с файловыми `.log` АКУЗ. Оно получает снимки по SSH с Linux, читает Windows-папку SMB/UNC или заданный локальный .log/каталог, создаёт локальные отчёты и показывает их в браузере. В поставке нет рабочих журналов и демонстрационного отчёта.
 
 ## Выбор запуска
 
-**Windows без установки зависимостей:** распакуйте portable ZIP из [релиза v4.8.0](https://github.com/Artemedi/akuzlogparser/releases/tag/v4.8.0), запустите `AKUZLogExplorer.exe`. `ConnectConf.cfg` нужно заполнить только для SSH/SMB; для локальных `.log` он не требуется. Python уже внутри. [Подробная инструкция](README_PORTABLE.md).
+**Windows без установки зависимостей:** текущий release candidate имеет версию 4.9.0; до его публикации последний публичный пакет остаётся [v4.8.0](https://github.com/Artemedi/akuzlogparser/releases/tag/v4.8.0). Для проверенного RC используйте собранный portable artifact точного commit SHA, затем запустите `AKUZLogExplorer.exe`. `ConnectConf.cfg` нужно заполнить только для SSH/SMB; для локальных `.log` он не требуется. Python уже внутри. [Подробная инструкция](README_PORTABLE.md).
 
-**Исходники на Windows:** нужен Python 3.9+. Запустите `START_EXPLORER.bat`; для SSH/SMB заранее настройте `ConnectConf.cfg` из `ConnectConf.example.cfg`. Если Paramiko отсутствует, BAT может установить его через pip (нужен доступ к PyPI или внутреннему зеркалу).
+**Исходники на Windows:** нужен Python 3.9+. Запустите `START_EXPLORER.bat`; для SSH/SMB заранее настройте `ConnectConf.cfg` из `ConnectConf.example.cfg`. BAT устанавливает недостающие runtime-зависимости через `requirements.txt`: Paramiko, а на Python 3.10+ также orjson. Python 3.9 остаётся поддержан и использует stdlib-сериализацию raw-shards.
 
 **Исходники на Linux:** установите `requirements.txt` в виртуальное окружение и выполните `python akuz_app.py --no-browser`. Полные команды — в [README](README.md).
 
@@ -69,6 +69,26 @@ $env:AKUZ_PHASE11_PROCESS_PREFETCH = '0'
 (~15.8% меньше wall); inventory и analytics совпали. Это измерение конкретной
 DBA-008D workload, а не обещание фиксированного ускорения на любом сервере.
 
+## Phase 14 — сериализация raw-shards в v4.9.0
+
+На Python 3.10+ и в Windows portable Explorer по умолчанию использует
+`orjson` только для массивов строк `data/raw_*.js`. Каталог
+`data/catalog.js` продолжает сериализоваться штатным `json.dumps`, поэтому
+числовые представления каталога не меняются. На real replicated B/C/C/B/B/C
+для 956,307,242 байт median wall снизился примерно на **5.43%**, CPU на
+**5.31%**, а measured JSON-время на **50.10%** при полном byte/analytics
+parity.
+
+Rollback без изменения конфигурации:
+
+```powershell
+$env:AKUZ_PHASE14_RAW_ORJSON = '0'
+.\AKUZLogExplorer.exe
+```
+
+При Python 3.9 `orjson` не устанавливается и автоматически используется
+прежний stdlib encoder; формат отчётов остаётся тем же.
+
 ## Windows / SMB / UNC
 
 Приложение должно быть запущено на Windows от пользователя с правом чтения сетевой папки.
@@ -126,7 +146,7 @@ $env:AKUZ_PHASE12_DELTA_RESUME = '1'
 
 Пока Phase 12 включён, Phase 11 process-prefetch намеренно отключается: совместная
 работа двух оптимизаций требует отдельного gate. Сбросьте переменную или задайте
-`AKUZ_PHASE12_DELTA_RESUME=0`, чтобы вернуться к обычному v4.8 пути.
+`AKUZ_PHASE12_DELTA_RESUME=0`, чтобы вернуться к обычному v4.9 пути.
 
 Встроенная SSH-компрессия остаётся независимой, выключена по умолчанию и
 включается только явно через `[ssh] compression = true` с учётом дополнительной
@@ -138,7 +158,7 @@ CPU-нагрузки на сервер.
 
 Если важно обнаруживать перезапись **исходного локального журнала** при
 сохранённых размере, `mtime` и inode/file ID, можно включить полный SHA-256
-перед повторным использованием отчёта. Для portable v4.8.0:
+перед повторным использованием отчёта. Для portable v4.9.0:
 
 ```powershell
 $env:AKUZ_VERIFY_LOCAL_SOURCE_SHA = '1'
