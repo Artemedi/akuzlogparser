@@ -1178,6 +1178,12 @@ def _perform_clear_transaction_body(root, state, include_reports):
         state.result = dict(cleanup=result)
         state.stage = 'Кэш очищен: скачанных файлов ' + str(result['downloads_removed']) + \
              ', отчётов ' + str(result['reports_removed'])
+        if result.get('downloads_retained'):
+            state.stage += (', сохранено в других/старых каталогах '
+                            + str(result['downloads_retained']))
+        if result.get('reports_retained'):
+            state.stage += (', отчётов сохранено как небезопасные для удаления '
+                            + str(result['reports_retained']))
         state.notice = state.stage
         state.listing = []
 
