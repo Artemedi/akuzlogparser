@@ -73,6 +73,28 @@ class Phase14RawOrjsonEquivalenceTests(unittest.TestCase):
             self.assertEqual(candidate_files, baseline_files)
 
 
+class Phase14RawOrjsonHarnessTests(unittest.TestCase):
+    def test_combined_scratch_name_is_deterministic(self):
+        with tempfile.TemporaryDirectory(
+                prefix="akuz_p14_merge_name_") as tmp:
+            root = Path(tmp)
+            names = []
+            for _ in range(2):
+                with benchmark._deterministic_merge_tempfile(
+                        mode="w",
+                        suffix=".jsonl",
+                        prefix="akuz-v4-merge-",
+                        dir=root,
+                        delete=False) as stream:
+                    names.append(Path(stream.name).name)
+                    stream.write("marker")
+                Path(stream.name).unlink(missing_ok=True)
+            self.assertEqual(
+                names,
+                ["akuz-v4-merge-phase14-fixed.jsonl"] * 2,
+            )
+
+
 class Phase14RawOrjsonSurfaceTests(unittest.TestCase):
     def test_safe_manifest_mismatch_reports_only_structure(self):
         reference = {
