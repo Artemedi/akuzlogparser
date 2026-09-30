@@ -3721,3 +3721,53 @@ the trusted real `20260923_server.log`:
 
 Decision: **Phase 16 ACCEPTED / DONE**. Move to Phase 15 multiprocessing
 research only after full mainline Windows/portable regression.
+
+
+## Phase 15 production opt-in — accepted for v4.10.0 (2026-09-30)
+
+Phase 15 was integrated after Phase 16 and after the public v4.9.0 release.
+Production scope is deliberately narrow: Windows only, two or more selected
+reports, built-in `generate`, Phase 12 delta disabled, maximum two worker
+processes plus the parent. The feature remains default-OFF and is enabled only
+with `AKUZ_PHASE15_PARALLEL_GENERATION=1`. While active, Phase 11
+process-prefetch is disabled so two process schedulers do not compete.
+
+Exact production gate before main integration:
+`28d09c48fa106dde4552a711513a96a9d77bac9c`, Actions #36736610340 —
+full Python regression PASS, browser **12/12 PASS**, production policy/safety
+checks PASS.
+
+Real normal-app B/C/C/B/B/C on **956,307,242 source bytes**, 4 reports,
+**657,738 events**:
+- baseline wall median: **192.513628 s**;
+- candidate wall median: **165.654935 s**;
+- wall reduction: **13.952%**;
+- baseline CPU median: **194.078125 s**;
+- candidate CPU median: **197.843750 s (+1.94%)**;
+- baseline peak private median: **1,562,357,760 B**;
+- candidate peak private median: **1,563,148,288 B (+0.051%)**;
+- exact report equivalence: **PASS**;
+- analytics equivalence: **PASS**;
+- downloads unchanged: **PASS**;
+- network during trials: **NO**;
+- raw payload retained: **NO**;
+- public Release changed: **NO**.
+
+Post-integration main gates on the accepted runtime SHA
+`28d09c48fa106dde4552a711513a96a9d77bac9c`:
+Windows portable #36743204459 **PASS** and Windows regression #36743204614
+**PASS**. Phase 15 is therefore accepted for v4.10.0 as an opt-in production
+path, not as the default scheduler.
+
+## v4.10.0 release preparation (2026-09-30)
+
+The public v4.9.0 tag remains immutable at
+`b419d537d60cde4a37be37253a7276ec56a50bab`. The v4.10.0 release line
+contains the accepted Phase 16 cache/UI hardening and Phase 15 opt-in parallel
+report generation. Obsolete phase branches and experimental workflows were
+removed after acceptance; repository branch policy is now main-only, with
+permanent CI limited to Windows regression and portable build.
+
+Before publication, v4.10.0 requires an independent Claude Fable review of the
+v4.9.0..release diff, followed by exact-SHA Windows regression and portable
+build/smoke. A public release must not be created until those gates pass.
