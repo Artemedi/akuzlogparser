@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """AKUZ Log Explorer: offline browser UI for AKUZ logs or parser JSONL archives.
 
-Python >=3.9. The core path remains stdlib-compatible; Python >=3.10 may use\noptional orjson acceleration for raw shards. No external JavaScript/CDN.
+Python >=3.9. The core path remains stdlib-compatible; Python >=3.10 may use
+optional orjson acceleration for raw shards. No external JavaScript/CDN.
 Every original event is stored in static, on-demand JS shards to work over file://.
 """
 from __future__ import annotations
@@ -250,7 +251,7 @@ def _phase14_raw_orjson_active(env=None) -> bool:
     return _phase14_raw_orjson_requested(env) and _orjson is not None
 
 
-def _raw_json_compact(value: list[str], *, use_orjson: bool | None = None) -> str:
+def _raw_json_compact(value: list[str], *, use_orjson=None) -> str:
     """Serialize a raw-shard string array without changing report bytes."""
     active = _phase14_raw_orjson_active() if use_orjson is None else use_orjson
     if active and _orjson is not None:

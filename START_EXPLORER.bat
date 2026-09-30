@@ -26,13 +26,13 @@ goto failed
 
 :python_ready
 echo Using %PYTHON%
-%PYTHON% -c "import paramiko" >nul 2>nul
+%PYTHON% -c "import sys, importlib.util, paramiko; assert sys.version_info < (3,10) or importlib.util.find_spec('orjson') is not None" >nul 2>nul
 if not errorlevel 1 goto start_app
 
-echo Installing SSH dependency Paramiko...
+echo Installing runtime dependencies...
 %PYTHON% -m pip install -r requirements.txt
 if errorlevel 1 goto install_failed
-%PYTHON% -c "import paramiko" >nul 2>nul
+%PYTHON% -c "import sys, importlib.util, paramiko; assert sys.version_info < (3,10) or importlib.util.find_spec('orjson') is not None" >nul 2>nul
 if errorlevel 1 goto install_failed
 
 :start_app
@@ -47,8 +47,8 @@ echo ERROR: Cannot open the Explorer directory.
 goto failed_no_popd
 
 :install_failed
-echo ERROR: Cannot install or import Paramiko.
-echo Check pip access or install it manually in the selected Python.
+echo ERROR: Cannot install or import required runtime dependencies.
+echo Check pip access or install requirements.txt manually in the selected Python.
 goto failed
 
 :app_failed
