@@ -8,6 +8,8 @@ on:
       - 'akuz_html_explorer.py'
       - 'akuz_portable_check.py'
       - 'requirements*.txt'
+      - 'README_PORTABLE.md'
+      - 'ConnectConf.example.cfg'
       - 'scripts/build_portable.py'
       - 'scripts/smoke_portable.py'
   workflow_dispatch:

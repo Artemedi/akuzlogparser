@@ -36,9 +36,6 @@
   (-65.053% wall), snapshot/report/semantic SQL/export parity PASS.
 - Portable builder явно включает `akuz_delta`; frozen EXE self-test реально
   выполняет delta assembler. Acceptance Actions #36563631303 PASS.
-- Это **не** изменение уже опубликованного v4.8.0 Release и не default-on
-  решение.
-
 
 ## 4.8.0 — 2026-09-29
 

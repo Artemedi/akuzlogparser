@@ -75,7 +75,9 @@ proof metadata идёт полным fetch; обычная ошибка delta т
 временно не используется.
 
 Чтобы вернуться к стандартному v4.9 поведению, удалите переменную или задайте
-`AKUZ_PHASE12_DELTA_RESUME=0`. ### Phase 14: ускоренная сериализация raw-shards
+`AKUZ_PHASE12_DELTA_RESUME=0`.
+
+### Phase 14: ускоренная сериализация raw-shards
 
 В portable v4.9.0 массивы строк `data/raw_*.js` по умолчанию сериализуются
 через встроенный `orjson`; `data/catalog.js` остаётся на прежнем stdlib
