@@ -163,6 +163,30 @@ def _median_metrics(trials):
     }
 
 
+def _safe_parity_detail(key, reference, current):
+    """Return only structural mismatch detail; never payload text or digests."""
+    if key != "manifest":
+        return key
+    ref_ids = sorted(reference)
+    cur_ids = sorted(current)
+    if ref_ids != cur_ids:
+        return "manifest:report_ids"
+    for rid in ref_ids:
+        ref = reference[rid]
+        cur = current[rid]
+        if ref.get("events") != cur.get("events"):
+            return f"manifest:{rid}:events"
+        if ref.get("kind") != cur.get("kind"):
+            return f"manifest:{rid}:kind"
+        ref_hashes = ref.get("producer_sha256") or {}
+        cur_hashes = cur.get("producer_sha256") or {}
+        names = sorted(set(ref_hashes) | set(cur_hashes))
+        for name in names:
+            if ref_hashes.get(name) != cur_hashes.get(name):
+                return f"manifest:{rid}:{name}"
+    return "manifest:unknown"
+
+
 def _setup_seed(root: Path, cfg):
     state = State()
     with patch.object(akuz_app, "source_config", return_value=cfg):
@@ -263,6 +287,12 @@ def run(config_path: Path, app_root: Path):
             store = load_store(root)
             if store["downloads"] != downloads_before:
                 raise AssertionError("P14-01 trial mutated cached snapshots")
+            public_trial = {
+                "ordinal": ordinal,
+                "mode": mode,
+                "metrics": trial["metrics"],
+            }
+            print("P14_ORJSON_TRIAL", json.dumps(public_trial, sort_keys=True))
             if reference is None:
                 reference = trial
             else:
@@ -270,13 +300,12 @@ def run(config_path: Path, app_root: Path):
                         "manifest", "semantic_sql",
                         "exports", "semantic_exports"):
                     if trial[key] != reference[key]:
+                        detail = _safe_parity_detail(
+                            key, reference[key], trial[key])
+                        print("P14_ORJSON_PARITY_MISMATCH", detail)
                         raise AssertionError(
                             "P14-01 candidate differs in " + key)
-            trials.append({
-                "ordinal": ordinal,
-                "mode": mode,
-                "metrics": trial["metrics"],
-            })
+            trials.append(public_trial)
 
         baseline_trials = [row for row in trials if row["mode"] == "B"]
         candidate_trials = [row for row in trials if row["mode"] == "C"]
