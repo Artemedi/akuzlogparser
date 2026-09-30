@@ -151,7 +151,11 @@ def _trial_metrics(root: Path, offset: int, wall_s: float, cpu_s: float):
     ]
     if len(serial) != 4 or len(assets) != 4:
         raise AssertionError("Expected four report-generation metric groups")
+    encoders = {int(row.get("raw_json_orjson", "-1")) for row in serial}
+    if len(encoders) != 1:
+        raise AssertionError("Mixed Phase 14 encoder state within one trial")
     return {
+        "raw_json_orjson": encoders.pop(),
         "wall_s": round(wall_s, 6),
         "cpu_s": round(cpu_s, 6),
         "generate_elapsed_s": round(sum(_num(row, "elapsed_s") for row in assets), 6),
@@ -280,8 +284,12 @@ def _run_trial(root: Path, cfg, state: State, selected, mode: str):
         raise AssertionError("Analytics warning during P14-02 trial")
     if state.result["active_snapshots"]:
         raise AssertionError("Unexpected active snapshot during cached trial")
+    metrics = _trial_metrics(root, offset, wall_s, cpu_s)
+    expected_encoder = 1 if mode == "C" else 0
+    if metrics["raw_json_orjson"] != expected_encoder:
+        raise AssertionError("Production Phase 14 switch did not select expected encoder")
     return {
-        "metrics": _trial_metrics(root, offset, wall_s, cpu_s),
+        "metrics": metrics,
         "manifest": _report_manifest(root),
         "semantic_sql": semantic_sql(root),
         "exports": _export_hashes(root),
