@@ -1,4 +1,4 @@
-name: AKUZ Actions retention cleanup
+name: AKUZ repository cleanup
 
 on:
   push:
@@ -9,26 +9,18 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 jobs:
   cleanup:
-    name: Remove superseded unreferenced workflow runs
+    name: Prune obsolete branches workflows runs and artifacts
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         shell: pwsh
-    env:
-      PYTHONUTF8: '1'
-      PYTHONDONTWRITEBYTECODE: '1'
     steps:
-      - name: Check out documentation references
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-
-      - name: Delete old completed runs not referenced by project docs
+      - name: Repository cleanup
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -36,98 +28,144 @@ jobs:
           @'
           import json
           import os
-          from pathlib import Path
-          import re
-          import sys
-          import urllib.error
+          import urllib.parse
           import urllib.request
+          import urllib.error
 
           repo = os.environ['GITHUB_REPOSITORY']
-          current = int(os.environ['GITHUB_RUN_ID'])
           token = os.environ['GH_TOKEN']
-          root = Path.cwd()
-
-          referenced = set()
-          pattern = re.compile(r'github\.com/Artemedi/akuzlogparser/actions/runs/(\d+)')
-          for path in root.rglob('*.md'):
-              if '.git' in path.parts:
-                  continue
-              try:
-                  text = path.read_text(encoding='utf-8')
-              except UnicodeDecodeError:
-                  continue
-              referenced.update(int(x) for x in pattern.findall(text))
-
+          current_run = int(os.environ['GITHUB_RUN_ID'])
           headers = {
               'Authorization': 'Bearer ' + token,
               'Accept': 'application/vnd.github+json',
               'X-GitHub-Api-Version': '2022-11-28',
-              'User-Agent': 'akuz-actions-retention-cleanup',
+              'User-Agent': 'akuz-final-cleanup',
           }
 
-          def request(url, method='GET'):
-              req = urllib.request.Request(url, headers=headers, method=method)
-              with urllib.request.urlopen(req, timeout=30) as response:
-                  data = response.read()
-                  return json.loads(data) if data else None
+          def req(url, method='GET', body=None):
+              data = None if body is None else json.dumps(body).encode('utf-8')
+              h = dict(headers)
+              if data is not None:
+                  h['Content-Type'] = 'application/json'
+              r = urllib.request.Request(url, headers=h, data=data, method=method)
+              with urllib.request.urlopen(r, timeout=60) as response:
+                  raw = response.read()
+                  return json.loads(raw) if raw else None
 
+          base = f'https://api.github.com/repos/{repo}'
+
+          # 1. Remove obsolete phase branches. Keep main only.
+          branches = req(base + '/branches?per_page=100')
+          deleted_branches = []
+          for row in branches:
+              name = row['name']
+              if name == 'main':
+                  continue
+              if name.startswith('phase'):
+                  ref = urllib.parse.quote('heads/' + name, safe='/')
+                  req(base + '/git/refs/' + ref, method='DELETE')
+                  deleted_branches.append(name)
+          print('DELETED_BRANCHES=' + ','.join(sorted(deleted_branches)))
+
+          # 2. Remove all Actions artifacts (release assets are separate and untouched).
+          deleted_artifacts = 0
+          page = 1
+          while True:
+              payload = req(base + f'/actions/artifacts?per_page=100&page={page}')
+              rows = payload.get('artifacts', [])
+              if not rows:
+                  break
+              for row in rows:
+                  req(base + f"/actions/artifacts/{row['id']}", method='DELETE')
+                  deleted_artifacts += 1
+              if len(rows) < 100:
+                  break
+              page += 1
+          print(f'DELETED_ACTIONS_ARTIFACTS={deleted_artifacts}')
+
+          # 3. Remove all completed historical Actions runs except this cleanup run.
           runs = []
           page = 1
           while True:
-              url = f'https://api.github.com/repos/{repo}/actions/runs?per_page=100&page={page}'
-              payload = request(url)
-              chunk = payload.get('workflow_runs', [])
-              runs.extend(chunk)
-              if len(chunk) < 100:
+              payload = req(base + f'/actions/runs?per_page=100&page={page}')
+              rows = payload.get('workflow_runs', [])
+              runs.extend(rows)
+              if len(rows) < 100:
                   break
               page += 1
-
-          # Preserve the two newest runs of every workflow even if docs do not
-          # link to them. This keeps immediate diagnostics while discarding
-          # superseded history. All in-progress/queued runs are always kept.
-          newest = {}
-          for row in runs:
-              newest.setdefault(row['name'], [])
-              if len(newest[row['name']]) < 2:
-                  newest[row['name']].append(int(row['id']))
-          protected_recent = {rid for ids in newest.values() for rid in ids}
-          protected = referenced | protected_recent | {current}
-
-          candidates = []
+          deleted_runs = 0
           for row in runs:
               rid = int(row['id'])
-              if row['status'] != 'completed' or rid in protected:
+              if rid == current_run or row['status'] != 'completed':
                   continue
-              candidates.append((rid, row['name'], row.get('conclusion')))
-
-          deleted = 0
-          failed = 0
-          for rid, name, conclusion in candidates:
               try:
-                  request(
-                      f'https://api.github.com/repos/{repo}/actions/runs/{rid}',
-                      method='DELETE')
-                  deleted += 1
+                  req(base + f'/actions/runs/{rid}', method='DELETE')
+                  deleted_runs += 1
               except urllib.error.HTTPError as exc:
-                  failed += 1
-                  print(f'CLEANUP_DELETE_FAILED run={rid} status={exc.code}')
-              except Exception as exc:
-                  failed += 1
-                  print(f'CLEANUP_DELETE_FAILED run={rid} kind={type(exc).__name__}')
+                  print(f'RUN_DELETE_FAILED={rid}:{exc.code}')
+                  raise
+          print(f'DELETED_ACTION_RUNS={deleted_runs}')
 
-          print(f'CLEANUP_TOTAL_RUNS={len(runs)}')
-          print(f'CLEANUP_DOC_REFERENCED={len(referenced)}')
-          print(f'CLEANUP_RECENT_PROTECTED={len(protected_recent)}')
-          print(f'CLEANUP_CANDIDATES={len(candidates)}')
-          print(f'CLEANUP_DELETED={deleted}')
-          print(f'CLEANUP_FAILED={failed}')
-          if failed:
-              raise SystemExit('one or more workflow runs could not be deleted')
-          print('ACTIONS_RETENTION_CLEANUP=PASS')
+          # 4. Remove obsolete workflow files. Keep only permanent regression + portable.
+          obsolete = [
+              '.github/workflows/akuz-phase14-serialization-baseline.yml',
+              '.github/workflows/akuz-phase15-production.yml',
+              '.github/workflows/akuz-windows-smoke.yml',
+              '.github/workflows/cleanup-experimental-branches.yml',
+          ]
+          deleted_workflows = []
+          for path in obsolete:
+              encoded = urllib.parse.quote(path, safe='/')
+              try:
+                  info = req(base + '/contents/' + encoded + '?ref=main')
+              except urllib.error.HTTPError as exc:
+                  if exc.code == 404:
+                      continue
+                  raise
+              req(
+                  base + '/contents/' + encoded,
+                  method='DELETE',
+                  body={
+                      'message': 'ci: remove obsolete workflow',
+                      'sha': info['sha'],
+                      'branch': 'main',
+                  },
+              )
+              deleted_workflows.append(path)
+          print('DELETED_WORKFLOWS=' + ','.join(deleted_workflows))
+
+          # 5. Verify branch and workflow end-state before self-removal.
+          branches = req(base + '/branches?per_page=100')
+          names = sorted(row['name'] for row in branches)
+          print('REMAINING_BRANCHES=' + ','.join(names))
+          if names != ['main']:
+              raise SystemExit('branch cleanup incomplete: ' + repr(names))
+
+          listing = req(base + '/contents/.github/workflows?ref=main')
+          wf_names = sorted(row['name'] for row in listing)
+          allowed_with_self = [
+              'akuz-actions-cleanup.yml',
+              'akuz-windows-tests.yml',
+              'windows-portable.yml',
+          ]
+          print('WORKFLOWS_BEFORE_SELF_DELETE=' + ','.join(wf_names))
+          if wf_names != allowed_with_self:
+              raise SystemExit('workflow cleanup incomplete: ' + repr(wf_names))
+
+          # 6. Delete this cleanup workflow itself last.
+          self_path = '.github/workflows/akuz-actions-cleanup.yml'
+          encoded = urllib.parse.quote(self_path, safe='/')
+          info = req(base + '/contents/' + encoded + '?ref=main')
+          req(
+              base + '/contents/' + encoded,
+              method='DELETE',
+              body={
+                  'message': 'ci: remove completed cleanup workflow',
+                  'sha': info['sha'],
+                  'branch': 'main',
+              },
+          )
+          print('SELF_CLEANUP_WORKFLOW_DELETED=PASS')
+          print('REPOSITORY_CLEANUP=PASS')
           '@ | python -B -
-          if ($LASTEXITCODE -ne 0) { throw 'Actions cleanup failed' }
-# Retention rerun requested after v4.8.0 release; safety policy unchanged.
-
-# Obsolete workflow cleanup requested after workflow pruning.
-
-# Retention rerun after Phase 12 opt-in acceptance and workflow consolidation.
+          if ($LASTEXITCODE -ne 0) { throw 'Repository cleanup failed' }
