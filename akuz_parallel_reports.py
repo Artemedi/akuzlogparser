@@ -137,6 +137,8 @@ def run_staged_reports(jobs: list[StagedReportJob], *,
                        max_workers: int = 2) -> list[dict]:
     if not jobs:
         return []
+    if len(jobs) == 1:
+        return [generate_staged_report(jobs[0])]
     if max_workers != 2:
         raise ValueError("Phase 15 production scope requires exactly two workers")
     ctx = (get_job_bound_spawn_context()
