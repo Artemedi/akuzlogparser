@@ -1,42 +1,59 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
 import subprocess
-import urllib.request
+import tempfile
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
 
 
-def load_api_key(path: Path) -> str:
+ROOT = Path(__file__).resolve().parents[1]
+PRIVATE_PATH = Path(
+    r"E:\Software\Project\LogAkusExplorer\secrets\fable_review_v410_private.pem"
+)
+ENCRYPTED_PATH = ROOT / ".github" / "fable_review_v410.enc.b64"
+
+
+def decrypt_environment() -> dict[str, str]:
+    if not PRIVATE_PATH.is_file():
+        raise RuntimeError("FABLE_EPHEMERAL_PRIVATE_KEY=MISSING")
+    if not ENCRYPTED_PATH.is_file():
+        raise RuntimeError("FABLE_ENCRYPTED_CREDENTIAL=MISSING")
+
+    private = serialization.load_pem_private_key(
+        PRIVATE_PATH.read_bytes(), password=None
+    )
+    ciphertext = base64.b64decode(
+        ENCRYPTED_PATH.read_text(encoding="ascii").strip()
+    )
+    plaintext = private.decrypt(
+        ciphertext,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None,
+        ),
+    ).decode("utf-8")
+
     values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8-sig").splitlines():
+    for raw in plaintext.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
-        key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip('"').strip("'")
-    for key in (
-        "CLEANAPIS_API_KEY",
-        "CLEANAPI_API_KEY",
-        "CLEAN_API_KEY",
-        "OPENAI_API_KEY",
-        "API_KEY",
-        "TOKEN",
-    ):
-        if values.get(key):
-            return values[key]
-    nonempty = [value for value in values.values() if value]
-    if len(nonempty) == 1:
-        return nonempty[0]
-    raise RuntimeError("FABLE_CREDENTIALS=UNRESOLVED")
+        name, value = line.split("=", 1)
+        values[name.strip()] = value.strip().strip('"').strip("'")
+    if not values.get("ANTHROPIC_AUTH_TOKEN"):
+        raise RuntimeError("FABLE_TOKEN=MISSING")
+    if not values.get("ANTHROPIC_BASE_URL"):
+        raise RuntimeError("FABLE_BASE_URL=MISSING")
+    return values
 
 
-def main() -> int:
-    env_path = Path(os.environ["FABLE_ENV_FILE"])
-    if not env_path.is_file():
-        raise RuntimeError("FABLE_CREDENTIALS_FILE=MISSING")
-    api_key = load_api_key(env_path)
-
+def candidate_diff() -> str:
     paths = [
         "akuz_app.py",
         "akuz_parallel_reports.py",
@@ -50,7 +67,9 @@ def main() -> int:
         "scripts/check_phase16_real_smoke.py",
     ]
     diff = subprocess.run(
-        ["git", "diff", "--no-ext-diff", "--unified=80", "v4.9.0..HEAD", "--", *paths],
+        ["git", "diff", "--no-ext-diff", "--unified=80",
+         "v4.9.0..HEAD", "--", *paths],
+        cwd=ROOT,
         check=True,
         capture_output=True,
         text=True,
@@ -60,32 +79,108 @@ def main() -> int:
         raise RuntimeError("FABLE_DIFF=EMPTY")
     if len(diff) > 220_000:
         diff = diff[:220_000] + "\n[DIFF TRUNCATED AT 220000 CHARACTERS]\n"
+    return diff
 
-    prompt = """You are an independent senior release reviewer for AKUZ Log Explorer v4.10.0.
-Review the supplied v4.9.0..candidate diff for correctness and release safety.
-Do not optimize for style. Look for concrete defects, races, unsafe cleanup,
-process-lifecycle problems, cache/source identity corruption, nondeterministic
-publication, compatibility regressions, or missing fail-closed behavior.
 
-Release facts already established by executable gates:
-- Phase 16 mixed/per-folder cache, stale browser listing_revision, legacy v4
-  cache fallback and real cache-clear smoke passed.
-- Phase 15 is Windows-only, default-OFF opt-in with
+def call_fable(values: dict[str, str], prompt: str) -> str:
+    token = values["ANTHROPIC_AUTH_TOKEN"]
+    base = values["ANTHROPIC_BASE_URL"].rstrip("/")
+    model = values.get("ANTHROPIC_MODEL", "claude-fable-5.1")
+
+    payload = json.dumps(
+        {
+            "model": model,
+            "max_tokens": 7000,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Act as an independent senior code and release reviewer. "
+                        "Be precise, skeptical and evidence-based."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+    request_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", suffix=".json", delete=False
+        ) as request_file:
+            request_file.write(payload)
+            request_path = request_file.name
+
+        curl_config = (
+            'url = "' + base + '/chat/completions"\n'
+            'header = "Authorization: Bearer ' + token + '"\n'
+            'header = "Content-Type: application/json"\n'
+            'header = "User-Agent: curl/8"\n'
+            'data-binary = "@' + request_path.replace("\\", "/") + '"\n'
+        )
+        proc = subprocess.run(
+            [
+                "curl", "--silent", "--show-error", "--fail",
+                "--max-time", "300", "--config", "-"
+            ],
+            input=curl_config.encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=310,
+        )
+        if proc.returncode:
+            raise RuntimeError(
+                "FABLE_CURL_FAILED=" + str(proc.returncode) + ":"
+                + proc.stderr.decode("utf-8", errors="replace")[:500]
+            )
+        data = json.loads(proc.stdout.decode("utf-8"))
+    finally:
+        if request_path:
+            Path(request_path).unlink(missing_ok=True)
+
+    content = data["choices"][0]["message"]["content"]
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("FABLE_REVIEW=EMPTY")
+    return content.strip()
+
+
+def main() -> int:
+    values = decrypt_environment()
+    diff = candidate_diff()
+    sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+    ).strip()
+
+    prompt = f"""You are the independent senior release reviewer for AKUZ Log Explorer v4.10.0.
+Review candidate SHA {sha}, specifically the supplied runtime/test diff from
+public v4.9.0 to this candidate. Do not optimize for style. Look for concrete
+release defects, races, unsafe cleanup, process-lifecycle problems,
+cache/source-identity corruption, nondeterministic publication, compatibility
+regressions, or missing fail-closed behavior.
+
+Established executable evidence:
+- Phase 16 mixed/per-folder cache correctness, stale-browser listing_revision,
+  legacy v4 cache fallback and real cache-clear smoke passed.
+- Phase 15 is Windows-only and default-OFF, enabled only by
   AKUZ_PHASE15_PARALLEL_GENERATION=1; it requires 2+ selections, built-in
-  generate, and Phase 12 delta disabled. While Phase 15 is active, Phase 11
-  process-prefetch is disabled.
-- Phase 15 real normal-app B/C/C/B/B/C: wall median 192.513628 -> 165.654935 s
-  (-13.952%), CPU +1.94%, peak private +0.051%; exact outputs, analytics and
-  downloads parity passed; no network during trials and no raw payload retained.
-- Post-integration Windows portable and full Windows regression gates passed on
-  the accepted runtime SHA.
-- Public v4.9.0 is immutable; this review is for v4.10.0.
+  generate and Phase 12 delta disabled. While active it disables Phase 11
+  process-prefetch.
+- Phase 15 real normal-app B/C/C/B/B/C on 956,307,242 source bytes / 4 reports:
+  median wall 192.513628 -> 165.654935 s (-13.952%), CPU +1.94%, peak private
+  memory +0.051%; exact report parity, analytics parity and downloads
+  invariants passed; no network during trials and no raw payload retained.
+- Post-integration Windows regression and portable gates passed on the accepted
+  runtime lineage. Final exact-SHA gates will be rerun after this review.
+- Public v4.9.0 is immutable. This review is for v4.10.0.
 
-Pay special attention to:
-1) Windows spawn/worker containment and failure cleanup.
-2) Parent ownership, source order, validation and deterministic publication.
-3) Interaction boundaries with Phase 11 and Phase 12.
-4) clear_cache path ownership / symlink / custom-root fail-closed behavior.
+Focus especially on:
+1) Windows spawn/worker containment, cancellation and failure cleanup.
+2) Parent ownership, source ordering, staged-output validation and
+   deterministic publication.
+3) Phase 15 boundaries with Phase 11 and Phase 12.
+4) clear_cache ownership / symlink / custom-root fail-closed behavior.
 5) listing_revision stale-tab race behavior.
 6) backward compatibility and future-version fail-closed behavior.
 
@@ -97,39 +192,23 @@ RELEASE=ACCEPT or RELEASE=BLOCK
 
 Then list findings, each tagged BLOCKER/HIGH/MEDIUM/LOW and grounded in a
 specific file/function. Use BLOCK only for a credible release-blocking defect
-visible in this diff, not for optional future hardening.
+visible in the supplied code.
 
 DIFF START
-""" + diff + "\nDIFF END\n"
+{diff}
+DIFF END
+"""
 
-    payload = {
-        "model": "claude-fable-5.1",
-        "messages": [
-            {
-                "role": "system",
-                "content": "Act as an independent code/release reviewer. Be precise and evidence-based.",
-            },
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0,
-    }
-    request = urllib.request.Request(
-        "https://cleanapis.com/v1/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": "Bearer " + api_key,
-            "Content-Type": "application/json",
-            "User-Agent": "akuz-v410-fable-review",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=300) as response:
-        body = json.loads(response.read().decode("utf-8"))
-    review = body["choices"][0]["message"]["content"].strip()
+    try:
+        review = call_fable(values, prompt)
+    finally:
+        PRIVATE_PATH.unlink(missing_ok=True)
 
     print("FABLE_REVIEW_BEGIN")
     print(review)
     print("FABLE_REVIEW_END")
+    print("FABLE_EPHEMERAL_PRIVATE_KEY_DESTROYED=PASS")
+    print("NO_PRIVATE_LOGS_OR_SECRETS_SENT=PASS")
 
     verdicts: dict[str, str] = {}
     for line in review.splitlines()[:12]:
