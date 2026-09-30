@@ -279,3 +279,33 @@ test('build posts the exact listing revision and surfaces stale-tab rejection',a
   assert.equal(posted[0].listing_revision,5);
   assert.match(get('fetch-status').textContent,/другой вкладке/);
 });
+
+
+test('report history groups one host and path even when legacy/current dates differ',async()=>{
+  const nodes=new Map();
+  const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
+  const reports=[
+    {id:'dated',created:'2026-09-30T10:00:00',events:20,kind:'single',
+      url:'/reports/dated/index.html',label:'20260923_server.log · 2026-09-23',
+      sources:[{host:'app1',remote_path:'/srv/20260923_server.log',date:'2026-09-23'}]},
+    {id:'legacy-undated',created:'2026-09-29T10:00:00',events:10,kind:'single',
+      url:'/reports/legacy-undated/index.html',label:'20260923_server.log · дата не задана',
+      sources:[{host:'app1',remote_path:'/srv/20260923_server.log',date:''}]}
+  ];
+  const context={
+    document:{getElementById:get,createElement:tag=>{const el=new Element();el.tagName=tag.toUpperCase();return el;}},
+    location:{hostname:'127.0.0.1',protocol:'http:',pathname:'/',assign(){}},
+    setTimeout:()=>1,clearTimeout(){},confirm:()=>true,
+    fetch:async url=>({ok:true,json:async()=>url==='/api/status'?
+      {busy:false,source:'linux',listing_revision:0,listing:[],stage:'Ready'}:
+      url==='/api/reports'?{reports}:{started:true}})
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../app_controls.js'),'utf8'),context);
+  await new Promise(resolve=>setImmediate(resolve));
+  const entries=get('report-items').children;
+  assert.equal(entries.length,1);
+  assert.equal(entries[0].className,'library-report-group');
+  assert.equal(entries[0].children.length,3);
+  assert.equal(entries[0].children[1].children[0].href,'/reports/dated/index.html');
+  assert.equal(entries[0].children[2].children[0].href,'/reports/legacy-undated/index.html');
+});
