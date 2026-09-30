@@ -18,6 +18,10 @@ on:
         default: false
 permissions:
   contents: read
+
+concurrency:
+  group: akuz-windows-portable-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     permissions:
