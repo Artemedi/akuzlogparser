@@ -1,102 +1,81 @@
-# AKUZ Log Explorer 4.9.0 — Windows 10/11 x64 portable
+# AKUZ Log Explorer 4.10.0 — Windows 10/11 x64 portable
 
-## Главное в v4.9.0
+## Главное в v4.10.0
 
-### Быстрее аналитика ошибок — Phase 13
+### Надёжнее кэш и работа нескольких вкладок — Phase 16
 
-Индекс аналитики теперь использует уже опубликованные и проверенные
-`errorFingerprints` из каталога отчёта как отрицательный фильтр. Положительные
-события по-прежнему перечитываются из raw-shard и повторно проходят
-`recognize_error`, поэтому семантика распознавания не заменена доверием к
-кэшу.
+Очистка кэша теперь удаляет и вычёркивает из inventory только те snapshot,
+для которых доказано принадлежание текущим разрешённым cache roots.
+Исторические/custom-root записи не теряют индекс, а symlink/external/unproven
+пути остаются fail-closed.
 
-На default-path real A/B для 23/24/25 сентября:
+Сервер публикует монотонный `listing_revision`. Если другая вкладка успела
+сменить или очистить текущий список источников, устаревшая вкладка получает
+HTTP 409 до запуска build. История одиночных отчётов связывается с
+`host + remote_path`, а операторская дата остаётся метаданными.
 
-- wall: **39.308 → 25.178 с** (**-35.95%**);
-- SQL/export и semantic parity — PASS;
-- inventory — PASS.
+Принятые проверки:
+- mixed/per-folder cache correctness — PASS;
+- legacy v4 cache fallback — PASS;
+- stale-session 409 — PASS;
+- real cache-clear smoke на `20260923_server.log` — PASS;
+- preserved report reuse без refetch — PASS.
 
-Rollback:
+### Параллельная генерация отчётов — Phase 15, opt-in
+
+На Windows можно явно включить новый ограниченный parallel scheduler:
+
 ```powershell
-$env:AKUZ_PHASE13_CATALOG_ERROR_INDEX = '0'
+$env:AKUZ_PHASE15_PARALLEL_GENERATION = '1'
 .\AKUZLogExplorer.exe
 ```
 
-### Быстрее сериализация raw-shards — Phase 14
+Он применяется только при выборе двух и более источников, встроенном
+`generate` и выключенном Phase 12 delta. Parent запускает максимум два worker
+process, принимает только проверенные staged outputs и публикует их в
+детерминированном порядке.
 
-Portable включает `orjson 3.12.0` и использует его **только** для массивов
-строк `raw_*.js`. Каталог `data/catalog.js` остаётся на штатном
-`json.dumps`.
+Пока Phase 15 активен, Phase 11 process-prefetch намеренно отключается, чтобы
+два независимых process scheduler не конкурировали. Phase 12 delta и Phase 15
+одновременно не используются.
 
-Replicated B/C/C/B/B/C benchmark на 956,307,242 байт / 4 отчётах /
-1,315,476 событиях:
+Real normal-app B/C/C/B/B/C на 956,307,242 байт / 4 отчётах / 657,738 событиях:
+- wall median: **192.514 → 165.655 с** (**-13.95%**);
+- CPU median: **194.078 → 197.844 с** (**+1.94%**);
+- peak private memory: **+0.051%**;
+- exact output parity — PASS;
+- analytics parity — PASS;
+- downloads/cache invariants — PASS;
+- network during trials — NO;
+- raw payload retained — NO.
 
-- wall: **195.911 → 185.269 с** (**-5.43%**);
-- CPU: **187.281 → 177.344 с** (**-5.31%**);
-- generation: **161.769 → 151.682 с** (**-6.24%**);
-- измеренное JSON-время: **16.852 → 8.409 с** (**-50.10%**);
-- полный producer manifest — byte-identical;
-- analytics exact/semantic parity — PASS;
-- cached downloads — unchanged.
+Phase 15 остаётся **default OFF** в v4.10.0.
 
-Для немедленного возврата к stdlib:
+## Сохранено из v4.9.0
 
-```powershell
-$env:AKUZ_PHASE14_RAW_ORJSON = '0'
-.\AKUZLogExplorer.exe
-```
-
-При запуске из исходников Python 3.9 остаётся поддержан: `orjson` требует
-Python >=3.10, поэтому на Python 3.9 Explorer автоматически использует прежний
-stdlib encoder. Portable собирается на Python 3.12 и содержит ускоритель.
-
-### Phase 12 delta/resume остаётся opt-in
-
-Режим докачивания выросшего Linux/SSH журнала включается только явно:
-
-```powershell
-$env:AKUZ_PHASE12_DELTA_RESUME = '1'
-.\AKUZLogExplorer.exe
-```
-
-Принятый snapshot требует доказанный предыдущий SHA/identity и полный SHA-256
-удалённого принятого префикса. При обычной ошибке доказательства Explorer
-возвращается к полной bounded-загрузке; небезопасные коллизии остаются
-fail-closed. Пока Phase 12 включён, Phase 11 process-prefetch намеренно
-отключается.
-
-Измерения принятой Phase 12 матрицы:
-
-- transport A/B: **120.067 → 7.215 с** median (**-93.99% wall**);
-- normal-app integration: **265.223 → 92.686 с** (**-65.05% wall**);
-- snapshot/report/semantic SQL/export parity — PASS.
-
-Default остаётся OFF.
-
-## Сохранено из v4.8.0
-
-- Windows SSH process-prefetch Phase 11 остаётся default-on для двух и более
-  SSH-файлов; rollback: `AKUZ_PHASE11_PROCESS_PREFETCH=0`.
-- Phase 9 ephemeral derived spool остаётся production-архитектурой combined.
-- SSH compression остаётся `compression=false` по умолчанию.
-- Transient `Failed to fetch` в status polling не оставляет UI навсегда
-  отключённым.
-- Старые reports, inventory, downloads, analytics и `ConnectConf.cfg`
-  остаются совместимыми.
+- Phase 13 catalog error-index остаётся default ON; rollback:
+  `AKUZ_PHASE13_CATALOG_ERROR_INDEX=0`.
+- Phase 14 raw-shard `orjson` остаётся default ON при доступной зависимости;
+  rollback: `AKUZ_PHASE14_RAW_ORJSON=0`.
+- Phase 12 delta/resume остаётся default-OFF opt-in:
+  `AKUZ_PHASE12_DELTA_RESUME=1`.
+- Phase 11 SSH process-prefetch остаётся default-on в своём прежнем scope,
+  если Phase 12/15 не требуют его отключения.
+- Phase 9 ephemeral derived spool и существующие cache/report formats
+  сохраняются.
 
 ## Release-candidate gates
 
-Перед публикацией v4.9.0 выполняются на exact versioned SHA:
+Перед публикацией v4.10.0 обязательны на одном exact versioned SHA:
 
+- независимое Claude Fable review изменения `v4.9.0..v4.10.0`;
 - полный Windows Python + browser regression;
-- production stdlib/orjson real B/C/C/B/B/C на фиксированных snapshot;
 - PyInstaller Windows x64 build;
-- frozen `--self-test` с фактическим импортом/исполнением orjson;
+- frozen `--self-test`;
 - packaged offline smoke без Python/pip в child PATH;
 - проверка `BUILD_INFO.json` и `SHA256SUMS.txt`.
 
-Публичный GitHub Release не заменяется автоматически: публикация выполняется
-отдельно после финального gate.
+Публичный GitHub Release создаётся только после успешных gate.
 
 ## Обновление
 
