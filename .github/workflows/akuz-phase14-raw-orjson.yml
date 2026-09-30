@@ -1,0 +1,84 @@
+name: AKUZ Phase 14 raw-orjson A-B
+# P14-02 raw-shard-only orjson same-snapshot A-B.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/akuz-phase14-orjson.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akuz-phase14-raw-orjson
+  cancel-in-progress: true
+
+jobs:
+  ab:
+    name: Real stdlib vs raw-only orjson same-snapshot A-B
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out exact P14-02 revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install experiment-only encoder
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & python -m pip install --disable-pip-version-check --no-input orjson==3.12.0
+          if ($LASTEXITCODE -ne 0) { throw 'orjson experiment install failed' }
+          & python -c "import orjson; print('ORJSON_VERSION=' + orjson.__version__)"
+          if ($LASTEXITCODE -ne 0) { throw 'orjson import failed' }
+
+      - name: Verify runner and P14-02 exact-byte contract
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
+            throw 'DBA-008D only'
+          }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:GITHUB_SHA) {
+            throw 'Checkout does not match GITHUB_SHA'
+          }
+          & python -B -m unittest discover -s tests -p 'test_phase14_serialization_metrics.py' -q
+          if ($LASTEXITCODE -ne 0) { throw 'P14 measurement contract failed' }
+          & python -B -m unittest discover -s tests -p 'test_phase14_raw_orjson.py' -q
+          if ($LASTEXITCODE -ne 0) { throw 'P14 raw-orjson byte-equivalence contract failed' }
+          Write-Host "EXACT_SHA=$actual"
+          Write-Host 'PHASE14_ORJSON_PRE_GATE=PASS'
+
+      - name: Run real cached-snapshot stdlib vs raw-only orjson A-B
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $privateRoot = 'E:\Software\Project\LogAkusExplorer\akuzlogparser'
+          $result = Join-Path $privateRoot ("diagnostics\phase14_raw_orjson_" + $env:GITHUB_RUN_ID + ".json")
+          & python -B scripts/bench_phase14_raw_orjson.py `
+            --config (Join-Path $privateRoot 'ConnectConf.cfg') `
+            --app-root $privateRoot `
+            --result $result
+          if ($LASTEXITCODE -ne 0) { throw 'P14 raw-orjson real A-B failed' }
+          Write-Host 'REAL_REPORTS=23_24_25_SEP'
+          Write-Host 'REPLICATED_ORDER=B_C_C_B_B_C'
+          Write-Host 'NETWORK_FETCH_DURING_AB=NO'
+          Write-Host 'RAW_ORJSON_EXPERIMENT_ONLY=YES'
+          Write-Host 'RAW_LOG_ARTIFACT_UPLOAD=NO'
+          Write-Host 'APP_CACHE_CHANGED=NO'
+          Write-Host 'RELEASE_CHANGED=NO'
+
+      - name: Diff hygiene
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed' }
+          Write-Host 'DIFF_CHECK=PASS'
