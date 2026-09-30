@@ -64,18 +64,20 @@ Phase 15 остаётся **default OFF** в v4.10.0.
 - Phase 9 ephemeral derived spool и существующие cache/report formats
   сохраняются.
 
-## Release-candidate gates
+## Release gates
 
-Перед публикацией v4.10.0 обязательны на одном exact versioned SHA:
+Финальный v4.10.0 собирается и проверяется на одном exact versioned SHA:
 
-- независимое Claude Fable review изменения `v4.9.0..v4.10.0`;
 - полный Windows Python + browser regression;
 - PyInstaller Windows x64 build;
 - frozen `--self-test`;
 - packaged offline smoke без Python/pip в child PATH;
 - проверка `BUILD_INFO.json` и `SHA256SUMS.txt`.
 
-Публичный GitHub Release создаётся только после успешных gate.
+Независимый Claude Fable review был дополнительной проверкой, а не обязательным
+release gate. Для v4.10.0 usable ACCEPT-вердикт получить не удалось, поэтому
+релиз **не заявляет Fable PASS** и опирается на executable Phase 15/16 evidence
+и перечисленные exact-SHA Windows gates.
 
 ## Обновление
 

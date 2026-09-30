@@ -15,6 +15,7 @@ on:
       - 'akuz_app.py'
       - 'requirements*.txt'
       - 'README_PORTABLE.md'
+      - 'RELEASE_NOTES.md'
       - 'ConnectConf.example.cfg'
       - 'scripts/build_portable.py'
       - 'scripts/smoke_portable.py'

@@ -9,6 +9,7 @@ on:
       - 'scripts/**'
       - 'tests/**'
       - 'requirements*.txt'
+      - 'RELEASE_NOTES.md'
       - 'common.js'
       - 'errors.js'
       - 'index.js'
