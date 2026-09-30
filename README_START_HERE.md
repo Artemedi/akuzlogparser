@@ -1,10 +1,10 @@
-# AKUZ Log Explorer 4.9.0 RC — запуск и настройка
+# AKUZ Log Explorer 4.9.0 — запуск и настройка
 
 Приложение работает только с файловыми `.log` АКУЗ. Оно получает снимки по SSH с Linux, читает Windows-папку SMB/UNC или заданный локальный .log/каталог, создаёт локальные отчёты и показывает их в браузере. В поставке нет рабочих журналов и демонстрационного отчёта.
 
 ## Выбор запуска
 
-**Windows без установки зависимостей:** текущий release candidate имеет версию 4.9.0; до его публикации последний публичный пакет остаётся [v4.8.0](https://github.com/Artemedi/akuzlogparser/releases/tag/v4.8.0). Для проверенного RC используйте собранный portable artifact точного commit SHA, затем запустите `AKUZLogExplorer.exe`. `ConnectConf.cfg` нужно заполнить только для SSH/SMB; для локальных `.log` он не требуется. Python уже внутри. [Подробная инструкция](README_PORTABLE.md).
+**Windows без установки зависимостей:** скачайте portable ZIP из [релиза v4.9.0](https://github.com/Artemedi/akuzlogparser/releases/tag/v4.9.0), полностью распакуйте его и запустите `AKUZLogExplorer.exe`. `ConnectConf.cfg` нужно заполнить только для SSH/SMB; для локальных `.log` он не требуется. Python уже внутри. [Подробная инструкция](README_PORTABLE.md).
 
 **Исходники на Windows:** нужен Python 3.9+. Запустите `START_EXPLORER.bat`; для SSH/SMB заранее настройте `ConnectConf.cfg` из `ConnectConf.example.cfg`. BAT устанавливает недостающие runtime-зависимости через `requirements.txt`: Paramiko, а на Python 3.10+ также orjson. Python 3.9 остаётся поддержан и использует stdlib-сериализацию raw-shards.
 
