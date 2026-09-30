@@ -22,6 +22,7 @@ def main():
                '--specpath', str(ROOT/'build'), '--noupx',
                '--collect-submodules', 'paramiko',
                '--hidden-import', 'akuz_delta',
+               '--hidden-import', 'orjson',
                '--python-option', 'X utf8']
     for name in ASSETS:
         command += ['--add-data', str(ROOT/name)+':.']
