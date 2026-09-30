@@ -1,5 +1,15 @@
 name: Windows portable
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-portable.yml'
+      - 'akuz_version.py'
+      - 'akuz_html_explorer.py'
+      - 'akuz_portable_check.py'
+      - 'requirements*.txt'
+      - 'scripts/build_portable.py'
+      - 'scripts/smoke_portable.py'
   workflow_dispatch:
     inputs:
       draft_release:
