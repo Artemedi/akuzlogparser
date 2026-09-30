@@ -167,34 +167,88 @@ def report_summary(data, root: Path):
                   key=lambda r:r['created'], reverse=True)
 
 
+def _tracked_location(path: Path, base: Path, prefix: str = ''):
+    """Return whether a path is inside an allowed cache root, even if missing."""
+    try:
+        if path.is_symlink() or not path.name.startswith(prefix):
+            return False
+        path.resolve(strict=False).relative_to(base.resolve(strict=False))
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def _safe_tracked(path: Path, base: Path, prefix: str = ''):
     try:
-        if not path.is_file() and not path.is_dir():
-            return False
-        path.resolve().relative_to(base.resolve())
-        return path.name.startswith(prefix) and not path.is_symlink()
-    except ValueError:
+        return ((path.is_file() or path.is_dir())
+                and _tracked_location(path, base, prefix))
+    except OSError:
         return False
 
 
 def clear_cache(root: Path, cfg, store, include_reports: bool):
-    """Clear only files created and indexed by v4. Never delete arbitrary local files."""
+    """Clear only cache entries proven to belong to currently allowed roots.
+
+    Entries from a previous/custom local_dest are preserved in inventory when
+    that root is no longer configured. Dropping their index while leaving the
+    bytes behind would create an untracked orphan and make a later cleanup
+    impossible to reason about safely.
+    """
     cleared = 0
+    retained = 0
     destinations = [c.local_dest for c in cfg] if isinstance(cfg, (list, tuple)) else [cfg.local_dest]
-    for entry in store['downloads'].values():
-        path = Path(entry['path'])
-        if any(_safe_tracked(path, dest, 'akuz_v4_') for dest in destinations):
+    removable_downloads = []
+    for fid, entry in list(store['downloads'].items()):
+        try:
+            path = Path(entry['path'])
+        except (KeyError, TypeError):
+            retained += 1
+            continue
+        allowed = any(_tracked_location(path, dest, 'akuz_v4_')
+                      for dest in destinations)
+        if not allowed:
+            retained += 1
+            continue
+        if path.exists() or path.is_symlink():
+            if not path.is_file() or path.is_symlink():
+                retained += 1
+                continue
             path.unlink()
             cleared += 1
-    store['downloads'] = {}
+        # A missing file inside an allowed cache root is a stale index entry,
+        # so forget it even though there were no bytes left to delete.
+        removable_downloads.append(fid)
+    for fid in removable_downloads:
+        store['downloads'].pop(fid, None)
+
     reports = 0
+    reports_retained = 0
     if include_reports:
-        for entry in store['reports'].values():
-            directory = root/'reports'/entry['id']
-            if _safe_tracked(directory, root/'reports') and entry['id'].startswith('v4_'):
+        removable_reports = []
+        for rid, entry in list(store['reports'].items()):
+            report_id = entry.get('id') if isinstance(entry, dict) else None
+            if not isinstance(report_id, str):
+                reports_retained += 1
+                continue
+            directory = root/'reports'/report_id
+            allowed = (report_id.startswith('v4_')
+                       and _tracked_location(directory, root/'reports'))
+            if not allowed:
+                reports_retained += 1
+                continue
+            if directory.exists() or directory.is_symlink():
+                if not directory.is_dir() or directory.is_symlink():
+                    reports_retained += 1
+                    continue
                 shutil.rmtree(directory)
                 reports += 1
-        store['reports'] = {}
+            removable_reports.append(rid)
+        for rid in removable_reports:
+            store['reports'].pop(rid, None)
+
     save_store(root, store)
-    return {'downloads_removed':cleared, 'reports_removed':reports,
+    return {'downloads_removed':cleared,
+            'downloads_retained':retained,
+            'reports_removed':reports,
+            'reports_retained':reports_retained,
             'reports_preserved':not include_reports}
