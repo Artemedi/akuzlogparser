@@ -73,7 +73,9 @@
     if(report.kind!=='single'||sources.length!==1)return 'report:'+report.id;
     const source=sources[0];
     if(!source.host||!source.remote_path)return 'report:'+report.id;
-    return 'source:'+JSON.stringify([source.host,source.remote_path,source.date||'']);
+    // The operator-selected/corrected date is report metadata, not source
+    // identity. Legacy/current snapshots of one host+path stay one history.
+    return 'source:'+JSON.stringify([source.host,source.remote_path]);
   }
   function appendReportRow(parent,report,snapshotIndex=-1){
     const row=document.createElement('div');
