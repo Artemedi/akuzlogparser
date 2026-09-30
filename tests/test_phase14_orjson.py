@@ -63,6 +63,36 @@ class Phase14OrjsonEquivalenceTests(unittest.TestCase):
 
 
 class Phase14OrjsonSurfaceTests(unittest.TestCase):
+    def test_safe_manifest_mismatch_reports_only_structure(self):
+        reference = {
+            "v4_20990101_000001_00000001": {
+                "events": 10,
+                "kind": "single",
+                "producer_sha256": {
+                    "data/catalog.js": "a" * 64,
+                    "data/raw_00000.js": "b" * 64,
+                },
+            }
+        }
+        current = {
+            "v4_20990101_000001_00000001": {
+                "events": 10,
+                "kind": "single",
+                "producer_sha256": {
+                    "data/catalog.js": "c" * 64,
+                    "data/raw_00000.js": "b" * 64,
+                },
+            }
+        }
+        detail = benchmark._safe_parity_detail(
+            "manifest", reference, current)
+        self.assertEqual(
+            detail,
+            "manifest:v4_20990101_000001_00000001:data/catalog.js",
+        )
+        self.assertNotIn("a" * 64, detail)
+        self.assertNotIn("c" * 64, detail)
+
     def test_public_summary_redacts_private_evidence(self):
         result = {
             "setup": {"source_bytes": 123, "reports": 4},
