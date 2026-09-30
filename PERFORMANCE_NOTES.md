@@ -3635,3 +3635,89 @@ GitHub Release **v4.9.0** was published on 2026-09-30 and targets
 `AKUZLogExplorer.exe`, `AKUZLogExplorer-windows-x64.zip`, and
 `SHA256SUMS.txt`. No raw AKUZ logs, filled credentials, working reports or
 private diagnostics were published.
+
+
+## Phase 16 cache/UI hardening — accepted (2026-09-30)
+
+Parent main at start: `7de10bf3a8f3b9901ee264024752991e57477614`.
+Work was isolated on `phase16-cache-ui`; published v4.9.0 remained unchanged.
+
+### Mixed/per-folder cache correctness
+
+Audit found that historical `clear_cache()` deleted bytes only when an entry
+was under a currently configured `local_dest`, but then unconditionally
+cleared the entire downloads inventory. A cache root that had been moved or
+removed from the current configuration could therefore leave bytes behind
+while losing the only inventory record describing them.
+
+Accepted behavior:
+- delete/unindex only entries proven to be under a currently allowed cache root;
+- keep old/custom-root entries indexed and report them as retained;
+- remove a stale missing-file entry if its path is still proven inside an
+  allowed root;
+- never delete/unindex symlinks, wrong-prefix files, external paths or other
+  unproven entries;
+- apply the same fail-closed policy to optional report deletion.
+
+Synthetic/mixed-cache + local/SMB + browser gate Actions #36727761073:
+**25 Python tests PASS**, browser controls **9/9 PASS**, diff/privacy gate PASS.
+
+### Stale browser sessions and source history
+
+Server state now exposes a monotonic `listing_revision`. Current UI sends the
+revision with `/api/build`; if another tab has replaced/cleared/refreshed the
+authoritative listing, the stale tab is rejected with HTTP 409 before worker
+admission. Locally edited source/path controls are not overwritten while dirty;
+otherwise a newer server revision synchronizes the authoritative source/list.
+
+Report history grouping now uses documented source identity
+`host + remote_path`; operator-selected/corrected date is metadata, not source
+identity. Same-name reports from different host/path and combined reports remain
+separate.
+
+Repository-history audit of v4.3.0 through v4.8.0 found the top-level
+`inventory.json` schema already used `version: 4`. Compatibility therefore
+targets older v4 rows lacking newer `integrity` / fingerprint metadata rather
+than inventing a v3 migration. A fixed legacy-v4 regression proves such rows
+still use the existing safe fallback/reuse path, while unknown future versions
+remain fail-closed.
+
+### Production-JS UX baseline
+
+Exact `7115cf8e05add9eb9f7bedd846896fc474c4c3ab`,
+Actions #36727761073. Production `common.js`, `index.js`, and `errors.js`
+were executed in a Node VM DOM shim using 657,738 synthetic events, 5,000
+analytics groups and 100,000 detail items. Median values across three trials:
+- report initial production-JS CPU path: **419.954 ms**;
+- quick search: **481.472 ms**;
+- component filter: **208.942 ms**;
+- analytics initial detail/chart: **67.756 ms**;
+- analytics group search: **2.297 ms**;
+- process heap after benchmark: **371.3 MiB**.
+
+The benchmark explicitly excludes catalog disk read, JSON parse, and browser
+layout/paint. These figures are a repeatable JS hot-loop baseline, not total
+browser wall time. No evidence from this measurement justified a lazy-loading
+or virtualization rewrite.
+
+### Real 23-Sep cache-clear smoke
+
+The first real workflow #36727994033 failed before touching source/cache because
+the new harness omitted the repository root from `sys.path`
+(`ModuleNotFoundError: akuz_app`). Production code was not implicated.
+
+After harness-only fix, exact
+`5dbeaeed4c03e31868fef82d775c3b69dd2a523b`,
+Actions #36728152329 **PASS** using a disposable app-root-owned workspace and
+the trusted real `20260923_server.log`:
+- `downloads_removed=1`;
+- `downloads_retained=0`;
+- `reports_preserved=1`;
+- preserved report reused after clear without refetch;
+- `listing_revision=5` after list/clear/relist transitions;
+- raw payload retained/uploaded: **NO**;
+- Actions artifact upload: **NO**;
+- public Release changed: **NO**.
+
+Decision: **Phase 16 ACCEPTED / DONE**. Move to Phase 15 multiprocessing
+research only after full mainline Windows/portable regression.
