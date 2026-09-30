@@ -3508,7 +3508,7 @@ byte-identical report manifests and a material end-to-end gain sufficient to
 justify portable packaging complexity.
 
 
-## Phase 14 P14-01 full-report orjson — rejected (2026-09-30)
+## Phase 14 P14-01 full-report orjson — superseded/inconclusive (2026-09-30)
 
 P14-00 showed JSON encoding as the largest measured serialization CPU
 subphase, so P14-01 tested `orjson==3.12.0` as an experiment-only encoder.
@@ -3579,3 +3579,43 @@ Correction policy: stabilize **only the benchmark's combined scratch basename**
 while preserving the production path unchanged. Then rerun P14-02
 B/C/C/B/B/C. Previous P14-01/P14-02 speed samples remain directional only and
 their parity failures must not be treated as candidate failures.
+
+
+## Phase 14 P14-02 replicated acceptance and production integration (2026-09-30)
+
+After the stdlib-only determinism control identified the random combined scratch
+basename as the source of false catalog parity failures, the benchmark fixed
+only that scratch basename. Production report generation itself was unchanged
+for the measurement.
+
+Exact `969b2873fdefd9567e14d1bf05652b21ac000ecd`, Actions #36679305855,
+real 23/24/25 Sep cached snapshots, **956,307,242 B**, 4 reports,
+**1,315,476 events**, order B/C/C/B/B/C:
+
+- stdlib median wall/CPU: **195.911398 / 187.281250 s**;
+- raw-only orjson median wall/CPU: **185.269494 / 177.343750 s**;
+- wall reduction: **5.432%**;
+- CPU reduction: **5.306%**;
+- generation reduction: **6.235%**;
+- measured JSON: **16.852037 -> 8.408679 s (-50.103%)**;
+- output bytes: **2,275,367,806 B** in both modes;
+- producer manifest exact equivalence: **PASS**;
+- analytics exact/semantic equivalence: **PASS**;
+- cached downloads unchanged: **PASS**.
+
+Production integration then added a default-on, dependency-aware raw-shard
+encoder in `akuz_html_explorer.py`. Only `raw_*.js` uses orjson; catalog
+serialization remains stdlib. Rollback is
+`AKUZ_PHASE14_RAW_ORJSON=0`. If orjson is unavailable, including supported
+Python 3.9 source installs, the implementation falls back to stdlib. Portable
+builds explicitly bundle `orjson==3.12.0` and their frozen self-test executes
+the native encoder and checks raw-shard byte parity.
+
+Version was advanced to **4.9.0**. Release-candidate runtime commit
+`e7d15d725c33c24397a32a32ab51eca72175eb56` contains the finalized production
+code/source compatibility fix. Package/document workflow continued to
+`188bf762fcf8dd4adc804b69f82af5c661250cef` and later CI-only commits.
+At the time of this note the mandatory DBA-008D exact Windows regression,
+production-switch real A/B and frozen portable build/smoke are queued but
+cannot execute while the self-hosted runner is offline. No public GitHub
+Release has been changed.
