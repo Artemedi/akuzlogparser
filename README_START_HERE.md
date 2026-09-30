@@ -1,10 +1,10 @@
-# AKUZ Log Explorer 4.9.0 — запуск и настройка
+# AKUZ Log Explorer 4.10.0 — запуск и настройка
 
 Приложение работает только с файловыми `.log` АКУЗ. Оно получает снимки по SSH с Linux, читает Windows-папку SMB/UNC или заданный локальный .log/каталог, создаёт локальные отчёты и показывает их в браузере. В поставке нет рабочих журналов и демонстрационного отчёта.
 
 ## Выбор запуска
 
-**Windows без установки зависимостей:** скачайте portable ZIP из [релиза v4.9.0](https://github.com/Artemedi/akuzlogparser/releases/tag/v4.9.0), полностью распакуйте его и запустите `AKUZLogExplorer.exe`. `ConnectConf.cfg` нужно заполнить только для SSH/SMB; для локальных `.log` он не требуется. Python уже внутри. [Подробная инструкция](README_PORTABLE.md).
+**Windows без установки зависимостей:** скачайте portable ZIP из [релиза v4.10.0](https://github.com/Artemedi/akuzlogparser/releases/tag/v4.10.0), полностью распакуйте его и запустите `AKUZLogExplorer.exe`. `ConnectConf.cfg` нужно заполнить только для SSH/SMB; для локальных `.log` он не требуется. Python уже внутри. [Подробная инструкция](README_PORTABLE.md).
 
 **Исходники на Windows:** нужен Python 3.9+. Запустите `START_EXPLORER.bat`; для SSH/SMB заранее настройте `ConnectConf.cfg` из `ConnectConf.example.cfg`. BAT устанавливает недостающие runtime-зависимости через `requirements.txt`: Paramiko, а на Python 3.10+ также orjson. Python 3.9 остаётся поддержан и использует stdlib-сериализацию raw-shards.
 
@@ -69,7 +69,7 @@ $env:AKUZ_PHASE11_PROCESS_PREFETCH = '0'
 (~15.8% меньше wall); inventory и analytics совпали. Это измерение конкретной
 DBA-008D workload, а не обещание фиксированного ускорения на любом сервере.
 
-## Phase 14 — сериализация raw-shards в v4.9.0
+## Phase 14 — сериализация raw-shards в v4.10.0
 
 На Python 3.10+ и в Windows portable Explorer по умолчанию использует
 `orjson` только для массивов строк `data/raw_*.js`. Каталог
@@ -158,7 +158,7 @@ CPU-нагрузки на сервер.
 
 Если важно обнаруживать перезапись **исходного локального журнала** при
 сохранённых размере, `mtime` и inode/file ID, можно включить полный SHA-256
-перед повторным использованием отчёта. Для portable v4.9.0:
+перед повторным использованием отчёта. Для portable v4.10.0:
 
 ```powershell
 $env:AKUZ_VERIFY_LOCAL_SOURCE_SHA = '1'
