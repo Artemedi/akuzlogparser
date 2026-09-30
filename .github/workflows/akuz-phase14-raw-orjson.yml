@@ -1,5 +1,5 @@
 name: AKUZ Phase 14 raw-orjson A-B
-# P14-02 raw-shard-only orjson same-snapshot A-B.
+# P14-02 raw-shard-only orjson same-snapshot A-B with deterministic merge scratch.
 
 on:
   push:
@@ -56,7 +56,7 @@ jobs:
           & python -B -m unittest discover -s tests -p 'test_phase14_raw_orjson.py' -q
           if ($LASTEXITCODE -ne 0) { throw 'P14 raw-orjson byte-equivalence contract failed' }
           Write-Host "EXACT_SHA=$actual"
-          Write-Host 'PHASE14_ORJSON_PRE_GATE=PASS'
+          Write-Host 'PHASE14_RAW_ORJSON_PRE_GATE=PASS'
 
       - name: Run real cached-snapshot stdlib vs raw-only orjson A-B
         run: |
