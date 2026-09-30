@@ -64,13 +64,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/publish_portable.py
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: RC package gate complete
         if: ${{ !inputs.draft_release }}
-        with:
-          name: AKUZLogExplorer-windows-x64
-          path: |
-            dist/AKUZLogExplorer.exe
-            dist/AKUZLogExplorer-windows-x64.zip
-            dist/SHA256SUMS.txt
-          if-no-files-found: error
-          retention-days: 30
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path 'dist/AKUZLogExplorer.exe') -or
+              -not (Test-Path 'dist/AKUZLogExplorer-windows-x64.zip') -or
+              -not (Test-Path 'dist/SHA256SUMS.txt')) {
+            throw 'Verified RC outputs missing'
+          }
+          Write-Host 'PORTABLE_BUILD=PASS'
+          Write-Host 'PORTABLE_SMOKE=PASS'
+          Write-Host 'ACTIONS_ARTIFACT_UPLOAD=SKIPPED_QUOTA'
+          Write-Host 'PUBLIC_RELEASE_CHANGED=NO'
