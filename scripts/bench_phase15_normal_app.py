@@ -8,6 +8,7 @@ Full producer manifests and analytics exact/semantic outputs must match.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -123,12 +124,11 @@ def run(config_path: Path, app_root: Path):
             dir=app_root / "diagnostics") as temp:
         root = Path(temp)
         workspace_path = root
-        cfg = load_config(config_path, app_root)
-        cfg = type(cfg)(**{
-            **cfg.__dict__,
-            "local_dest": root / "downloads",
-            "compression": False,
-        })
+        cfg = replace(
+            load_config(config_path, app_root),
+            local_dest=root / "downloads",
+            compression=False,
+        )
         state, selected, downloads_before, setup = _setup_seed(root, cfg)
         reference = None
         trials = []
