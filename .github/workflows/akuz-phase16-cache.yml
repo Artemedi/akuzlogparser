@@ -1,0 +1,58 @@
+name: AKUZ Phase 16 cache correctness
+
+on:
+  push:
+    branches: [phase16-cache-ui]
+    paths:
+      - '.github/workflows/akuz-phase16-cache.yml'
+      - 'akuz_store.py'
+      - 'akuz_app.py'
+      - 'tests/test_phase16_cache_clear.py'
+      - 'tests/test_local_source.py'
+      - 'tests/test_windows_source.py'
+      - 'tests/test_app_controls.cjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: akuz-phase16-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cache:
+    name: Mixed-cache and UI safety on DBA-008D
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify runner and exact SHA
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') { throw 'DBA-008D only' }
+          $actual=(git rev-parse HEAD).Trim()
+          if ($actual -ne $env:GITHUB_SHA) { throw 'Wrong checkout' }
+          Write-Host "EXACT_SHA=$actual"
+      - name: Phase 16 cache regression
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -B -m unittest tests.test_phase16_cache_clear tests.test_local_source tests.test_windows_source -q
+          if ($LASTEXITCODE -ne 0) { throw 'Phase 16 cache tests failed' }
+          node --test tests/test_app_controls.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Phase 16 browser controls failed' }
+          Write-Host 'PHASE16_CACHE=PASS'
+      - name: Diff hygiene
+        run: |
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'diff check failed' }
+          Write-Host 'NO_RELEASE_NO_REAL_LOGS=PASS'
