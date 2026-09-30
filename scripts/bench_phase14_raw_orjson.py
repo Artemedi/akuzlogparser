@@ -88,7 +88,7 @@ def _num(row, key):
 _STDLIB_JSON_COMPACT = akuz_html_explorer._json_compact
 
 
-def _raw_raw_orjson_compact(value):
+def _raw_orjson_compact(value):
     """Use orjson only for raw-shard list[str]; everything else stays stdlib."""
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
         import orjson
