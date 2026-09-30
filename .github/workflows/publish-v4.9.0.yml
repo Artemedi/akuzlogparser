@@ -1,0 +1,125 @@
+name: Publish AKUZ v4.9.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v4.9.0.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: akuz-publish-v4.9.0
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify exact RC and publish v4.9.0
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      TARGET_SHA: 'b419d537d60cde4a37be37253a7276ec56a50bab'
+      RELEASE_TAG: 'v4.9.0'
+    steps:
+      - name: Check out exact release candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          persist-credentials: false
+
+      - name: Verify exact target and absence of existing release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') { throw 'DBA-008D only' }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:TARGET_SHA) { throw ('Wrong release checkout: ' + $actual) }
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) { throw ($env:RELEASE_TAG + ' already exists; refusing to overwrite') }
+          Write-Host ('EXACT_RELEASE_SHA=' + $actual)
+          Write-Host 'EXISTING_RELEASE=NO'
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install -r requirements-build.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Build dependency install failed' }
+
+      - name: Final Python regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -B -m unittest discover -s tests -q
+          if ($LASTEXITCODE -ne 0) { throw 'Python regression failed' }
+          Write-Host 'FINAL_PYTHON_REGRESSION=PASS'
+
+      - name: Final browser regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test tests/test_app_controls.cjs tests/test_hourly_view.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Browser regression failed' }
+          Write-Host 'FINAL_BROWSER_REGRESSION=PASS'
+
+      - name: Build and smoke exact portable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/build_portable.py
+          if ($LASTEXITCODE -ne 0) { throw 'Portable build failed' }
+          python scripts/smoke_portable.py dist/AKUZLogExplorer-windows-x64.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Portable smoke failed' }
+          Write-Host 'FINAL_PORTABLE_BUILD=PASS'
+          Write-Host 'FINAL_PORTABLE_SMOKE=PASS'
+
+      - name: Verify BUILD_INFO and checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Resolve-Path 'dist/AKUZLogExplorer-windows-x64.zip'
+          $scratch = Join-Path $env:RUNNER_TEMP ('akuz-release-verify-' + $env:GITHUB_RUN_ID)
+          Remove-Item -Recurse -Force $scratch -ErrorAction SilentlyContinue
+          Expand-Archive -LiteralPath $zip -DestinationPath $scratch
+          $info = Get-Content -Raw (Join-Path $scratch 'AKUZLogExplorer/BUILD_INFO.json') | ConvertFrom-Json
+          if ($info.version -ne '4.9.0') { throw ('Wrong packaged version: ' + $info.version) }
+          if ($info.commit -ne $env:TARGET_SHA) { throw ('Wrong packaged commit: ' + $info.commit) }
+          $expected = @{}
+          Get-Content 'dist/SHA256SUMS.txt' | ForEach-Object { if ($_ -match '^([0-9a-f]{64})  (.+)$') { $expected[$Matches[2]] = $Matches[1] } }
+          foreach ($name in @('AKUZLogExplorer.exe','AKUZLogExplorer-windows-x64.zip')) {
+            if (-not $expected.ContainsKey($name)) { throw ('Checksum missing: ' + $name) }
+            $actual = (Get-FileHash -Algorithm SHA256 (Join-Path 'dist' $name)).Hash.ToLowerInvariant()
+            if ($actual -ne $expected[$name]) { throw ('Checksum mismatch: ' + $name) }
+          }
+          Remove-Item -Recurse -Force $scratch
+          Write-Host 'BUILD_INFO=PASS'
+          Write-Host 'SHA256SUMS=PASS'
+
+      - name: Publish public GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gh release create $env:RELEASE_TAG dist/AKUZLogExplorer.exe dist/AKUZLogExplorer-windows-x64.zip dist/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --target $env:TARGET_SHA --title 'AKUZ Log Explorer 4.9.0 — Windows portable' --notes-file RELEASE_NOTES.md
+          if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
+          Write-Host 'PUBLIC_RELEASE_CREATED=YES'
+
+      - name: Verify published release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $r = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json tagName,targetCommitish,isDraft,isPrerelease,name,assets,url | ConvertFrom-Json
+          if ($r.tagName -ne $env:RELEASE_TAG) { throw 'Wrong release tag' }
+          if ($r.targetCommitish -ne $env:TARGET_SHA) { throw ('Wrong release target: ' + $r.targetCommitish) }
+          if ($r.isDraft -or $r.isPrerelease) { throw 'Release is not a final public release' }
+          $names = @($r.assets | ForEach-Object { $_.name })
+          foreach ($name in @('AKUZLogExplorer.exe','AKUZLogExplorer-windows-x64.zip','SHA256SUMS.txt')) { if ($names -notcontains $name) { throw ('Published asset missing: ' + $name) } }
+          Write-Host ('RELEASE_URL=' + $r.url)
+          Write-Host 'PUBLIC_RELEASE_VERIFIED=PASS'
