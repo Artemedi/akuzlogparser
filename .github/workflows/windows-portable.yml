@@ -22,16 +22,27 @@ jobs:
   build:
     permissions:
       contents: write
-    runs-on: windows-2022
+    runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 20
     env:
       PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.12'
-          architecture: x64
+      - name: Verify exact DBA-008D revision
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNNER_NAME -ne 'DBA-008D' -or $env:COMPUTERNAME -ne 'DBA-008D') {
+            throw 'DBA-008D only'
+          }
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:GITHUB_SHA) {
+            throw 'Checkout does not match GITHUB_SHA'
+          }
+          & python --version
+          if ($LASTEXITCODE -ne 0) { throw 'Python unavailable' }
+          Write-Host "EXACT_SHA=$actual"
+          Write-Host 'PORTABLE_RUNNER_GATE=PASS'
       - name: Install build dependencies
         run: python -m pip install -r requirements-build.txt
       - name: Test application
