@@ -3768,6 +3768,8 @@ report generation. Obsolete phase branches and experimental workflows were
 removed after acceptance; repository branch policy is now main-only, with
 permanent CI limited to Windows regression and portable build.
 
-Before publication, v4.10.0 requires an independent Claude Fable review of the
-v4.9.0..release diff, followed by exact-SHA Windows regression and portable
-build/smoke. A public release must not be created until those gates pass.
+For v4.10.0 the independent Claude Fable review is an optional external
+review, not a mandatory release gate. No usable ACCEPT verdict was obtained and
+the release must not claim one. Release acceptance is based on the executable
+Phase 15/16 evidence plus final exact-SHA Windows regression, portable
+build/smoke, BUILD_INFO and SHA256 verification on the release target.

@@ -4,8 +4,8 @@
 **Репозиторий:** https://github.com/Artemedi/akuzlogparser
 **Локальный каталог Windows:** `E:\Software\Project\LogAkusExplorer\akuzlogparser`
 **Исходный checkpoint:** `1ce50a1dc46b1fd6e822a712919b39c9b921de7d` (Phase 8, основной branch `main`).
-**Последний выпущенный GitHub Release:** v4.6.0. Phase 6/7/8 коммитились в `main`; их диагностические EXE не являются заменой опубликованного релиза.
-**Главный следующий этап:** Phase 9 — сохранить корректность и кэш, перестать повторно вычислять производные признаки события в combined.
+**Текущий публичный baseline перед выпуском v4.10.0:** v4.9.0 (`b419d537d60cde4a37be37253a7276ec56a50bab`). Исторические строки ниже фиксируют ход Phase 9–16 и не должны читаться как текущие OPEN-блокеры, если более поздняя запись их закрыла.
+**Текущая release line:** v4.10.0 — Phase 16 cache/UI hardening + Phase 15 Windows parallel generation (default-OFF opt-in). Финальный релиз принимается по exact-SHA Windows regression и portable build/smoke; Fable для v4.10.0 необязателен и PASS не заявляется.
 **2026-09-26 Phase 9.0a:** synthetic Windows baseline + memory sampler + isolated cache matrix implemented; production/portable/A-B gate still OPEN. See PERFORMANCE_NOTES.md.
 **2026-09-26 Phase 9.0b:** isolated Phase 8 portable ZIP smoke with Windows child-process memory passed; equivalent-workload Python/EXE and real snapshot A/B remain OPEN. See PERFORMANCE_NOTES.md.
 **2026-09-26 Phase 9.0c:** SHA-verified real local .log snapshot Python control performed twice: 655,054 combined events; 263.781/268.099-s fresh and 2.352/2.348-s warm; build-only Windows Working Set OS peak captured. Normalized report/inventory match across independent fresh builds, but SQL and analytics export cross-fresh hashes differ and need a targeted explanation. Existing user cache/source untouched; full portable/A-B gate OPEN. See PERFORMANCE_NOTES.md.

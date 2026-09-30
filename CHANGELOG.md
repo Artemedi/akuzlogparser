@@ -8,6 +8,7 @@
 - Post-v4.9.0 cleanup removed obsolete phase branches and experimental workflows. Repository branch set is reduced to `main`; permanent CI is reduced to Windows regression and portable build.
 - v4.9.0 remains immutable and unchanged. v4.10.0 is the release line for accepted Phase 15/16 work.
 - Optional independent Fable review for the v4.10.0 candidate did not produce a usable ACCEPT verdict and is **not claimed as a passed gate**. Release confidence is based on the executable Phase 15/16 evidence plus final exact-SHA Windows regression and portable build/smoke.
+- Release cleanup keeps only permanent Windows regression/portable workflows; temporary credential/review workflows and the obsolete runner handoff are removed. GitHub Actions stores no build artifacts for the remaining candidate runs; release binaries are attached only to the GitHub Release.
 
 ## 4.9.0 — 2026-09-30
 
