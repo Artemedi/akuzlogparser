@@ -3506,3 +3506,41 @@ P14-01 candidate policy: evaluate `orjson` only as an experiment dependency.
 Default/production remains stdlib until a real same-snapshot A/B proves both
 byte-identical report manifests and a material end-to-end gain sufficient to
 justify portable packaging complexity.
+
+
+## Phase 14 P14-01 full-report orjson — rejected (2026-09-30)
+
+P14-00 showed JSON encoding as the largest measured serialization CPU
+subphase, so P14-01 tested `orjson==3.12.0` as an experiment-only encoder.
+Production/default remained stdlib throughout.
+
+The synthetic pre-gate passed, including the supported fixture
+byte-equivalence test. Two early real attempts were harness failures and were
+corrected without production changes. The diagnostic rerun used exact
+`ea73e78783417b797e001c573bd10c9414a3345a`, Actions #36669946121.
+
+The first real same-snapshot pair completed:
+- baseline stdlib wall/CPU: **195.885509 / 187.593750 s**;
+- candidate orjson wall/CPU: **182.681869 / 174.843750 s**;
+- generation: **162.164 -> 148.780 s**;
+- measured JSON: **16.869287 -> 5.592300 s**;
+- escaping: **7.808530 -> 7.764999 s**;
+- write/hash: **11.778566 -> 11.006944 s**;
+- output bytes remained **2,275,367,801 B** in both trials.
+
+These performance numbers are only directional because parity failed before a
+replicated A/B could complete. Safe structural diagnostics proved the first
+exact producer-manifest mismatch at:
+`v4_20990101_000004_00000004:data/catalog.js`
+(the deterministic combined report catalog). No raw text or digest was logged.
+
+Decision: **REJECTED for full-report encoding**. Exact-byte compatibility is
+mandatory and overrides the apparent speedup. The failure is consistent with
+the fact that stdlib and orjson may render some semantically equal numeric
+values with different JSON bytes. No production serializer or Release was
+changed.
+
+Follow-up P14-02 is a new, narrower hypothesis: use orjson only for raw shards,
+which are top-level string arrays and accounted for 13.154682 s of the P14-00
+17.064567 s JSON cost, while retaining stdlib for catalog serialization. It
+must pass complete producer-manifest parity and replicated same-snapshot A/B.
