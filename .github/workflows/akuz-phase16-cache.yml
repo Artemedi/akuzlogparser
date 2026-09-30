@@ -13,6 +13,10 @@ on:
       - 'tests/test_local_source.py'
       - 'tests/test_windows_source.py'
       - 'tests/test_app_controls.cjs'
+      - 'scripts/bench_phase16_ui.cjs'
+      - 'index.js'
+      - 'errors.js'
+      - 'common.js'
   workflow_dispatch:
 
 permissions:
@@ -53,6 +57,12 @@ jobs:
           node --test tests/test_app_controls.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Phase 16 browser controls failed' }
           Write-Host 'PHASE16_CACHE=PASS'
+      - name: Phase 16 production-JS UX baseline
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node scripts/bench_phase16_ui.cjs 657738 5000 100000
+          if ($LASTEXITCODE -ne 0) { throw 'Phase 16 UX benchmark failed' }
+          Write-Host 'PHASE16_UI_BASELINE=PASS'
       - name: Diff hygiene
         run: |
           git diff --check
