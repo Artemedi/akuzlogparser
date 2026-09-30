@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -15,7 +16,7 @@ from scripts import bench_phase14_raw_orjson as benchmark
 HAS_ORJSON = importlib.util.find_spec("orjson") is not None
 
 
-@unittest.skipUnless(HAS_ORJSON, "orjson experiment dependency not installed")
+@unittest.skipUnless(HAS_ORJSON, "orjson production acceleration dependency not installed")
 class Phase14RawOrjsonEquivalenceTests(unittest.TestCase):
     def test_raw_string_array_matches_stdlib_bytes(self):
         sample = [
@@ -25,7 +26,8 @@ class Phase14RawOrjsonEquivalenceTests(unittest.TestCase):
             "replacement � and emoji 🙂",
         ]
         self.assertEqual(
-            benchmark._raw_orjson_compact(sample),
+            akuz_html_explorer._raw_json_compact(
+                sample, use_orjson=True),
             akuz_html_explorer._json_compact(sample),
         )
 
@@ -38,10 +40,12 @@ class Phase14RawOrjsonEquivalenceTests(unittest.TestCase):
             "rows": [[1, "component", 0.000001]],
             "flags": [True, False, None],
         }
-        self.assertEqual(
-            benchmark._raw_orjson_compact(sample),
-            akuz_html_explorer._json_compact(sample),
-        )
+        expected = akuz_html_explorer._escape_js_json(
+            akuz_html_explorer._json_compact(sample))
+        with patch.dict(
+                os.environ, {"AKUZ_PHASE14_RAW_ORJSON": "1"},
+                clear=False):
+            self.assertEqual(akuz_html_explorer.js_json(sample), expected)
 
     def test_generated_report_files_are_byte_identical(self):
         with tempfile.TemporaryDirectory(
@@ -56,10 +60,13 @@ class Phase14RawOrjsonEquivalenceTests(unittest.TestCase):
             )
             baseline = root / "baseline"
             candidate = root / "candidate"
-            generate(log, baseline, None, 10, 10)
-            with patch.object(
-                    akuz_html_explorer, "_json_compact",
-                    benchmark._raw_orjson_compact):
+            with patch.dict(
+                    os.environ, {"AKUZ_PHASE14_RAW_ORJSON": "0"},
+                    clear=False):
+                generate(log, baseline, None, 10, 10)
+            with patch.dict(
+                    os.environ, {"AKUZ_PHASE14_RAW_ORJSON": "1"},
+                    clear=False):
                 generate(log, candidate, None, 10, 10)
 
             baseline_files = {
