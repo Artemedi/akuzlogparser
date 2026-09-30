@@ -715,6 +715,9 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
     reports = []
     files = []
     spools = {}
+    pending_parallel_reports = []
+    phase15_parallel_reports = 0
+    phase15_parallel_child_cpu_s = 0.0
     skipped = []
     source_seen = set()  # separate paths may contain independent identical events
     active_count = 0
@@ -1100,6 +1103,25 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         label = remote['name'] + (' · ' + chosen if chosen else ' · дата не задана')
         source_meta = [dict(name=remote['name'], date=chosen, sha256=digest,
                             remote_path=remote['path'], host=cfg.host)]
+        if phase15_root is not None:
+            slot = len(reports)
+            reports.append(None)
+            stage_dir = phase15_root / f'{idx-1:04d}' / 'report'
+            spool_path = (
+                spool_root / f'{idx-1:04d}.jsonl'
+                if spool_root is not None and all(dates.values()) else None)
+            token = f'{idx-1:04d}:{content_key}'
+            job = StagedReportJob(
+                token=token,
+                raw_path=str(path),
+                base_iso=chosen,
+                stage_dir=str(stage_dir),
+                spool_path=str(spool_path) if spool_path is not None else '')
+            pending_parallel_reports.append(dict(
+                job=job, slot=slot, content_key=content_key,
+                source_meta=source_meta, label=label, remote_key=remote_key,
+                remote_path=remote['path'], digest=digest, chosen=chosen))
+            continue
         prefetch = start_next_prefetch(idx)
         try:
             if spool_root is not None and all(dates.values()):
@@ -1153,6 +1175,50 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                         pass
             raise
         finish_prefetch(prefetch)
+
+    if pending_parallel_reports:
+        state.set_stage(
+            f'Параллельно разбираю {len(pending_parallel_reports)} отчётов…')
+        jobs = [item['job'] for item in pending_parallel_reports]
+        with perf_phase(root, 'parallel.generate',
+                        reports=len(jobs), workers=2):
+            staged_results = run_staged_reports(jobs, max_workers=2)
+        staged_by_token = {row['token']: row for row in staged_results}
+        if len(staged_by_token) != len(jobs):
+            raise FetchError('Phase 15 вернул неполный набор отчётов')
+        for item in pending_parallel_reports:
+            job = item['job']
+            result = staged_by_token.get(job.token)
+            if result is None:
+                raise FetchError('Phase 15 потерял результат отчёта')
+            validate_staged_report(job, result)
+            report = _publish_staged_report(
+                root, store, item['content_key'], Path(job.stage_dir), result,
+                item['source_meta'], item['label'], 'single')
+            store['reports'][report['id']]['aliases'] = list(set(
+                store['reports'][report['id']].get('aliases', [])
+                + [item['remote_key']]))
+            save_store(root, store)
+            reports[item['slot']] = report
+            singles_new += 1
+            phase15_parallel_reports += 1
+            phase15_parallel_child_cpu_s += float(result.get('cpu_s', 0.0))
+            spool = result.get('spool')
+            if spool is not None and not report['reused']:
+                spool_path = Path(spool['path'])
+                spools[(
+                    item['remote_path'], item['digest'], item['chosen'])] = (
+                        spool_path, spool['sha256'])
+                perf_event(
+                    root, 'derived.spool', 'summary',
+                    events=spool['count'], bytes_saved=spool['bytes'])
+        if any(report is None for report in reports):
+            raise FetchError('Phase 15 не опубликовал все выбранные отчёты')
+        perf_event(
+            root, 'parallel.generate', 'summary',
+            reports=phase15_parallel_reports, workers=2,
+            child_cpu_s=round(phase15_parallel_child_cpu_s, 3))
+
     combined = None
     if len(files) > 1 and all(f['date'] for f in files):
         files.sort(key=lambda f:(f['date'], f['remote']['mtime'], f['remote']['name']))
@@ -1212,6 +1278,8 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
                skipped_identical=len(skipped), active_snapshots=active_count,
                process_prefetch_downloads=process_prefetch_downloads,
                process_prefetch_child_cpu_s=round(process_prefetch_child_cpu_s, 3),
+               phase15_parallel_reports=phase15_parallel_reports,
+               phase15_parallel_child_cpu_s=round(phase15_parallel_child_cpu_s, 3),
                delta_resume_downloads=delta_resume_downloads,
                delta_resume_fallbacks=delta_resume_fallbacks,
                combined_status=(0 if combined is None else (1 if combined['reused'] else 2)),
