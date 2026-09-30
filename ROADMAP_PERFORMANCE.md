@@ -240,10 +240,12 @@ Phase 13 is closed; subsequent work begins with P14-00 measurement only.
 2. Не параллелить сериализацию или SQL без понимания ownership, source order, SHA и rollback.
 3. При отсутствии выигрыша или удвоении памяти оставить однопроцессную архитектуру.
 
-### Phase 16 — оптимизация локального кэша и UI-связности [POST-RELEASE, приоритет №1]
-1. Аудит clean-cache и per-folder cache, повторные отчёты с одинаковым именем, stale browser session, source identity и одинаковые bytes с разными paths/hosts.
-2. Проверить mixed-cache со всеми версиями схемы, отчётные даты, фильтры, архив/активный файл, не переносить независимые файлы логов между источниками.
-3. Отдельная UX-метрика: поиск ошибки, график повторений по часам/дням, время переключения отчётов и выгрузки после их построения.
+### Phase 16 — оптимизация локального кэша и UI-связности [DONE POST-RELEASE]
+1. **Mixed/per-folder cache — PASS.** Исправлен `clear_cache`: он удаляет из inventory только snapshot, доказанно принадлежащие текущим разрешённым cache roots. Старый/custom `local_dest` больше не превращается в неиндексированный orphan; retained entries явно считаются/показываются. Missing snapshot внутри разрешённого root безопасно удаляется только из индекса. Synthetic Windows gate #36727761073 PASS.
+2. **Stale browser / source identity — PASS.** `listing_revision` привязывает build к конкретной серверной версии списка; старая вкладка получает 409 после смены списка другой вкладкой. История single-report теперь группируется по `host + remote_path`, а не по операторской дате; разные host/path и combined остаются независимыми. Legacy/current v4 entries без новых integrity/fingerprint полей продолжают safe fallback/reuse; unknown future inventory version fail-closed.
+3. **Real cache smoke — PASS.** Exact `5dbeaeed`, Actions #36728152329, disposable real `20260923_server.log`: `downloads_removed=1`, `downloads_retained=0`, `reports_preserved=1`, preserved report reused after clear without refetch, stale listing revision invalidated. Raw payload/artifact upload/public Release mutation — NO.
+4. **UX baseline — PASS / measurement only.** Exact `7115cf8`, Actions #36727761073 executes production `common.js/index.js/errors.js` in Node VM at 657,738 events / 5,000 groups / 100,000 detail items: report initial JS CPU ~419.954 ms, quick search ~481.472 ms, component filter ~208.942 ms, analytics detail/chart ~67.756 ms, group search ~2.297 ms. This excludes disk read, JSON parse and browser layout/paint, so it is not claimed as full browser wall time. No JS hot-loop blocker justified a virtualized-UI rewrite.
+5. **Release scope:** v4.9.0 remains unchanged. Phase 16 is post-release mainline hardening; next research phase is Phase 15 multiprocessing.
 
 ## 9. Выпуск и фиксирование результатов каждого шага
 
