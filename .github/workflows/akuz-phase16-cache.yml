@@ -8,6 +8,8 @@ on:
       - 'akuz_store.py'
       - 'akuz_app.py'
       - 'tests/test_phase16_cache_clear.py'
+      - 'tests/test_phase16_stale_session.py'
+      - 'tests/test_phase16_legacy_cache.py'
       - 'tests/test_local_source.py'
       - 'tests/test_windows_source.py'
       - 'tests/test_app_controls.cjs'
@@ -46,7 +48,7 @@ jobs:
       - name: Phase 16 cache regression
         run: |
           $ErrorActionPreference = 'Stop'
-          python -B -m unittest tests.test_phase16_cache_clear tests.test_local_source tests.test_windows_source -q
+          python -B -m unittest tests.test_phase16_cache_clear tests.test_phase16_stale_session tests.test_phase16_legacy_cache tests.test_local_source tests.test_windows_source -q
           if ($LASTEXITCODE -ne 0) { throw 'Phase 16 cache tests failed' }
           node --test tests/test_app_controls.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Phase 16 browser controls failed' }
