@@ -1,6 +1,6 @@
 # История изменений AKUZ Log Explorer
 
-## 4.9.0 — 2026-09-30 (release candidate)
+## 4.9.0 — 2026-09-30
 
 - **Phase 13 analytics optimization accepted.** Catalog `errorFingerprints`
   are used as an integrity-proven negative filter; positive events still read raw
