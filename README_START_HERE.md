@@ -69,7 +69,7 @@ $env:AKUZ_PHASE11_PROCESS_PREFETCH = '0'
 (~15.8% меньше wall); inventory и analytics совпали. Это измерение конкретной
 DBA-008D workload, а не обещание фиксированного ускорения на любом сервере.
 
-## Phase 14 — сериализация raw-shards в v4.10.0
+## Phase 14 — сериализация raw-shards из v4.9.0 (сохраняется в v4.10.0)
 
 На Python 3.10+ и в Windows portable Explorer по умолчанию использует
 `orjson` только для массивов строк `data/raw_*.js`. Каталог
@@ -88,6 +88,27 @@ $env:AKUZ_PHASE14_RAW_ORJSON = '0'
 
 При Python 3.9 `orjson` не устанавливается и автоматически используется
 прежний stdlib encoder; формат отчётов остаётся тем же.
+
+## Phase 15 — параллельная генерация в v4.10.0
+
+На Windows при выборе двух и более источников можно явно включить новый
+параллельный scheduler генерации отчётов:
+
+```powershell
+$env:AKUZ_PHASE15_PARALLEL_GENERATION = '1'
+.\AKUZLogExplorer.exe
+```
+
+Режим остаётся **выключенным по умолчанию**. Он используется только со
+встроенным генератором и при выключенном Phase 12 delta. Пока Phase 15 активен,
+Phase 11 process-prefetch намеренно отключается, чтобы два process scheduler не
+работали одновременно. Для возврата к обычному пути удалите переменную либо
+задайте `AKUZ_PHASE15_PARALLEL_GENERATION=0`.
+
+На принятом real normal-app B/C/C/B/B/C для 956,307,242 байт / 4 отчётов
+median wall снизился с **192.514 до 165.655 с (-13.95%)**; CPU вырос на
+**1.94%**, peak private memory — на **0.051%**. Exact report parity, analytics
+parity и downloads/cache invariants прошли.
 
 ## Windows / SMB / UNC
 
@@ -146,7 +167,7 @@ $env:AKUZ_PHASE12_DELTA_RESUME = '1'
 
 Пока Phase 12 включён, Phase 11 process-prefetch намеренно отключается: совместная
 работа двух оптимизаций требует отдельного gate. Сбросьте переменную или задайте
-`AKUZ_PHASE12_DELTA_RESUME=0`, чтобы вернуться к обычному v4.9 пути.
+`AKUZ_PHASE12_DELTA_RESUME=0`, чтобы вернуться к обычному последовательному пути.
 
 Встроенная SSH-компрессия остаётся независимой, выключена по умолчанию и
 включается только явно через `[ssh] compression = true` с учётом дополнительной
