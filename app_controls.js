@@ -16,7 +16,7 @@
   const buttons=['fetch-latest','fetch-list','fetch-cache','picker-build','picker-select-all','picker-select-none'];
   const isLocal=/^(127\.0\.0\.1|localhost)$/.test(location.hostname)&&location.protocol==='http:';
   if(!isLocal){$('fetch-status').textContent='Офлайн-просмотр работает. Для SSH и управления отчётами запустите START_EXPLORER.bat.';for(const id of buttons)$(id).disabled=true;return}
-  let files=[],renderKey='',awaitAction='',shownResult='',pollTimer=null,pickerCollapsed=true,initialSourceLoaded=false,busyNow=true,connectionFailures=0;
+  let files=[],renderKey='',awaitAction='',shownResult='',pollTimer=null,pickerCollapsed=true,initialSourceLoaded=false,busyNow=true,connectionFailures=0,listingRevision=0,sourceDirty=false;
   const status=$('fetch-status'), picker=$('remote-picker'), collection=$('picker-files'), link=$('fetch-open');
   const url='/api/status';
   const label=s=>String(s??'');
@@ -130,12 +130,26 @@
   async function refresh(){
     try{
       const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const s=await r.json();connectionFailures=0;setBusy(!!s.busy);
-      if(!initialSourceLoaded){$('fetch-source').value=s.source||'linux';$('local-path').value=s.local_path||'';initialSourceLoaded=true;showLocalPath()}
-      if(!s.busy && !s.error && ['list','build','latest'].includes(awaitAction)){$('fetch-source').value=s.source||'linux';showLocalPath()}
+      const serverRevision=Number.isInteger(s.listing_revision)?s.listing_revision:0;
+      const ownListingDone=!s.busy&&!s.error&&['list','latest'].includes(awaitAction);
+      if(!initialSourceLoaded){
+        $('fetch-source').value=s.source||'linux';$('local-path').value=s.local_path||'';
+        initialSourceLoaded=true;sourceDirty=false;showLocalPath();
+      }
+      if(ownListingDone){
+        $('fetch-source').value=s.source||'linux';$('local-path').value=s.local_path||'';
+        sourceDirty=false;showLocalPath();
+      }else if(!sourceDirty&&serverRevision!==listingRevision){
+        // Another tab changed the authoritative server-side listing.
+        $('fetch-source').value=s.source||'linux';$('local-path').value=s.local_path||'';
+        showLocalPath();
+      }
+      if(!s.busy && !s.error && awaitAction==='build'){$('fetch-source').value=s.source||'linux';showLocalPath()}
       status.textContent=s.error?'Ошибка: '+s.error:s.stage;
-      const signature=(s.source||'linux')+'|'+s.listing.map(f=>f.id+String(f.cached)).join('|');
-      if(signature!==renderKey){
-        renderKey=signature;files=s.listing.map(f=>Object.assign({checked:false,date:''},f));
+      const signature=serverRevision+'|'+(s.source||'linux')+'|'+s.listing.map(f=>f.id+String(f.cached)).join('|');
+      if(!sourceDirty&&signature!==renderKey){
+        renderKey=signature;listingRevision=serverRevision;
+        files=s.listing.map(f=>Object.assign({checked:false,date:''},f));
         if(files.length)renderFiles();else showPicker(false);
       }
       if(!s.busy && awaitAction==='list' && !s.error){
@@ -174,10 +188,10 @@
     files=[];renderKey='';collection.replaceChildren();showPicker(false);updateCount();
   }
   $('fetch-source').addEventListener('change',()=>{
-    clearSelectedFiles();showLocalPath();
+    sourceDirty=true;clearSelectedFiles();showLocalPath();
     status.textContent='Выбран источник: '+($('fetch-source').value==='windows'?'Windows · SMB':$('fetch-source').value==='local'?'Локальный файл / папка':'Linux · SSH')+'. Нажмите «Список файлов».';
   });
-  $('local-path').addEventListener('input',()=>{clearSelectedFiles();status.textContent='Путь изменён. Нажмите «Список файлов».'});
+  $('local-path').addEventListener('input',()=>{sourceDirty=true;clearSelectedFiles();status.textContent='Путь изменён. Нажмите «Список файлов».'});
   $('fetch-latest').addEventListener('click',()=>action('/api/fetch',localSelection(),'latest'));
   $('fetch-list').addEventListener('click',()=>action('/api/list',localSelection(),'list'));
   $('picker-toggle').addEventListener('click',()=>showPicker(pickerCollapsed));
@@ -188,7 +202,7 @@
     if(selected.length>1&&!selected.every(f=>f.date)){
       if(!confirm('У части файлов нет даты в имени YYYYMMDD_*.log и дата не указана вручную. Создать отдельные отчёты без общей временной шкалы?'))return;
     }
-    action('/api/build',{selections:selected},'build');
+    action('/api/build',{selections:selected,listing_revision:listingRevision},'build');
   });
   $('fetch-cache').addEventListener('click',()=>{
     if(!confirm('Удалить скачанные файлы из кэша? Готовые отчёты сохранятся.'))return;
