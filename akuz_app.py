@@ -74,6 +74,7 @@ class State:
         self.error = ''
         self.result = None
         self.listing = []
+        self.listing_revision = 0
         self.source = 'linux'
         self.local_path = ''
         self.started = None
@@ -82,7 +83,9 @@ class State:
     def snapshot(self):
         with self.lock:
             return dict(busy=self.busy, stage=self.stage, error=self.error,
-                        result=self.result, listing=self.listing, source=self.source,
+                        result=self.result, listing=self.listing,
+                        listing_revision=self.listing_revision,
+                        source=self.source,
                          local_path=self.local_path,
                         started=self.started, notice=self.notice)
 
@@ -156,6 +159,7 @@ def perform_list(root: Path, state: State, list_fn=list_remote, source='linux', 
         file['cached'] = file['id'] in store['downloads'] and cached_download(store, file['id']) is not None
     with state.lock:
         state.listing = listing
+        state.listing_revision += 1
         state.source = source
         state.local_path = cfg.remote_log_dir if source == 'local' else ''
         state.notice = f'Найдено {len(listing)} журналов'
@@ -588,6 +592,7 @@ def _perform_build(root, state, selections, fetch_fn, gen_fn,
         selections = reconciled
         with state.lock:
             state.listing = fresh
+            state.listing_revision += 1
         listed = {f['id']:f for f in fresh}
     if not listed:
         raise FetchError('Сначала обновите список файлов')
@@ -1186,6 +1191,7 @@ def _perform_clear_transaction_body(root, state, include_reports):
                             + str(result['reports_retained']))
         state.notice = state.stage
         state.listing = []
+        state.listing_revision += 1
 
 
 def make_handler(root: Path, state: State, port: int):
@@ -1346,8 +1352,19 @@ def make_handler(root: Path, state: State, port: int):
                 local_path = ''
             if endpoint == '/api/build':
                 selected = payload.get('selections')
+                requested_revision = payload.get('listing_revision')
                 with state.lock:
                     ids = {f['id'] for f in state.listing}
+                    current_revision = state.listing_revision
+                if (requested_revision is not None
+                        and (not isinstance(requested_revision, int)
+                             or isinstance(requested_revision, bool))):
+                    return self._json(400, {'error':'Некорректная версия списка файлов'})
+                if (requested_revision is not None
+                        and requested_revision != current_revision):
+                    return self._json(
+                        409,
+                        {'error':'Список файлов изменился в другой вкладке. Обновите список.'})
                 if not isinstance(selected,list) or not 1 <= len(selected) <= MAX_SELECTED:
                     return self._json(400, {'error':f'Выберите от 1 до {MAX_SELECTED} файлов'})
                 if any(not isinstance(s,dict) or not isinstance(s.get('id'),str)
