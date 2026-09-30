@@ -86,6 +86,15 @@ def run():
                 or final.read_bytes() != current):
             raise RuntimeError('Portable Phase 12 delta check failed')
 
+        # Prove the packaged Phase 14 native encoder is importable and produces
+        # exactly the same raw-shard bytes as the stdlib contract.
+        import orjson
+        from akuz_html_explorer import _json_compact, _raw_json_compact
+        raw_sample = ["<tag>& русский    ", "\\quoted\"\nline"]
+        if (_raw_json_compact(raw_sample, use_orjson=True)
+                != _json_compact(raw_sample)):
+            raise RuntimeError('Portable Phase 14 raw-json parity failed')
+
         raw = root/'20260923_smoke.log'
         raw.write_text(
             '23:59:00.100,AKUZ,s,user: SerializationException: Failed item 1\n'
@@ -104,5 +113,7 @@ def run():
             if result['days'] != [('2026-09-23',1), ('2026-09-24',1)]:
                 raise RuntimeError('Portable calendar check failed')
     print(json.dumps(dict(ok=True, events=2, errors=2, crypto=True, spawn=True,
-                          phase12_delta=True, app_root=str(app_root())),
+                          phase12_delta=True, phase14_raw_orjson=True,
+                          orjson_version=orjson.__version__,
+                          app_root=str(app_root())),
                      ensure_ascii=True))
