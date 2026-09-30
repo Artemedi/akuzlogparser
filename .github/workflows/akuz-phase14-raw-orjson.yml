@@ -1,11 +1,16 @@
 name: AKUZ Phase 14 raw-orjson A-B
-# P14-02 raw-shard-only orjson same-snapshot A-B with deterministic merge scratch.
+# P14-02 production raw-shard orjson same-snapshot A-B with deterministic merge scratch.
 
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/akuz-phase14-raw-orjson.yml'
+      - 'akuz_html_explorer.py'
+      - 'requirements.txt'
+      - 'scripts/bench_phase14_raw_orjson.py'
+      - 'tests/test_phase14_raw_orjson.py'
+      - 'tests/test_phase14_production_raw_orjson.py'
   workflow_dispatch:
 
 permissions:
@@ -17,7 +22,7 @@ concurrency:
 
 jobs:
   ab:
-    name: Real stdlib vs raw-only orjson same-snapshot A-B
+    name: Real production stdlib vs raw-orjson same-snapshot A-B
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 40
@@ -33,11 +38,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install experiment-only encoder
+      - name: Install production candidate encoder
         run: |
           $ErrorActionPreference = 'Stop'
           & python -m pip install --disable-pip-version-check --no-input orjson==3.12.0
-          if ($LASTEXITCODE -ne 0) { throw 'orjson experiment install failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'orjson production candidate install failed' }
           & python -c "import orjson; print('ORJSON_VERSION=' + orjson.__version__)"
           if ($LASTEXITCODE -ne 0) { throw 'orjson import failed' }
 
@@ -54,11 +59,13 @@ jobs:
           & python -B -m unittest discover -s tests -p 'test_phase14_serialization_metrics.py' -q
           if ($LASTEXITCODE -ne 0) { throw 'P14 measurement contract failed' }
           & python -B -m unittest discover -s tests -p 'test_phase14_raw_orjson.py' -q
-          if ($LASTEXITCODE -ne 0) { throw 'P14 raw-orjson byte-equivalence contract failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'P14 raw-orjson harness contract failed' }
+          & python -B -m unittest discover -s tests -p 'test_phase14_production_raw_orjson.py' -q
+          if ($LASTEXITCODE -ne 0) { throw 'P14 production raw-orjson contract failed' }
           Write-Host "EXACT_SHA=$actual"
           Write-Host 'PHASE14_RAW_ORJSON_PRE_GATE=PASS'
 
-      - name: Run real cached-snapshot stdlib vs raw-only orjson A-B
+      - name: Run real cached-snapshot production stdlib vs raw-orjson A-B
         run: |
           $ErrorActionPreference = 'Stop'
           $privateRoot = 'E:\Software\Project\LogAkusExplorer\akuzlogparser'
@@ -71,7 +78,7 @@ jobs:
           Write-Host 'REAL_REPORTS=23_24_25_SEP'
           Write-Host 'REPLICATED_ORDER=B_C_C_B_B_C'
           Write-Host 'NETWORK_FETCH_DURING_AB=NO'
-          Write-Host 'RAW_ORJSON_EXPERIMENT_ONLY=YES'
+          Write-Host 'RAW_ORJSON_PRODUCTION_CANDIDATE=YES'
           Write-Host 'RAW_LOG_ARTIFACT_UPLOAD=NO'
           Write-Host 'APP_CACHE_CHANGED=NO'
           Write-Host 'RELEASE_CHANGED=NO'
